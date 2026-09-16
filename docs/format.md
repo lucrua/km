@@ -22,6 +22,43 @@ is missing, so there is nothing to approve: `km` counts these separately and kee
 of the queue. Measured on a real repository in design phase, they were 43 of 370 items —
 enough to bury the queue if they were treated as claims.
 
+## Enumerating is not classifying
+
+Splitting a document into claims is mechanical and must stay that way: identity is a hash of
+the text, so a split that varied between runs would invalidate every approval without anyone
+editing anything. But *what kind of sentence this is* — a norm, where a document came from,
+a pointer, plain prose — is judgement, and a regex pretending to judge produces the card that
+made you stop: a provenance line ranked most urgent because it contained digits.
+
+So classification is a separate, optional layer:
+
+```bash
+km triage export claims.json   # claims with no current classification
+km triage import claims.json   # {key, kind, risk, reason} back from a model
+km triage status               # how much is classified, and into what
+km list --kind procedencia     # look at what was hidden
+```
+
+`kind` is one of `norma · procedencia · contexto · ponteiro · pergunta · duplicada`. Only
+`norma` reaches the default queue. Two rules keep this honest:
+
+- **Triage only hides and orders.** It never approves, and `.km/triage.jsonl` is written by
+  an agent while `.km/approvals.jsonl` is not.
+- **One in seven hidden claims is shown anyway**, marked as a sample. A wrong classification
+  surfaces instead of burying a claim forever.
+
+Triage carries the `text_hash` it was made against: edit the text and the classification is
+dropped, exactly like an approval.
+
+## The section is the unit of reading
+
+The record stays per claim — a section-level hash would have died daily in a repository where
+one document went from 91 to 354 lines in four days, and where one section was rewritten three
+times in a single day. But a claim read alone is often meaningless, and related claims are
+decided together, so the card shows the whole section with the claim in focus and offers
+"approve the N in this section". Each of them still gets its own hash, and the ones you did
+not read one by one are recorded with `lot: true` — visible later, not hidden.
+
 ## Order of the queue
 
 `km list` sorts by risk, and **takes turns between documents at the same risk level**. A

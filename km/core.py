@@ -20,6 +20,11 @@ DEFERRALS = "deferrals.jsonl"
 DISCUSSIONS = "discussions.jsonl"
 IGNORED = "ignored.jsonl"
 NOTES = "notes.jsonl"
+TRIAGE = "triage.jsonl"
+
+# What a claim is, as judged by a model. Only `norma` reaches the queue by default.
+KINDS = ("norma", "procedencia", "contexto", "ponteiro", "pergunta", "duplicada")
+SAMPLE_EVERY = 7  # one in seven hidden claims is shown anyway, to catch a wrong triage
 CONFIG = "config.json"
 LISTING = "last-listing.json"
 
@@ -314,16 +319,34 @@ class KeyedLog:
         self.path.write_text("\n".join(out) + ("\n" if out else ""), encoding="utf-8")
 
 
+@dataclass
+class QueueRow:
+    risk: int
+    status: str
+    claim: Claim
+    kind: str = "?"
+    sampled: bool = False
+
+
+def _sampled(claim: Claim, every: int) -> bool:
+    """Deterministic one-in-N, so a wrong triage surfaces instead of hiding forever."""
+    return every > 0 and int(claim.text_hash[:8], 16) % every == 0
+
+
 def build_queue(claims: list[Claim], store: "Store", config: dict, wanted: set[str],
                 deferrals: KeyedLog | None = None, today: str | None = None,
-                ignored: KeyedLog | None = None) -> list[tuple[int, str, Claim]]:
-    """The review queue: what needs a person, ordered, with deferred claims hidden.
+                ignored: KeyedLog | None = None, triage: KeyedLog | None = None,
+                kinds: set[str] | None = None,
+                sample_every: int = SAMPLE_EVERY) -> list[QueueRow]:
+    """The review queue: what needs a person, ordered.
 
-    Parsing over-collects on purpose — it has no idea what a sentence means. Marking a line
-    as "not a claim" is how the queue learns, without a model ever being asked.
+    Parsing enumerates; it has no idea what a sentence means. Judging what kind of sentence
+    it is belongs to a model (`km triage`) or to you (`X` = not a claim) — never to a regex
+    pretending to understand. A triaged kind only hides and orders; it never approves.
     """
     now = today or date.today().isoformat()
-    rows: list[tuple[int, str, Claim]] = []
+    kinds = kinds or {"norma"}
+    rows: list[QueueRow] = []
     for claim in claims:
         if claim.is_question:
             continue
@@ -334,31 +357,53 @@ def build_queue(claims: list[Claim], store: "Store", config: dict, wanted: set[s
             if rec and rec.get("until", "") > now:
                 continue
         status = status_of(claim, store, today=now)
-        if status in wanted:
-            rows.append((risk(claim, config), status, claim))
+        if status not in wanted:
+            continue
+
+        kind, score, sampled = "?", risk(claim, config), False
+        rec = triage.records.get(claim.key) if triage else None
+        if rec and rec.get("text_hash") == claim.text_hash:  # stale triage is no triage
+            kind = rec.get("kind", "?")
+            if isinstance(rec.get("risk"), int):
+                score = rec["risk"]
+            if kind not in kinds:
+                if not _sampled(claim, sample_every):
+                    continue
+                sampled = True
+        rows.append(QueueRow(risk=score, status=status, claim=claim, kind=kind, sampled=sampled))
     return order_queue(rows)
 
 
-def order_queue(rows: list[tuple[int, str, Claim]]) -> list[tuple[int, str, Claim]]:
+def order_queue(rows: list[QueueRow]) -> list[QueueRow]:
     """Most risky first, taking turns between documents at the same risk level.
 
     Without the round robin, one long document owns the whole first page and the other
     documents are never seen.
     """
-    out: list[tuple[int, str, Claim]] = []
-    for level in sorted({r[0] for r in rows}, reverse=True):
-        by_file: dict[str, list[tuple[int, str, Claim]]] = {}
+    out: list[QueueRow] = []
+    for level in sorted({r.risk for r in rows}, reverse=True):
+        by_file: dict[str, list[QueueRow]] = {}
         for row in rows:
-            if row[0] == level:
-                by_file.setdefault(row[2].file, []).append(row)
+            if row.risk == level:
+                by_file.setdefault(row.claim.file, []).append(row)
         for bucket in by_file.values():
-            bucket.sort(key=lambda r: r[2].line)
+            bucket.sort(key=lambda r: r.claim.line)
         files = sorted(by_file)
         while any(by_file[f] for f in files):
             for f in files:
                 if by_file[f]:
                     out.append(by_file[f].pop(0))
     return out
+
+
+def section_of(claim: Claim, claims: list[Claim]) -> list[Claim]:
+    """The claims written next to this one, under the same heading of the same document.
+
+    The unit of the record is the claim; the unit of reading is the section. A claim read
+    alone was frequently meaningless, and related claims are decided together.
+    """
+    return [c for c in claims
+            if c.file == claim.file and c.heading == claim.heading and not c.is_question]
 
 
 def load_config(root: Path) -> dict:

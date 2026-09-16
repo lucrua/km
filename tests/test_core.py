@@ -157,14 +157,67 @@ class QueueOrderTest(unittest.TestCase):
         return core.Claim(key=f"{file}:{line}", kind="hash", claim_id=None, text="x",
                           text_hash="0", file=file, line=line, heading="")
 
+    def row(self, file: str, line: int, risk: int) -> core.QueueRow:
+        return core.QueueRow(risk=risk, status="proposed", claim=self.claim(file, line))
+
     def test_risk_first_then_round_robin_between_documents(self):
-        rows = [(2, "proposed", self.claim("a.md", i)) for i in range(1, 4)]
-        rows += [(2, "proposed", self.claim("b.md", i)) for i in range(1, 3)]
-        rows += [(0, "proposed", self.claim("c.md", 1))]
+        rows = [self.row("a.md", i, 2) for i in range(1, 4)]
+        rows += [self.row("b.md", i, 2) for i in range(1, 3)]
+        rows += [self.row("c.md", 1, 0)]
         ordered = core.order_queue(rows)
-        self.assertEqual([r[2].file for r in ordered],
+        self.assertEqual([r.claim.file for r in ordered],
                          ["a.md", "b.md", "a.md", "b.md", "a.md", "c.md"])
-        self.assertEqual([r[2].line for r in ordered if r[2].file == "a.md"], [1, 2, 3])
+        self.assertEqual([r.claim.line for r in ordered if r.claim.file == "a.md"], [1, 2, 3])
+
+
+class TriageTest(unittest.TestCase):
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp())
+        shutil.copytree(FIXTURE, self.tmp / "docs")
+        self.claims = core.scan(self.tmp, core.DEFAULT_CONFIG)
+        self.store = core.Store(self.tmp)
+        self.target = next(c for c in self.claims if "per contract" in c.text)
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp)
+
+    def _triage(self, kind: str, text_hash: str | None = None, risk: int = 0) -> core.KeyedLog:
+        log = core.KeyedLog(self.tmp, core.TRIAGE)
+        log.put(self.target.key, kind=kind, risk=risk,
+                text_hash=text_hash or self.target.text_hash)
+        return log
+
+    def _queue(self, triage, **kw):
+        return core.build_queue(self.claims, self.store, core.DEFAULT_CONFIG, {"proposed"},
+                                triage=triage, sample_every=0, **kw)
+
+    def test_a_kind_other_than_norma_leaves_the_default_queue(self):
+        rows = self._queue(self._triage("procedencia"))
+        self.assertNotIn(self.target.key, [r.claim.key for r in rows])
+
+    def test_the_hidden_kind_is_still_reachable_on_purpose(self):
+        rows = self._queue(self._triage("procedencia"), kinds={"procedencia"})
+        self.assertIn(self.target.key, [r.claim.key for r in rows])
+
+    def test_stale_triage_is_no_triage(self):
+        rows = self._queue(self._triage("procedencia", text_hash="deadbeef"))
+        row = next(r for r in rows if r.claim.key == self.target.key)
+        self.assertEqual(row.kind, "?")
+
+    def test_triage_can_only_hide_and_order_never_approve(self):
+        triage = self._triage("norma", risk=5)
+        rows = self._queue(triage)
+        row = next(r for r in rows if r.claim.key == self.target.key)
+        self.assertEqual(row.risk, 5)
+        self.assertEqual(row.status, "proposed")
+        self.assertEqual(core.status_of(self.target, self.store), "proposed")
+
+    def test_sampling_brings_hidden_claims_back_for_checking(self):
+        triage = self._triage("procedencia")
+        rows = core.build_queue(self.claims, self.store, core.DEFAULT_CONFIG, {"proposed"},
+                                triage=triage, sample_every=1)
+        row = next(r for r in rows if r.claim.key == self.target.key)
+        self.assertTrue(row.sampled)
 
 
 class DeferralTest(unittest.TestCase):
@@ -184,16 +237,16 @@ class DeferralTest(unittest.TestCase):
 
         hidden = core.build_queue(claims, store, core.DEFAULT_CONFIG, {"proposed"},
                                   deferrals, today="2026-09-16")
-        self.assertNotIn(target.key, [c.key for _, _, c in hidden])
+        self.assertNotIn(target.key, [r.claim.key for r in hidden])
 
         back = core.build_queue(claims, store, core.DEFAULT_CONFIG, {"proposed"},
                                 deferrals, today="2026-10-02")
-        self.assertIn(target.key, [c.key for _, _, c in back])
+        self.assertIn(target.key, [r.claim.key for r in back])
 
     def test_questions_never_enter_the_queue(self):
         claims = core.scan(self.tmp, core.DEFAULT_CONFIG)
         rows = core.build_queue(claims, core.Store(self.tmp), core.DEFAULT_CONFIG, {"proposed"})
-        self.assertFalse(any(c.is_question for _, _, c in rows))
+        self.assertFalse(any(r.claim.is_question for r in rows))
 
     def test_undo_removes_the_approval(self):
         claims = core.scan(self.tmp, core.DEFAULT_CONFIG)
@@ -263,6 +316,26 @@ class ServeTest(unittest.TestCase):
         self.assertNotIn(key, [c["key"] for c in result["state"]["cards"]])
         result = serve._act(self.tmp, "human:test", {"key": key, "action": "undo"})
         self.assertIn(key, [c["key"] for c in result["state"]["cards"]])
+
+    def test_card_carries_its_section(self):
+        from km import serve
+
+        card = serve._state(self.tmp)["cards"][0]
+        self.assertTrue(any(s["target"] for s in card["siblings"]))
+        self.assertIn("pending_in_section", card)
+
+    def test_approving_a_section_marks_the_others_as_a_lot(self):
+        from km import serve
+
+        state = serve._state(self.tmp)
+        card = next(c for c in state["cards"] if c["pending_in_section"] > 0)
+        result = serve._act(self.tmp, "human:test",
+                            {"key": card["key"], "action": "approve_section"})
+        self.assertTrue(result["ok"])
+        store = core.Store(self.tmp)
+        approved = [rec for rec in store.records.values()]
+        self.assertGreater(len(approved), 1)
+        self.assertEqual(sum(1 for rec in approved if not rec.get("lot")), 1)
 
     def test_card_carries_the_neighbouring_lines(self):
         from km import serve

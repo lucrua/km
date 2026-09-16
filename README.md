@@ -51,8 +51,12 @@ with the document's progress above it and the keyboard doing the work:
 | <kbd>N</kbd> | note what is wrong or missing — the claim stays proposed, the note waits in `.km/notes.jsonl` |
 | <kbd>D</kbd> | defer for two weeks — a valid answer, recorded in `.km/deferrals.jsonl` |
 | <kbd>C</kbd> | discuss: copies the claim with its location to the clipboard, ready to paste into a chat |
+| <kbd>S</kbd> | approve every pending claim in this section — each keeps its own hash, the ones you did not read one by one are marked `lot` |
 | <kbd>X</kbd> | not a claim — parsing over-collects, and this is how the queue learns |
 | <kbd>U</kbd> | undo the last one |
+
+The card shows the whole section around the claim in focus: the record is per claim, the
+reading is per section.
 
 Each card carries the lines around it, its section, and any note you left on it before.
 
@@ -62,6 +66,21 @@ the whole point. `km notes --open` hides the ones already approved.
 
 Plain HTML from a single Python file: no build, no npm, no network, no framework. It writes
 the same `.km/` files the CLI writes, so terminal and page are interchangeable.
+
+## Enumerating, then classifying
+
+The parser splits and identifies; it does not understand. Judging what kind of sentence a
+claim is belongs to a model, and stays advisory:
+
+```bash
+km triage export claims.json    # what has no current classification
+km triage import claims.json    # {key, kind, risk, reason} from the model
+km list --kind procedencia      # inspect what was hidden
+```
+
+Only `norma` reaches the default queue, one in seven hidden claims is shown anyway as a
+sample, and a classification dies when the text changes. **Triage hides and orders; it never
+approves.**
 
 Stable IDs are optional and can be introduced later, one line at a time: write
 `**DSP-3** ...` at the start of a list item and `km` keys that claim by `DSP-3` instead of

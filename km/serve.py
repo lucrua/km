@@ -36,7 +36,9 @@ def _state(root: Path, limit: int = 60) -> dict:
     discussions = core.KeyedLog(root, core.DISCUSSIONS)
     ignored = core.KeyedLog(root, core.IGNORED)
     notes = core.KeyedLog(root, core.NOTES)
-    rows = core.build_queue(claims, store, config, WANTED, deferrals, ignored=ignored)
+    triage = core.KeyedLog(root, core.TRIAGE)
+    rows = core.build_queue(claims, store, config, WANTED, deferrals, ignored=ignored,
+                            triage=triage)
 
     approved = sum(1 for c in claims
                    if not c.is_question and core.status_of(c, store) in ("approved", "to-validate"))
@@ -51,12 +53,24 @@ def _state(root: Path, limit: int = 60) -> dict:
             bucket["done"] += 1
 
     cards = []
-    for risk, status, claim in rows[:limit]:
+    for row in rows[:limit]:
+        claim, status = row.claim, row.status
         rec = store.records.get(claim.key, {})
         before, after = _context(root, claim)
+        siblings = [
+            {"key": s.key, "text": s.text, "status": core.status_of(s, store),
+             "target": s.key == claim.key}
+            for s in core.section_of(claim, claims)
+        ]
+        pending = [s for s in siblings
+                   if not s["target"] and s["status"] in ("proposed", "changed", "expired")]
         cards.append({
             "key": claim.key,
-            "risk": risk,
+            "risk": row.risk,
+            "kind": row.kind,
+            "sampled": row.sampled,
+            "siblings": siblings[:12],
+            "pending_in_section": len(pending),
             "status": status,
             "file": claim.file,
             "line": claim.line,
@@ -98,6 +112,16 @@ def _act(root: Path, by: str, payload: dict) -> dict:
         store.save()
         deferrals.drop(claim.key)
         message = "aprovado"
+    elif action == "approve_section":
+        n = 0
+        for sibling in core.section_of(claim, claims):
+            if core.status_of(sibling, store) in ("proposed", "changed", "expired"):
+                store.approve(sibling, by=by, origin=payload.get("origin"),
+                              lot=sibling.key != claim.key)
+                deferrals.drop(sibling.key)
+                n += 1
+        store.save()
+        message = f"{n} afirmações desta seção aprovadas (as outras marcadas como lote)"
     elif action == "validate":
         due = payload.get("due") or (date.today() + timedelta(days=30)).isoformat()
         store.approve(claim, by=by, origin=payload.get("origin"),
@@ -167,6 +191,10 @@ font-family:ui-monospace,Menlo,monospace}
 font-size:14px;border-radius:0 4px 4px 0}
 .ctx{font-size:13.5px;color:var(--muted);line-height:1.45}
 .ctx div{padding:2px 0}
+.sib{margin-top:14px;border-top:1px dashed var(--rule);padding-top:10px;font-size:14px}
+.sib div{padding:3px 0;color:var(--muted)}
+.sib div.t{color:var(--ink);font-weight:600}
+.sib .ok{color:var(--ok)}
 .note{margin-top:10px;padding:8px 12px;border-left:3px solid var(--accent);font-size:14px}
 .badge{padding:1px 8px;border-radius:999px;font-size:11px}
 .b-chg{color:var(--warn);background:var(--warn-bg)}.b-exp{color:var(--bad);background:var(--bad-bg)}
@@ -203,9 +231,11 @@ function render(){
   const badge=c.status==='changed'?'<span class="badge b-chg">mexido depois de aprovado</span>'
     :c.status==='expired'?'<span class="badge b-exp">prazo vencido</span>':'';
   const dis=c.in_discussion?'<span class="badge b-dis">em conversa</span>':'';
+  const tri=c.sampled?`<span class="badge b-dis">amostra · triado como ${esc(c.kind)}</span>`
+    :(c.kind&&c.kind!=='?'&&c.kind!=='norma'?`<span class="badge b-dis">${esc(c.kind)}</span>`:'');
   const pct=Math.round(100*c.done/c.of);
   el('root').innerHTML=`<div class="card">
-    <div class="top"><span>${c.file}:${c.line}</span><span>risco ${'●'.repeat(c.risk)}${'○'.repeat(Math.max(0,5-c.risk))} ${badge} ${dis}</span></div>
+    <div class="top"><span>${c.file}:${c.line}</span><span>risco ${'●'.repeat(c.risk)}${'○'.repeat(Math.max(0,5-c.risk))} ${badge} ${dis} ${tri}</span></div>
     <div class="prog"><i style="width:${pct}%"></i></div>
     ${c.heading?`<div class="sec">${esc(c.file)} · seção: ${esc(c.heading)}</div>`:''}
     ${c.before.length?`<div class="ctx">${c.before.map(l=>`<div>${esc(l)}</div>`).join('')}</div>`:''}
@@ -213,8 +243,11 @@ function render(){
     ${c.after.length?`<div class="ctx">${c.after.map(l=>`<div>${esc(l)}</div>`).join('')}</div>`:''}
     ${c.previous?`<div class="prev"><b>texto aprovado antes:</b> ${esc(c.previous)}</div>`:''}
     ${c.notes.map(n=>`<div class="note"><b>sua nota:</b> ${esc(n)}</div>`).join('')}
+    ${c.siblings.length>1?`<div class="sib"><b>na mesma seção:</b>
+      ${c.siblings.map(s=>`<div class="${s.target?'t':''}">${s.status==='approved'||s.status==='to-validate'?'<span class="ok">✓</span> ':'· '}${esc(s.text.length>110?s.text.slice(0,109)+'…':s.text)}</div>`).join('')}</div>`:''}
     <div class="acts">
       <button class="ok" onclick="act('approve')">Aprovar <kbd>A</kbd></button>
+      ${c.pending_in_section?`<button class="ok" onclick="act('approve_section')">Aprovar as ${c.pending_in_section+1} da seção <kbd>S</kbd></button>`:''}
       <button onclick="validar()">A validar <kbd>V</kbd></button>
       <button onclick="anotar()">Anotar <kbd>N</kbd></button>
       <button onclick="act('defer')">Adiar 14d <kbd>D</kbd></button>
@@ -247,6 +280,7 @@ document.addEventListener('keydown',e=>{
   if(k==='a')act('approve'); else if(k==='v')validar(); else if(k==='d')act('defer');
   else if(k==='c')act('discuss'); else if(k==='u')undo();
   else if(k==='n')anotar(); else if(k==='x')ignorar();
+  else if(k==='s'&&S.cards[0]&&S.cards[0].pending_in_section)act('approve_section');
 });
 load();
 </script></body></html>"""

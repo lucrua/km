@@ -7,6 +7,7 @@ import difflib
 import json
 import os
 from collections import Counter
+from datetime import date
 from pathlib import Path
 
 from . import core
@@ -92,8 +93,11 @@ def cmd_status(args) -> int:
 def _queue(root: Path, config: dict, claims, store, wanted: set[str]):
     deferrals = core.KeyedLog(root, core.DEFERRALS)
     ignored = core.KeyedLog(root, core.IGNORED)
-    rows = core.build_queue(claims, store, config, wanted, deferrals, ignored=ignored)
-    core.save_listing(root, [c.key for _, _, c in rows])
+    triage = core.KeyedLog(root, core.TRIAGE)
+    kinds = {args_kind} if (args_kind := getattr(_queue, "kind", None)) else None
+    rows = core.build_queue(claims, store, config, wanted, deferrals, ignored=ignored,
+                            triage=triage, kinds=kinds)
+    core.save_listing(root, [r.claim.key for r in rows])
     return rows
 
 
@@ -104,16 +108,23 @@ def cmd_list(args) -> int:
     wanted = {"proposed"} if args.proposed else {"proposed", "changed", "expired"}
     if args.all:
         wanted = set(MARK)
+    _queue.kind = args.kind
     rows = _queue(root, config, claims, store, wanted)
     if args.file:
-        rows = [r for r in rows if r[2].file.startswith(args.file)]
-    for i, (risk, s, c) in enumerate(rows[: args.limit], start=1):
-        stars = "!" * risk
-        print(f"{i:4d}  {MARK[s]}  {c.file}:{c.line}  {stars}")
+        rows = [r for r in rows if r.claim.file.startswith(args.file)]
+    for i, row in enumerate(rows[: args.limit], start=1):
+        c = row.claim
+        stars = "!" * row.risk
+        tag = f"  [{row.kind}]" if row.kind not in ("?", "norma") else ""
+        tag += "  (amostra)" if row.sampled else ""
+        print(f"{i:4d}  {MARK[row.status]}  {c.file}:{c.line}  {stars}{tag}")
         print(f"      {c.preview()}")
     shown = min(len(rows), args.limit)
     print(f"\n{shown} of {len(rows)} · `km show N` for one, `km approve N` to record your approval")
     return 0
+
+
+_queue.kind = None  # type: ignore[attr-defined]
 
 
 def _claim_by_index(root: Path, claims, index: int):
@@ -225,6 +236,63 @@ def cmd_notes(args) -> int:
     return 0
 
 
+def cmd_triage(args) -> int:
+    """Classification is judgement, so it is a model's job — and it only hides and orders.
+
+    export → the claims with no current classification, as JSON
+    import → what the model answered: key, kind, risk, reason
+    """
+    root = _root(args)
+    config, claims = _scan(root)
+    triage = core.KeyedLog(root, core.TRIAGE)
+
+    if args.action == "status":
+        fresh = sum(1 for c in claims
+                    if triage.records.get(c.key, {}).get("text_hash") == c.text_hash)
+        kinds = Counter(rec.get("kind") for rec in triage.records.values())
+        print(f"{fresh} of {sum(1 for c in claims if not c.is_question)} claims classified")
+        for kind, n in kinds.most_common():
+            print(f"{n:5d}  {kind}")
+        return 0
+
+    if args.action == "export":
+        todo = [{"key": c.key, "file": c.file, "line": c.line, "heading": c.heading,
+                 "text": c.text}
+                for c in claims
+                if not c.is_question
+                and triage.records.get(c.key, {}).get("text_hash") != c.text_hash]
+        body = json.dumps({"kinds": list(core.KINDS), "claims": todo},
+                          ensure_ascii=False, indent=2)
+        if args.path:
+            Path(args.path).write_text(body, encoding="utf-8")
+            print(f"{len(todo)} claims to classify → {args.path}")
+        else:
+            print(body)
+        return 0
+
+    if not args.path:
+        raise SystemExit("import needs a path")
+    answers = json.loads(Path(args.path).read_text(encoding="utf-8"))
+    if isinstance(answers, dict):
+        answers = answers.get("claims", [])
+    by_key = {c.key: c for c in claims}
+    written = 0
+    for a in answers:
+        claim = by_key.get(a.get("key"))
+        if not claim or a.get("kind") not in core.KINDS:
+            continue
+        triage.records[claim.key] = {
+            "key": claim.key, "kind": a["kind"], "text_hash": claim.text_hash,
+            "risk": int(a.get("risk", 0)), "reason": (a.get("reason") or "")[:200],
+            "at": date.today().isoformat(), "by": args.by,
+        }
+        written += 1
+    triage.save()
+    print(f"{written} classifications recorded in {triage.path.relative_to(root)}")
+    print("triage only hides and orders — nothing here approves anything")
+    return 0
+
+
 def cmd_serve(args) -> int:
     from . import serve
 
@@ -248,8 +316,15 @@ def main(argv: list[str]) -> int:
     s.add_argument("--proposed", action="store_true", help="only claims never approved")
     s.add_argument("--all", action="store_true", help="every claim, whatever the status")
     s.add_argument("--file", help="only this path prefix")
+    s.add_argument("--kind", choices=core.KINDS, help="only this triaged kind")
     s.add_argument("--limit", type=int, default=20)
     s.set_defaults(func=cmd_list)
+
+    s = sub.add_parser("triage", help="hand claims to a model for classification, and read the answer back")
+    s.add_argument("action", choices=["export", "import", "status"])
+    s.add_argument("path", nargs="?", help="JSON file to write (export) or read (import)")
+    s.add_argument("--by", default="agent")
+    s.set_defaults(func=cmd_triage)
 
     s = sub.add_parser("show", help="one claim in full")
     s.add_argument("index", type=int)
