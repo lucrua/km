@@ -4,7 +4,9 @@ Ordered by what unlocks the next thing. Nothing here is committed to a date.
 
 ## Now — shadow mode
 
-`init · scan · status · list · show · approve · carry · gone`. No document is modified.
+`init · scan · status · list · show · approve · carry · gone · serve`. No document is
+modified. `serve` is the queue as a local page: one claim at a time, keyboard first, with
+defer and undo, writing the same `.km/` files as the CLI.
 
 ## Next
 

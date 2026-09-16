@@ -36,7 +36,24 @@ km show 12              # one claim: text, file:line, heading
 km approve 12           # record the approval with the hash of today's text
 km approve 12 --validate "confirm with the contract owner" --due 2026-10-15
 km carry 12             # this is a reworded claim 12 — keep the old approval's date and origin
+km serve                # the same queue as a local page, one claim at a time
 ```
+
+## The review page
+
+`km serve` binds a page to `127.0.0.1:8431`. One claim fills the screen, most risky first,
+with the document's progress above it and the keyboard doing the work:
+
+| key | |
+|---|---|
+| <kbd>A</kbd> | approve |
+| <kbd>V</kbd> | approve, but flag what would confirm it and when it comes back |
+| <kbd>D</kbd> | defer for two weeks — a valid answer, recorded in `.km/deferrals.jsonl` |
+| <kbd>C</kbd> | discuss: copies the claim with its location to the clipboard, ready to paste into a chat |
+| <kbd>U</kbd> | undo the last one |
+
+Plain HTML from a single Python file: no build, no npm, no network, no framework. It writes
+the same `.km/` files the CLI writes, so terminal and page are interchangeable.
 
 Stable IDs are optional and can be introduced later, one line at a time: write
 `**DSP-3** ...` at the start of a list item and `km` keys that claim by `DSP-3` instead of

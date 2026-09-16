@@ -90,14 +90,8 @@ def cmd_status(args) -> int:
 
 
 def _queue(root: Path, config: dict, claims, store, wanted: set[str]):
-    rows = []
-    for c in claims:
-        if c.is_question:
-            continue
-        s = core.status_of(c, store)
-        if s in wanted:
-            rows.append((core.risk(c, config), s, c))
-    rows = core.order_queue(rows)
+    deferrals = core.KeyedLog(root, core.DEFERRALS)
+    rows = core.build_queue(claims, store, config, wanted, deferrals)
     core.save_listing(root, [c.key for _, _, c in rows])
     return rows
 
@@ -206,6 +200,12 @@ def cmd_gone(args) -> int:
     return 0
 
 
+def cmd_serve(args) -> int:
+    from . import serve
+
+    return serve.run(_root(args), port=args.port, by=args.by)
+
+
 def main(argv: list[str]) -> int:
     p = argparse.ArgumentParser(prog="km", description="Which of your documents you actually approved.")
     p.add_argument("--repo", default=os.getcwd(), help="repository root (default: current directory)")
@@ -241,6 +241,11 @@ def main(argv: list[str]) -> int:
     s.set_defaults(func=cmd_approve)
 
     sub.add_parser("gone", help="approvals with no matching claim").set_defaults(func=cmd_gone)
+
+    s = sub.add_parser("serve", help="review the queue in a local page, one claim at a time")
+    s.add_argument("--port", type=int, default=8431)
+    s.add_argument("--by", default="human:" + os.environ.get("USER", "unknown"))
+    s.set_defaults(func=cmd_serve)
 
     args = p.parse_args(argv)
     return args.func(args)

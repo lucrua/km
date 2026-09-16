@@ -167,5 +167,88 @@ class QueueOrderTest(unittest.TestCase):
         self.assertEqual([r[2].line for r in ordered if r[2].file == "a.md"], [1, 2, 3])
 
 
+class DeferralTest(unittest.TestCase):
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp())
+        shutil.copytree(FIXTURE, self.tmp / "docs")
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp)
+
+    def test_deferred_claim_hides_until_the_date(self):
+        claims = core.scan(self.tmp, core.DEFAULT_CONFIG)
+        store = core.Store(self.tmp)
+        target = next(c for c in claims if "per contract" in c.text)
+        deferrals = core.KeyedLog(self.tmp, core.DEFERRALS)
+        deferrals.put(target.key, until="2026-10-01")
+
+        hidden = core.build_queue(claims, store, core.DEFAULT_CONFIG, {"proposed"},
+                                  deferrals, today="2026-09-16")
+        self.assertNotIn(target.key, [c.key for _, _, c in hidden])
+
+        back = core.build_queue(claims, store, core.DEFAULT_CONFIG, {"proposed"},
+                                deferrals, today="2026-10-02")
+        self.assertIn(target.key, [c.key for _, _, c in back])
+
+    def test_questions_never_enter_the_queue(self):
+        claims = core.scan(self.tmp, core.DEFAULT_CONFIG)
+        rows = core.build_queue(claims, core.Store(self.tmp), core.DEFAULT_CONFIG, {"proposed"})
+        self.assertFalse(any(c.is_question for _, _, c in rows))
+
+    def test_undo_removes_the_approval(self):
+        claims = core.scan(self.tmp, core.DEFAULT_CONFIG)
+        store = core.Store(self.tmp)
+        target = next(c for c in claims if "per contract" in c.text)
+        store.approve(target, by="human:test")
+        store.save()
+        self.assertEqual(core.status_of(target, store), "approved")
+        store.unapprove(target.key)
+        store.save()
+        self.assertEqual(core.status_of(target, core.Store(self.tmp)), "proposed")
+
+
+class ServeTest(unittest.TestCase):
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp())
+        shutil.copytree(FIXTURE, self.tmp / "docs")
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp)
+
+    def test_state_and_actions_write_only_inside_km(self):
+        from km import serve
+
+        state = serve._state(self.tmp)
+        self.assertGreater(state["queue"], 0)
+        self.assertEqual(state["approved"], 0)
+
+        before = {p: p.stat().st_mtime_ns for p in (self.tmp / "docs").rglob("*")}
+        key = state["cards"][0]["key"]
+        result = serve._act(self.tmp, "human:test", {"key": key, "action": "approve"})
+        self.assertTrue(result["ok"])
+        self.assertEqual(result["state"]["approved"], 1)
+
+        after = {p: p.stat().st_mtime_ns for p in (self.tmp / "docs").rglob("*")}
+        self.assertEqual(before, after)
+        self.assertTrue((self.tmp / core.KM_DIR / core.APPROVALS).exists())
+
+    def test_discuss_returns_a_prompt_and_defer_hides_the_card(self):
+        from km import serve
+
+        key = serve._state(self.tmp)["cards"][0]["key"]
+        result = serve._act(self.tmp, "human:test", {"key": key, "action": "discuss"})
+        self.assertIn("proposta, não aprovada", result["prompt"])
+
+        result = serve._act(self.tmp, "human:test", {"key": key, "action": "defer",
+                                                     "until": "2099-01-01"})
+        self.assertNotIn(key, [c["key"] for c in result["state"]["cards"]])
+
+    def test_unknown_claim_is_reported_not_crashed(self):
+        from km import serve
+
+        result = serve._act(self.tmp, "human:test", {"key": "h:deadbeef", "action": "approve"})
+        self.assertIn("not found", result["error"])
+
+
 if __name__ == "__main__":
     unittest.main()

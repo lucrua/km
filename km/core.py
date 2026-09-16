@@ -16,6 +16,8 @@ from pathlib import Path
 
 KM_DIR = ".km"
 APPROVALS = "approvals.jsonl"
+DEFERRALS = "deferrals.jsonl"
+DISCUSSIONS = "discussions.jsonl"
 CONFIG = "config.json"
 LISTING = "last-listing.json"
 
@@ -212,6 +214,10 @@ class Store:
                for k in sorted(self.records)]
         self.path.write_text("\n".join(out) + ("\n" if out else ""), encoding="utf-8")
 
+    def unapprove(self, key: str) -> dict | None:
+        """Undo the last approval. Approving by mistake must cost one keystroke to fix."""
+        return self.records.pop(key, None)
+
     def approve(self, claim: Claim, by: str, origin: str | None = None,
                 validate: str | None = None, due: str | None = None,
                 lot: bool = False, carried_from: str | None = None,
@@ -274,6 +280,55 @@ def risk(claim: Claim, config: dict) -> int:
     if any(term.lower() in low for term in config.get("risk_terms", [])):
         score += 2
     return score
+
+
+class KeyedLog:
+    """A small JSONL sidecar keyed by claim: deferrals, discussions."""
+
+    def __init__(self, root: Path, filename: str):
+        self.path = root / KM_DIR / filename
+        self.records: dict[str, dict] = {}
+        if self.path.exists():
+            for line in self.path.read_text(encoding="utf-8").splitlines():
+                line = line.strip()
+                if line:
+                    rec = json.loads(line)
+                    self.records[rec["key"]] = rec
+
+    def put(self, key: str, **fields) -> dict:
+        rec = {"key": key, **fields}
+        self.records[key] = rec
+        self.save()
+        return rec
+
+    def drop(self, key: str) -> None:
+        if self.records.pop(key, None) is not None:
+            self.save()
+
+    def save(self) -> None:
+        self.path.parent.mkdir(parents=True, exist_ok=True)
+        out = [json.dumps(self.records[k], ensure_ascii=False, sort_keys=True)
+               for k in sorted(self.records)]
+        self.path.write_text("\n".join(out) + ("\n" if out else ""), encoding="utf-8")
+
+
+def build_queue(claims: list[Claim], store: "Store", config: dict, wanted: set[str],
+                deferrals: KeyedLog | None = None,
+                today: str | None = None) -> list[tuple[int, str, Claim]]:
+    """The review queue: what needs a person, ordered, with deferred claims hidden."""
+    now = today or date.today().isoformat()
+    rows: list[tuple[int, str, Claim]] = []
+    for claim in claims:
+        if claim.is_question:
+            continue
+        if deferrals:
+            rec = deferrals.records.get(claim.key)
+            if rec and rec.get("until", "") > now:
+                continue
+        status = status_of(claim, store, today=now)
+        if status in wanted:
+            rows.append((risk(claim, config), status, claim))
+    return order_queue(rows)
 
 
 def order_queue(rows: list[tuple[int, str, Claim]]) -> list[tuple[int, str, Claim]]:
