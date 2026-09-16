@@ -10,6 +10,7 @@ import hashlib
 import json
 import re
 import unicodedata
+from collections import Counter
 from dataclasses import dataclass, field
 from datetime import date
 from pathlib import Path
@@ -21,6 +22,17 @@ DISCUSSIONS = "discussions.jsonl"
 IGNORED = "ignored.jsonl"
 NOTES = "notes.jsonl"
 TRIAGE = "triage.jsonl"
+CONFLICTS = "conflicts.jsonl"
+
+# Words too common in Portuguese documents to say anything about two claims being related.
+STOPWORDS = {
+    "para", "como", "esse", "essa", "isso", "aqui", "pelo", "pela", "mais", "menos", "quando",
+    "onde", "porque", "entre", "sobre", "cada", "todo", "toda", "todos", "todas", "sem",
+    "com", "que", "não", "nao", "uma", "dos", "das", "nos", "nas", "por", "ser", "está",
+    "esta", "estão", "estao", "foi", "são", "sao", "tem", "ter", "isto", "aquele", "mesmo",
+    "ainda", "depois", "antes", "então", "entao", "pode", "deve", "vale", "fica", "quer",
+    "dizer", "caso", "casos", "parte", "lado", "linha", "linhas", "texto", "arquivo",
+}
 
 # What a claim is, as judged by a model. Only `norma` reaches the queue by default.
 KINDS = ("norma", "procedencia", "contexto", "ponteiro", "pergunta", "duplicada")
@@ -87,6 +99,17 @@ def normalise(text: str) -> str:
 
 def text_hash(text: str) -> str:
     return hashlib.sha256(normalise(text).encode("utf-8")).hexdigest()[:12]
+
+
+def scoped_key(file: str, text: str) -> str:
+    """Identity is the text *in its document*, never the text alone.
+
+    Measured on a real repository: 369 claims produced only 355 distinct text hashes,
+    because boilerplate repeats — "**Descartado.**" appears once per decision, seven times.
+    Keyed by text alone, approving one of them would silently approve all seven. Changes are
+    still detected by `text_hash`, which stays text-only; only identity is scoped.
+    """
+    return "h:" + hashlib.sha256(f"{file}\n{normalise(text)}".encode("utf-8")).hexdigest()[:12]
 
 
 def _heading_path(stack: list[tuple[int, str]]) -> str:
@@ -168,7 +191,7 @@ def _make_claim(raw: str, rel: str, line: int, heading: str) -> Claim:
     m = ID_PATTERN.match(raw)
     claim_id = m.group(1) if m else None
     h = text_hash(raw)
-    key = claim_id if claim_id else f"h:{h}"
+    key = claim_id if claim_id else scoped_key(rel, raw)
     kind = "id" if claim_id else "hash"
     # `- [ ] …` is an open question, not something to approve: it states what is missing.
     is_question = bool(CHECKBOX.match(raw.lstrip()))
@@ -394,6 +417,94 @@ def order_queue(rows: list[QueueRow]) -> list[QueueRow]:
                 if by_file[f]:
                     out.append(by_file[f].pop(0))
     return out
+
+
+def _tokens(text: str) -> set[str]:
+    out = set()
+    for token in re.findall(r"[0-9]+(?:[.,][0-9]+)?%?|[a-zà-ÿ]{4,}", normalise(text)):
+        if token not in STOPWORDS:
+            out.add(token)
+    return out
+
+
+def _is_number(token: str) -> bool:
+    return bool(re.fullmatch(r"[0-9]+(?:[.,][0-9]+)?%?", token))
+
+
+def candidate_pairs(claims: list[Claim], store: "Store", limit_per_claim: int = 3,
+                    min_shared: int = 2, min_ratio: float = 0.30,
+                    today: str | None = None, triage: KeyedLog | None = None) -> list[dict]:
+    """Claims that might contradict something already settled.
+
+    Comparing everything against everything is 69k pairs for 372 claims, and pointless: what
+    matters is whether a claim fights something you already approved. So the settled set is
+    one side of every pair, and a cheap tf-idf overlap picks the candidates a model then
+    judges. Mechanical here, judgement there — the same split as triage.
+
+    The score is the **share** of the smaller claim's term mass that the two have in common,
+    never an absolute sum. An absolute cut-off breaks in both directions, as measured: on a
+    three-claim corpus nothing reaches it, and on a real one a long changelog paragraph
+    matches everything it happens to overlap. Two shared words that are not numbers are
+    required as well — bare digits pair a changelog with a decision and mean nothing.
+    """
+    import math
+
+    def is_norm(claim: Claim) -> bool:
+        if not triage:
+            return True
+        rec = triage.records.get(claim.key)
+        if not rec or rec.get("text_hash") != claim.text_hash:
+            return True  # not classified yet: better a false candidate than a missed clash
+        return rec.get("kind") == "norma"
+
+    live = [c for c in claims if not c.is_question and is_norm(c)]
+    settled = [c for c in live if status_of(c, store, today=today) in ("approved", "to-validate")]
+    if not settled:
+        return []
+
+    docs = {c.key: _tokens(c.text) for c in live}
+    df: Counter[str] = Counter()
+    for tokens in docs.values():
+        df.update(tokens)
+    n = len(docs) or 1
+    idf = {token: math.log(n / (1 + count)) + 1 for token, count in df.items()}
+    mass = {key: sum(idf[t] for t in tokens) or 1.0 for key, tokens in docs.items()}
+
+    by_token: dict[str, list[Claim]] = {}
+    for c in settled:
+        for token in docs[c.key]:
+            by_token.setdefault(token, []).append(c)
+
+    settled_by_key = {c.key: c for c in settled}
+    pairs: list[dict] = []
+    for claim in live:
+        if status_of(claim, store, today=today) in ("approved", "to-validate"):
+            continue  # both sides settled is a different question: consistency of the base
+        scored: dict[str, tuple[float, float, set[str]]] = {}
+        for token in docs[claim.key]:
+            for other in by_token.get(token, []):
+                if other.key in scored or other.key == claim.key:
+                    continue
+                shared = docs[claim.key] & docs[other.key]
+                if sum(1 for t in shared if not _is_number(t)) < min_shared:
+                    continue
+                shared_mass = sum(idf[t] for t in shared)
+                ratio = shared_mass / min(mass[claim.key], mass[other.key])
+                if ratio >= min_ratio:
+                    scored[other.key] = (ratio, shared_mass, shared)
+        best = sorted(scored.items(), key=lambda kv: -kv[1][0])[:limit_per_claim]
+        for other_key, (ratio, shared_mass, shared) in best:
+            other = settled_by_key[other_key]
+            pairs.append({
+                "key": claim.key, "against": other.key,
+                "ratio": round(ratio, 2), "score": round(shared_mass, 1),
+                "shared": sorted(t for t in shared if not _is_number(t))[:8],
+                "text": claim.text, "file": claim.file, "line": claim.line,
+                "against_text": other.text, "against_file": other.file,
+                "against_line": other.line,
+            })
+    pairs.sort(key=lambda p: (-p["ratio"], -p["score"]))
+    return pairs
 
 
 def section_of(claim: Claim, claims: list[Claim]) -> list[Claim]:

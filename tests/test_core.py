@@ -38,6 +38,35 @@ class ParseTest(unittest.TestCase):
         self.assertEqual(claim.kind, "id")
 
 
+class IdentityTest(unittest.TestCase):
+    """Same sentence in two documents must be two claims, or one approval covers both."""
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp())
+        docs = self.tmp / "docs"
+        docs.mkdir()
+        for name in ("a.md", "b.md"):
+            (docs / name).write_text("# Decisão\n\n- **Descartado.**\n", encoding="utf-8")
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp)
+
+    def test_boilerplate_in_two_files_does_not_share_a_key(self):
+        claims = core.scan(self.tmp, core.DEFAULT_CONFIG)
+        self.assertEqual(len(claims), 2)
+        self.assertNotEqual(claims[0].key, claims[1].key)
+        self.assertEqual(claims[0].text_hash, claims[1].text_hash)  # change detection is text-only
+
+    def test_approving_one_leaves_the_other_proposed(self):
+        claims = core.scan(self.tmp, core.DEFAULT_CONFIG)
+        store = core.Store(self.tmp)
+        store.approve(claims[0], by="human:test")
+        store.save()
+        store = core.Store(self.tmp)
+        self.assertEqual(core.status_of(claims[0], store), "approved")
+        self.assertEqual(core.status_of(claims[1], store), "proposed")
+
+
 class NormaliseTest(unittest.TestCase):
     def test_cosmetic_edits_keep_the_hash(self):
         a = "- **Availability** is measured per `contract`."
@@ -258,6 +287,94 @@ class DeferralTest(unittest.TestCase):
         store.unapprove(target.key)
         store.save()
         self.assertEqual(core.status_of(target, core.Store(self.tmp)), "proposed")
+
+
+class ConflictCandidateTest(unittest.TestCase):
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp())
+        docs = self.tmp / "docs"
+        docs.mkdir()
+        (docs / "rules.md").write_text(
+            "# Disponibilidade\n\n"
+            "- A disponibilidade é medida por contrato, nunca pela soma dos clientes.\n"
+            "- A disponibilidade é medida pela soma dos clientes de cada contrato.\n"
+            "- O relatório mensal usa fuso de Brasília para fechar a janela.\n"
+            "- **Changelog** — 2026-09-15: entrou a janela mensal, saiu o rascunho do "
+            "catálogo, o glossário passou a valer, o gráfico mudou de escala, a exportação "
+            "ganhou cabeçalho, a disponibilidade virou seção própria e o rodapé sumiu.\n",
+            encoding="utf-8")
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp)
+
+    def test_pairs_only_against_settled_claims(self):
+        claims = core.scan(self.tmp, core.DEFAULT_CONFIG)
+        store = core.Store(self.tmp)
+        self.assertEqual(core.candidate_pairs(claims, store), [])  # nothing settled yet
+
+        first = next(c for c in claims if "nunca pela soma" in c.text)
+        store.approve(first, by="human:test")
+        store.save()
+
+        pairs = core.candidate_pairs(claims, core.Store(self.tmp))
+        self.assertTrue(pairs)
+        self.assertTrue(all(p["against"] == first.key for p in pairs))
+        top = pairs[0]
+        self.assertIn("soma", top["shared"])
+        self.assertIn("disponibilidade", top["text"].lower())
+
+    def test_unrelated_claim_is_not_a_candidate(self):
+        claims = core.scan(self.tmp, core.DEFAULT_CONFIG)
+        store = core.Store(self.tmp)
+        first = next(c for c in claims if "nunca pela soma" in c.text)
+        store.approve(first, by="human:test")
+        store.save()
+        pairs = core.candidate_pairs(claims, core.Store(self.tmp))
+        unrelated = next(c for c in claims if "Brasília" in c.text)
+        self.assertNotIn(unrelated.key, [p["key"] for p in pairs])
+
+    def test_triaged_non_norms_are_not_compared(self):
+        """Measured: decision headers ("Data: … Estado: ativa") paired with each other."""
+        claims = core.scan(self.tmp, core.DEFAULT_CONFIG)
+        store = core.Store(self.tmp)
+        anchor = next(c for c in claims if "nunca pela soma" in c.text)
+        store.approve(anchor, by="human:test")
+        store.save()
+        other = next(c for c in claims if "soma dos clientes de cada contrato" in c.text)
+
+        store = core.Store(self.tmp)
+        self.assertIn(other.key, [p["key"] for p in core.candidate_pairs(claims, store)])
+
+        triage = core.KeyedLog(self.tmp, core.TRIAGE)
+        triage.put(other.key, kind="contexto", risk=0, text_hash=other.text_hash)
+        pairs = core.candidate_pairs(claims, store, triage=triage)
+        self.assertNotIn(other.key, [p["key"] for p in pairs])
+
+    def test_a_long_paragraph_does_not_match_everything(self):
+        """Measured on the real repository: a changelog line topped the ranking by sheer size."""
+        claims = core.scan(self.tmp, core.DEFAULT_CONFIG)
+        store = core.Store(self.tmp)
+        first = next(c for c in claims if "nunca pela soma" in c.text)
+        store.approve(first, by="human:test")
+        store.save()
+        pairs = core.candidate_pairs(claims, core.Store(self.tmp))
+        changelog = next(c for c in claims if c.text.startswith("**Changelog**"))
+        self.assertNotIn(changelog.key, [p["key"] for p in pairs])
+
+    def test_numbers_alone_never_make_a_pair(self):
+        docs = self.tmp / "docs"
+        (docs / "numbers.md").write_text(
+            "# Números\n\n"
+            "- O painel mostra 8 colunas e 1 rodapé, com 7 filtros e 0 gráficos.\n",
+            encoding="utf-8")
+        claims = core.scan(self.tmp, core.DEFAULT_CONFIG)
+        store = core.Store(self.tmp)
+        anchor = next(c for c in claims if "soma dos clientes de cada contrato" in c.text)
+        store.approve(anchor, by="human:test")
+        store.save()
+        pairs = core.candidate_pairs(claims, core.Store(self.tmp))
+        numeric = next(c for c in claims if "8 colunas" in c.text)
+        self.assertNotIn(numeric.key, [p["key"] for p in pairs])
 
 
 class ServeTest(unittest.TestCase):

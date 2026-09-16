@@ -72,6 +72,23 @@ def cmd_status(args) -> int:
         s = "question" if c.is_question else core.status_of(c, store)
         counts[s] += 1
         per_file.setdefault(c.file, Counter())[s] += 1
+
+    if getattr(args, "short", False):
+        conflicts = core.KeyedLog(root, core.CONFLICTS)
+        live = {c.key for c in claims}
+        open_conflicts = sum(1 for r in conflicts.records.values() if r.get("claim") in live)
+        total = sum(counts.values()) - counts["question"]
+        approved = counts["approved"] + counts["to-validate"]
+        bits = [f"km: {approved}/{total} aprovadas", f"{counts['proposed']} propostas"]
+        if counts["changed"]:
+            bits.append(f"{counts['changed']} mexidas depois de aprovadas")
+        if counts["expired"]:
+            bits.append(f"{counts['expired']} com prazo vencido")
+        if open_conflicts:
+            bits.append(f"⚠ {open_conflicts} conflitam com algo aprovado")
+        print(" · ".join(bits))
+        return 0
+
     width = max((len(f) for f in per_file), default=10)
     print(f"{'document'.ljust(width)}  appr  valid  chgd  prop  ques")
     for f in sorted(per_file):
@@ -293,6 +310,95 @@ def cmd_triage(args) -> int:
     return 0
 
 
+def cmd_conflicts(args) -> int:
+    """Does this claim fight something already settled? Candidates by overlap, verdict by a model."""
+    root = _root(args)
+    config, claims = _scan(root)
+    store = core.Store(root)
+    conflicts = core.KeyedLog(root, core.CONFLICTS)
+
+    if args.action == "export":
+        pairs = core.candidate_pairs(claims, store,
+                                     triage=core.KeyedLog(root, core.TRIAGE))
+        fresh = []
+        for pair in pairs:
+            seen = conflicts.records.get(f"{pair['key']}|{pair['against']}")
+            if seen and seen.get("text_hash") == next(
+                    (c.text_hash for c in claims if c.key == pair["key"]), None):
+                continue
+            fresh.append(pair)
+        body = json.dumps({"verdicts": ["contradiz", "sobrepoe", "duplica", "independente"],
+                           "pairs": fresh[: args.limit]}, ensure_ascii=False, indent=2)
+        if args.path:
+            Path(args.path).write_text(body, encoding="utf-8")
+            print(f"{len(fresh[: args.limit])} candidate pairs → {args.path}")
+        else:
+            print(body)
+        return 0
+
+    if args.action == "import":
+        if not args.path:
+            raise SystemExit("import needs a path")
+        answers = json.loads(Path(args.path).read_text(encoding="utf-8"))
+        if isinstance(answers, dict):
+            answers = answers.get("pairs", [])
+        by_key = {c.key: c for c in claims}
+        written = 0
+        for a in answers:
+            claim = by_key.get(a.get("key"))
+            if not claim or a.get("verdict") not in ("contradiz", "sobrepoe", "duplica"):
+                continue  # "independente" is a non-finding: nothing to record
+            conflicts.records[f"{claim.key}|{a['against']}"] = {
+                "key": f"{claim.key}|{a['against']}", "claim": claim.key,
+                "against": a["against"], "verdict": a["verdict"],
+                "reason": (a.get("reason") or "")[:240], "text_hash": claim.text_hash,
+                "at": date.today().isoformat(), "by": args.by,
+            }
+            written += 1
+        conflicts.save()
+        print(f"{written} conflicts recorded · a conflict never approves or rejects anything")
+        return 0
+
+    by_key = {c.key: c for c in claims}
+    shown = 0
+    for rec in sorted(conflicts.records.values(), key=lambda r: r.get("verdict", "")):
+        claim = by_key.get(rec["claim"])
+        other = by_key.get(rec["against"])
+        if not claim or not other:
+            continue
+        shown += 1
+        print(f"[{rec['verdict']}] {claim.file}:{claim.line}  ⟷  {other.file}:{other.line}")
+        print(f"      novo:      {claim.preview(80)}")
+        print(f"      aprovado:  {other.preview(80)}")
+        if rec.get("reason"):
+            print(f"      {rec['reason']}")
+    print(f"\n{shown} conflicts against settled claims")
+    return 0
+
+
+def cmd_install_hooks(args) -> int:
+    """So nothing has to be memorised: the repository tells you where it stands."""
+    root = _root(args)
+    hooks = root / ".git" / "hooks"
+    if not hooks.parent.exists():
+        raise SystemExit("not a git repository")
+    hooks.mkdir(parents=True, exist_ok=True)
+    km = Path(__file__).resolve().parent.parent / "bin" / "km"
+    body = f"""#!/bin/sh
+# knowledge-manager: report only. Never blocks a commit, always exits 0.
+"{km}" status --short 2>/dev/null || true
+exit 0
+"""
+    target = hooks / "post-commit"
+    if target.exists() and "knowledge-manager" not in target.read_text(encoding="utf-8"):
+        print(f"{target} already exists and is not ours — left untouched")
+        return 1
+    target.write_text(body, encoding="utf-8")
+    target.chmod(0o755)
+    print(f"installed {target.relative_to(root)} — prints the state after every commit, blocks nothing")
+    return 0
+
+
 def cmd_serve(args) -> int:
     from . import serve
 
@@ -310,7 +416,9 @@ def main(argv: list[str]) -> int:
     s.add_argument("--json", action="store_true")
     s.set_defaults(func=cmd_scan)
 
-    sub.add_parser("status", help="counts per document").set_defaults(func=cmd_status)
+    s = sub.add_parser("status", help="counts per document")
+    s.add_argument("--short", action="store_true", help="one line, for hooks")
+    s.set_defaults(func=cmd_status)
 
     s = sub.add_parser("list", help="the review queue, most risky first")
     s.add_argument("--proposed", action="store_true", help="only claims never approved")
@@ -345,6 +453,17 @@ def main(argv: list[str]) -> int:
     s = sub.add_parser("notes", help="what you wrote on claims while reviewing")
     s.add_argument("--open", action="store_true", help="only notes on claims still not approved")
     s.set_defaults(func=cmd_notes)
+
+    s = sub.add_parser("conflicts", help="claims that fight something already approved")
+    s.add_argument("action", nargs="?", default="list", choices=["list", "export", "import"])
+    s.add_argument("path", nargs="?")
+    s.add_argument("--limit", type=int, default=400)
+    s.add_argument("--by", default="agent")
+    s.set_defaults(func=cmd_conflicts)
+
+    sub.add_parser("install-hooks",
+                   help="report the state after each commit, so no command has to be remembered"
+                   ).set_defaults(func=cmd_install_hooks)
 
     s = sub.add_parser("serve", help="review the queue in a local page, one claim at a time")
     s.add_argument("--port", type=int, default=8431)

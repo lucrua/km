@@ -37,6 +37,10 @@ def _state(root: Path, limit: int = 60) -> dict:
     ignored = core.KeyedLog(root, core.IGNORED)
     notes = core.KeyedLog(root, core.NOTES)
     triage = core.KeyedLog(root, core.TRIAGE)
+    conflicts = core.KeyedLog(root, core.CONFLICTS)
+    by_claim: dict[str, list[dict]] = {}
+    for rec in conflicts.records.values():
+        by_claim.setdefault(rec.get("claim", ""), []).append(rec)
     rows = core.build_queue(claims, store, config, WANTED, deferrals, ignored=ignored,
                             triage=triage)
 
@@ -64,10 +68,22 @@ def _state(root: Path, limit: int = 60) -> dict:
         ]
         pending = [s for s in siblings
                    if not s["target"] and s["status"] in ("proposed", "changed", "expired")]
+        claim_by_key = {c.key: c for c in claims}
+        conflict_cards = []
+        for rec in by_claim.get(claim.key, []):
+            if rec.get("text_hash") != claim.text_hash:
+                continue  # the text moved on; the verdict was about another sentence
+            other = claim_by_key.get(rec.get("against"))
+            if other:
+                conflict_cards.append({
+                    "verdict": rec.get("verdict"), "reason": rec.get("reason", ""),
+                    "text": other.text, "where": f"{other.file}:{other.line}",
+                })
         cards.append({
             "key": claim.key,
             "risk": row.risk,
             "kind": row.kind,
+            "conflicts": conflict_cards,
             "sampled": row.sampled,
             "siblings": siblings[:12],
             "pending_in_section": len(pending),
@@ -196,6 +212,10 @@ font-size:14px;border-radius:0 4px 4px 0}
 .sib div.t{color:var(--ink);font-weight:600}
 .sib .ok{color:var(--ok)}
 .note{margin-top:10px;padding:8px 12px;border-left:3px solid var(--accent);font-size:14px}
+.conf{margin-top:12px;padding:10px 12px;border-left:3px solid var(--bad);background:var(--bad-bg);
+font-size:14px;border-radius:0 4px 4px 0}
+.conf b{color:var(--bad)}
+.conf .w{font-family:ui-monospace,Menlo,monospace;font-size:11.5px;color:var(--muted)}
 .badge{padding:1px 8px;border-radius:999px;font-size:11px}
 .b-chg{color:var(--warn);background:var(--warn-bg)}.b-exp{color:var(--bad);background:var(--bad-bg)}
 .b-dis{color:var(--accent);background:transparent;border:1px solid var(--accent)}
@@ -242,6 +262,9 @@ function render(){
     <div class="text">${esc(c.text)}</div>
     ${c.after.length?`<div class="ctx">${c.after.map(l=>`<div>${esc(l)}</div>`).join('')}</div>`:''}
     ${c.previous?`<div class="prev"><b>texto aprovado antes:</b> ${esc(c.previous)}</div>`:''}
+    ${c.conflicts.map(x=>`<div class="conf"><b>${esc(x.verdict)} algo que você já aprovou</b>
+      <div class="w">${esc(x.where)}</div><div>${esc(x.text)}</div>
+      ${x.reason?`<div class="w">${esc(x.reason)}</div>`:''}</div>`).join('')}
     ${c.notes.map(n=>`<div class="note"><b>sua nota:</b> ${esc(n)}</div>`).join('')}
     ${c.siblings.length>1?`<div class="sib"><b>na mesma seção:</b>
       ${c.siblings.map(s=>`<div class="${s.target?'t':''}">${s.status==='approved'||s.status==='to-validate'?'<span class="ok">✓</span> ':'· '}${esc(s.text.length>110?s.text.slice(0,109)+'…':s.text)}</div>`).join('')}</div>`:''}
