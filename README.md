@@ -48,9 +48,17 @@ with the document's progress above it and the keyboard doing the work:
 |---|---|
 | <kbd>A</kbd> | approve |
 | <kbd>V</kbd> | approve, but flag what would confirm it and when it comes back |
+| <kbd>N</kbd> | note what is wrong or missing — the claim stays proposed, the note waits in `.km/notes.jsonl` |
 | <kbd>D</kbd> | defer for two weeks — a valid answer, recorded in `.km/deferrals.jsonl` |
 | <kbd>C</kbd> | discuss: copies the claim with its location to the clipboard, ready to paste into a chat |
+| <kbd>X</kbd> | not a claim — parsing over-collects, and this is how the queue learns |
 | <kbd>U</kbd> | undo the last one |
+
+Each card carries the lines around it, its section, and any note you left on it before.
+
+`km notes` prints what you wrote, grouped by document: the list an agent reads to fix the
+text. Fixing it changes the text, so the claim comes back to the queue on its own — which is
+the whole point. `km notes --open` hides the ones already approved.
 
 Plain HTML from a single Python file: no build, no npm, no network, no framework. It writes
 the same `.km/` files the CLI writes, so terminal and page are interchangeable.

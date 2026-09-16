@@ -71,6 +71,25 @@ approval. **Digits are never normalised**: `98%` and `89%` are different claims.
 Only `key`, `kind`, `text_hash`, `preview`, `file`, `approved_at` and `by` are always
 present. `superseded_by` is accepted and read, and will be written by a later command.
 
+Three sidecars keep what reviewing produces, in the same JSONL shape, keyed by claim:
+
+| File | Holds | Effect on the queue |
+|---|---|---|
+| `deferrals.jsonl` | `until`, `at` | hidden until the date |
+| `discussions.jsonl` | `at`, `file`, `line` | stays, flagged as under discussion |
+| `notes.jsonl` | a list of `{at, text}` | stays proposed; `km notes` lists them |
+| `ignored.jsonl` | `at`, `preview`, `reason` | out of the queue until the text changes |
+
+`ignored.jsonl` is how the parser is corrected without a model: a heading-like sentence, a
+provenance line ("read from the spreadsheet received on…"), a pointer to another document —
+all of them parse as claims and none of them is one. Marking them costs a keystroke and the
+decision is recorded, not silent.
+
+A note never approves anything. It is the answer to "this is wrong or incomplete, and I am
+not going to fix it right now": the claim stays proposed, and the note is there for whoever
+edits the document next — a person or an agent. When the text is fixed, the hash changes and
+the claim returns to the queue by itself.
+
 `.km/config.json` holds `include`, `exclude`, `high_risk_files` and `risk_terms`.
 `high_risk_files` and `risk_terms` only affect the order of the queue.
 

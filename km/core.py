@@ -18,6 +18,8 @@ KM_DIR = ".km"
 APPROVALS = "approvals.jsonl"
 DEFERRALS = "deferrals.jsonl"
 DISCUSSIONS = "discussions.jsonl"
+IGNORED = "ignored.jsonl"
+NOTES = "notes.jsonl"
 CONFIG = "config.json"
 LISTING = "last-listing.json"
 
@@ -313,13 +315,19 @@ class KeyedLog:
 
 
 def build_queue(claims: list[Claim], store: "Store", config: dict, wanted: set[str],
-                deferrals: KeyedLog | None = None,
-                today: str | None = None) -> list[tuple[int, str, Claim]]:
-    """The review queue: what needs a person, ordered, with deferred claims hidden."""
+                deferrals: KeyedLog | None = None, today: str | None = None,
+                ignored: KeyedLog | None = None) -> list[tuple[int, str, Claim]]:
+    """The review queue: what needs a person, ordered, with deferred claims hidden.
+
+    Parsing over-collects on purpose — it has no idea what a sentence means. Marking a line
+    as "not a claim" is how the queue learns, without a model ever being asked.
+    """
     now = today or date.today().isoformat()
     rows: list[tuple[int, str, Claim]] = []
     for claim in claims:
         if claim.is_question:
+            continue
+        if ignored and claim.key in ignored.records:
             continue
         if deferrals:
             rec = deferrals.records.get(claim.key)

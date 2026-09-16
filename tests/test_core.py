@@ -243,6 +243,35 @@ class ServeTest(unittest.TestCase):
                                                      "until": "2099-01-01"})
         self.assertNotIn(key, [c["key"] for c in result["state"]["cards"]])
 
+    def test_note_is_recorded_and_the_claim_stays_proposed(self):
+        from km import serve
+
+        key = serve._state(self.tmp)["cards"][0]["key"]
+        result = serve._act(self.tmp, "human:test",
+                            {"key": key, "action": "note", "text": "a planilha está em $CH_DATA_DIR"})
+        self.assertTrue(result["ok"])
+        card = next(c for c in result["state"]["cards"] if c["key"] == key)
+        self.assertEqual(card["status"], "proposed")
+        self.assertIn("a planilha está em $CH_DATA_DIR", card["notes"])
+        self.assertEqual(result["state"]["approved"], 0)
+
+    def test_not_a_claim_leaves_the_queue_and_undo_brings_it_back(self):
+        from km import serve
+
+        key = serve._state(self.tmp)["cards"][0]["key"]
+        result = serve._act(self.tmp, "human:test", {"key": key, "action": "ignore"})
+        self.assertNotIn(key, [c["key"] for c in result["state"]["cards"]])
+        result = serve._act(self.tmp, "human:test", {"key": key, "action": "undo"})
+        self.assertIn(key, [c["key"] for c in result["state"]["cards"]])
+
+    def test_card_carries_the_neighbouring_lines(self):
+        from km import serve
+
+        cards = serve._state(self.tmp)["cards"]
+        card = next(c for c in cards if "per contract" in c["text"])
+        self.assertTrue(card["before"] or card["after"])
+        self.assertTrue(all(isinstance(x, str) for x in card["before"] + card["after"]))
+
     def test_unknown_claim_is_reported_not_crashed(self):
         from km import serve
 

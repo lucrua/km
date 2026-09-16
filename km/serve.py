@@ -16,13 +16,27 @@ from . import core
 WANTED = {"proposed", "changed", "expired"}
 
 
+def _context(root: Path, claim: core.Claim, span: int = 2) -> tuple[list[str], list[str]]:
+    """The neighbouring lines. A claim read alone is often unreadable."""
+    try:
+        lines = (root / claim.file).read_text(encoding="utf-8", errors="replace").splitlines()
+    except OSError:
+        return [], []
+    i = claim.line - 1
+    before = [ln.strip() for ln in lines[max(0, i - 6):i] if ln.strip()][-span:]
+    after = [ln.strip() for ln in lines[i + 1:i + 7] if ln.strip()][:span]
+    return before, after
+
+
 def _state(root: Path, limit: int = 60) -> dict:
     config = core.load_config(root)
     claims = core.scan(root, config)
     store = core.Store(root)
     deferrals = core.KeyedLog(root, core.DEFERRALS)
     discussions = core.KeyedLog(root, core.DISCUSSIONS)
-    rows = core.build_queue(claims, store, config, WANTED, deferrals)
+    ignored = core.KeyedLog(root, core.IGNORED)
+    notes = core.KeyedLog(root, core.NOTES)
+    rows = core.build_queue(claims, store, config, WANTED, deferrals, ignored=ignored)
 
     approved = sum(1 for c in claims
                    if not c.is_question and core.status_of(c, store) in ("approved", "to-validate"))
@@ -39,6 +53,7 @@ def _state(root: Path, limit: int = 60) -> dict:
     cards = []
     for risk, status, claim in rows[:limit]:
         rec = store.records.get(claim.key, {})
+        before, after = _context(root, claim)
         cards.append({
             "key": claim.key,
             "risk": risk,
@@ -47,8 +62,11 @@ def _state(root: Path, limit: int = 60) -> dict:
             "line": claim.line,
             "heading": claim.heading,
             "text": claim.text,
+            "before": before,
+            "after": after,
             "previous": rec.get("preview") if status == "changed" else None,
             "in_discussion": claim.key in discussions.records,
+            "notes": [n["text"] for n in notes.records.get(claim.key, {}).get("notes", [])],
             "done": per_file[claim.file]["done"],
             "of": per_file[claim.file]["total"],
         })
@@ -100,11 +118,26 @@ def _act(root: Path, by: str, payload: dict) -> dict:
         discussions.put(claim.key, at=date.today().isoformat(), file=claim.file, line=claim.line)
         message = "em conversa"
         return {"ok": True, "message": message, "prompt": prompt, "state": _state(root)}
+    elif action == "note":
+        text = (payload.get("text") or "").strip()
+        if not text:
+            return {"error": "nota vazia"}
+        notes = core.KeyedLog(root, core.NOTES)
+        existing = notes.records.get(claim.key, {}).get("notes", [])
+        notes.put(claim.key, file=claim.file, line=claim.line,
+                  notes=existing + [{"at": date.today().isoformat(), "text": text}])
+        message = "anotado — a afirmação continua proposta"
+    elif action == "ignore":
+        ignored = core.KeyedLog(root, core.IGNORED)
+        ignored.put(claim.key, at=date.today().isoformat(), file=claim.file,
+                    preview=claim.preview(), reason=payload.get("reason") or "not a claim")
+        message = "fora da fila — não é afirmação"
     elif action == "undo":
         store.unapprove(claim.key)
         store.save()
         deferrals.drop(claim.key)
         discussions.drop(claim.key)
+        core.KeyedLog(root, core.IGNORED).drop(claim.key)
         message = "desfeito"
     else:
         return {"error": f"unknown action: {action}"}
@@ -132,6 +165,9 @@ font-family:ui-monospace,Menlo,monospace}
 .sec{font-size:13px;color:var(--muted)}
 .prev{margin-top:12px;padding:10px 12px;border-left:3px solid var(--warn);background:var(--warn-bg);
 font-size:14px;border-radius:0 4px 4px 0}
+.ctx{font-size:13.5px;color:var(--muted);line-height:1.45}
+.ctx div{padding:2px 0}
+.note{margin-top:10px;padding:8px 12px;border-left:3px solid var(--accent);font-size:14px}
 .badge{padding:1px 8px;border-radius:999px;font-size:11px}
 .b-chg{color:var(--warn);background:var(--warn-bg)}.b-exp{color:var(--bad);background:var(--bad-bg)}
 .b-dis{color:var(--accent);background:transparent;border:1px solid var(--accent)}
@@ -152,7 +188,7 @@ border:1px solid var(--rule);background:var(--bg);color:var(--ink);margin-top:10
 <div id="root"></div>
 <div class="msg" id="msg"></div>
 <div class="bar" style="margin-top:20px">
-<span><kbd>A</kbd> aprovar · <kbd>V</kbd> a validar · <kbd>D</kbd> adiar · <kbd>C</kbd> discutir · <kbd>U</kbd> desfazer</span>
+<span><kbd>A</kbd> aprovar · <kbd>V</kbd> a validar · <kbd>N</kbd> anotar · <kbd>D</kbd> adiar · <kbd>C</kbd> discutir · <kbd>X</kbd> não é afirmação · <kbd>U</kbd> desfazer</span>
 <span id="hoje"></span></div>
 </div><script>
 let S={cards:[]}, last=null, doneToday=0;
@@ -171,14 +207,19 @@ function render(){
   el('root').innerHTML=`<div class="card">
     <div class="top"><span>${c.file}:${c.line}</span><span>risco ${'●'.repeat(c.risk)}${'○'.repeat(Math.max(0,5-c.risk))} ${badge} ${dis}</span></div>
     <div class="prog"><i style="width:${pct}%"></i></div>
+    ${c.heading?`<div class="sec">${esc(c.file)} · seção: ${esc(c.heading)}</div>`:''}
+    ${c.before.length?`<div class="ctx">${c.before.map(l=>`<div>${esc(l)}</div>`).join('')}</div>`:''}
     <div class="text">${esc(c.text)}</div>
-    ${c.heading?`<div class="sec">seção: ${esc(c.heading)}</div>`:''}
+    ${c.after.length?`<div class="ctx">${c.after.map(l=>`<div>${esc(l)}</div>`).join('')}</div>`:''}
     ${c.previous?`<div class="prev"><b>texto aprovado antes:</b> ${esc(c.previous)}</div>`:''}
+    ${c.notes.map(n=>`<div class="note"><b>sua nota:</b> ${esc(n)}</div>`).join('')}
     <div class="acts">
       <button class="ok" onclick="act('approve')">Aprovar <kbd>A</kbd></button>
       <button onclick="validar()">A validar <kbd>V</kbd></button>
+      <button onclick="anotar()">Anotar <kbd>N</kbd></button>
       <button onclick="act('defer')">Adiar 14d <kbd>D</kbd></button>
       <button onclick="act('discuss')">Discutir <kbd>C</kbd></button>
+      <button onclick="ignorar()">Não é afirmação <kbd>X</kbd></button>
       <button onclick="undo()">Desfazer <kbd>U</kbd></button>
     </div></div>`;
 }
@@ -194,6 +235,8 @@ async function act(action,extra){
   S=r.state; render();
 }
 function validar(){ const q=prompt('O que confirmaria isso?','confirmar com quem decide'); if(q!==null) act('validate',{validate:q}); }
+function anotar(){ const n=prompt('Nota para corrigir ou completar (fica no .km/, para você ou um agente tratar depois):'); if(n) act('note',{text:n}); }
+function ignorar(){ act('ignore',{reason:'not a claim'}); }
 function undo(){ if(!last){el('msg').textContent='nada para desfazer';return;}
   fetch('/api/act',{method:'POST',headers:{'Content-Type':'application/json'},
     body:JSON.stringify({key:last,action:'undo'})}).then(r=>r.json()).then(r=>{
@@ -203,6 +246,7 @@ document.addEventListener('keydown',e=>{
   const k=e.key.toLowerCase();
   if(k==='a')act('approve'); else if(k==='v')validar(); else if(k==='d')act('defer');
   else if(k==='c')act('discuss'); else if(k==='u')undo();
+  else if(k==='n')anotar(); else if(k==='x')ignorar();
 });
 load();
 </script></body></html>"""

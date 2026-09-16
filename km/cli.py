@@ -91,7 +91,8 @@ def cmd_status(args) -> int:
 
 def _queue(root: Path, config: dict, claims, store, wanted: set[str]):
     deferrals = core.KeyedLog(root, core.DEFERRALS)
-    rows = core.build_queue(claims, store, config, wanted, deferrals)
+    ignored = core.KeyedLog(root, core.IGNORED)
+    rows = core.build_queue(claims, store, config, wanted, deferrals, ignored=ignored)
     core.save_listing(root, [c.key for _, _, c in rows])
     return rows
 
@@ -200,6 +201,30 @@ def cmd_gone(args) -> int:
     return 0
 
 
+def cmd_notes(args) -> int:
+    """The list an agent reads to act on what you wrote while reviewing."""
+    root = _root(args)
+    config, claims = _scan(root)
+    store = core.Store(root)
+    notes = core.KeyedLog(root, core.NOTES)
+    by_key = {c.key: c for c in claims}
+    shown = 0
+    for key, rec in sorted(notes.records.items(), key=lambda kv: (kv[1].get("file", ""), kv[1].get("line", 0))):
+        claim = by_key.get(key)
+        status = core.status_of(claim, store) if claim else "gone"
+        if args.open and status in ("approved", "to-validate"):
+            continue
+        shown += 1
+        where = f"{rec.get('file')}:{rec.get('line')}" if rec.get("file") else key
+        print(f"{where}  [{status}]")
+        if claim:
+            print(f"      {claim.preview()}")
+        for note in rec.get("notes", []):
+            print(f"  note  {note['at']}  {note['text']}")
+    print(f"\n{shown} claims with notes — fix the document, then the claim comes back to the queue")
+    return 0
+
+
 def cmd_serve(args) -> int:
     from . import serve
 
@@ -241,6 +266,10 @@ def main(argv: list[str]) -> int:
     s.set_defaults(func=cmd_approve)
 
     sub.add_parser("gone", help="approvals with no matching claim").set_defaults(func=cmd_gone)
+
+    s = sub.add_parser("notes", help="what you wrote on claims while reviewing")
+    s.add_argument("--open", action="store_true", help="only notes on claims still not approved")
+    s.set_defaults(func=cmd_notes)
 
     s = sub.add_parser("serve", help="review the queue in a local page, one claim at a time")
     s.add_argument("--port", type=int, default=8431)
