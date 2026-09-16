@@ -72,8 +72,16 @@ it. Risk is a coarse heuristic — a point for digits or a percentage, two for a
 Two ways, and a document can mix them.
 
 **By hash (default).** The key is `h:` plus the first 12 hex characters of the SHA-256 of
-the normalised text. Nothing is written in the document. Rewording a claim produces a new
-key, so the old approval shows up under `km gone` and `km approve N --carry` moves it over.
+**the document path and the normalised text**. Nothing is written in the document. Rewording
+a claim produces a new key, so the old approval shows up under `km gone` and
+`km approve N --carry` moves it over.
+
+The path is part of the key because text alone is not unique: measured on a real repository,
+369 claims produced only 355 distinct text hashes, since every decision file repeats
+`**Descartado.**` and `**Consequência.**`. Approving one of them would have approved seven,
+in seven different decisions. Change detection still uses `text_hash`, which is text-only —
+so moving a sentence to another document is a new claim (and `carry` absorbs it), while
+editing it in place is the same claim, changed.
 
 **By ID (optional, later).** A list item starting with `**DSP-3**` is keyed by `DSP-3`. The
 approval then survives rewording: the record keeps the text hash separately, so an edit

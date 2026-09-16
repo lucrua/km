@@ -74,12 +74,28 @@ def cmd_status(args) -> int:
         per_file.setdefault(c.file, Counter())[s] += 1
 
     if getattr(args, "short", False):
+        # The one line printed after every commit. It has to agree with `km list`, so it is
+        # built from the same queue — triage, ignored and deferrals included.
+        deferrals = core.KeyedLog(root, core.DEFERRALS)
+        ignored = core.KeyedLog(root, core.IGNORED)
+        triage = core.KeyedLog(root, core.TRIAGE)
         conflicts = core.KeyedLog(root, core.CONFLICTS)
+        queue = core.build_queue(claims, store, config, {"proposed", "changed", "expired"},
+                                 deferrals, ignored=ignored, triage=triage)
+        norms = [c for c in claims
+                 if not c.is_question and c.key not in ignored.records
+                 and (triage.records.get(c.key, {}).get("kind", "norma") == "norma"
+                      or triage.records.get(c.key, {}).get("text_hash") != c.text_hash)]
+        approved = sum(1 for c in norms
+                       if core.status_of(c, store) in ("approved", "to-validate"))
         live = {c.key for c in claims}
         open_conflicts = sum(1 for r in conflicts.records.values() if r.get("claim") in live)
-        total = sum(counts.values()) - counts["question"]
-        approved = counts["approved"] + counts["to-validate"]
-        bits = [f"km: {approved}/{total} aprovadas", f"{counts['proposed']} propostas"]
+        sampled = sum(1 for row in queue if row.sampled)
+        bits = [f"km: {approved}/{len(norms)} normas aprovadas", f"{len(queue)} na fila"]
+        if sampled:
+            # Otherwise the two numbers read as a contradiction on the line seen after
+            # every commit, and a number nobody trusts is worse than no number.
+            bits.append(f"{sampled} são amostras da triagem")
         if counts["changed"]:
             bits.append(f"{counts['changed']} mexidas depois de aprovadas")
         if counts["expired"]:

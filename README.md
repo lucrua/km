@@ -67,6 +67,32 @@ the whole point. `km notes --open` hides the ones already approved.
 Plain HTML from a single Python file: no build, no npm, no network, no framework. It writes
 the same `.km/` files the CLI writes, so terminal and page are interchangeable.
 
+## Nothing to remember
+
+```bash
+km install-hooks
+```
+
+Writes a `post-commit` hook that prints one line after every commit — how many norms are
+approved, how many are in the queue, what changed after approval, what conflicts with
+something settled. It reports and exits 0: it never blocks a commit, and the only command
+left to remember is `km serve`.
+
+## Does this fight something already settled?
+
+```bash
+km conflicts export pairs.json   # candidates: claims overlapping an approved claim
+km conflicts import pairs.json   # {key, against, verdict, reason} from the model
+km conflicts                     # what was found
+```
+
+Comparing every claim against every other is 69k pairs for 372 claims and answers the wrong
+question. What matters is whether a claim fights something **you already approved**, so the
+settled set is one side of every pair. A cheap overlap picks candidates — the share of the
+smaller claim's term mass, never an absolute sum, since length alone would make a changelog
+paragraph match everything — and a model gives the verdict. A conflict is shown on the card
+with both texts; it never approves or rejects anything by itself.
+
 ## Enumerating, then classifying
 
 The parser splits and identifies; it does not understand. Judging what kind of sentence a
