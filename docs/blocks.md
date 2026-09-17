@@ -83,11 +83,32 @@ heading over 70 lines — written as a single narrative, so any edit anywhere re
 it. Giving it the headings it already deserves fixes the review granularity as a side
 effect, and a reader gets a better document.
 
-### Why nothing is written into the file
+### What may live in the file, and what may not
+
+The rule is not "nothing in the file, ever" — it is about **who is already writing**:
+
+| | A reader who never uses this tool wants it? | Where |
+|---|---|---|
+| "This rule came from the meeting of 14/09" | **yes** | in the file, as content |
+| "No proof for this yet — confirm" | **yes**, while unresolved | in the file; removed by whoever resolves it |
+| A block id | no, only the tool | outside |
+| Chancel, confidence, reviewer comment | no — it is about the reviewer's trust, not the content | **outside, always** |
+
+**Whoever is already writing may annotate in the file; whoever is not writing must annotate
+outside.** An agent writing a document annotates in the same act: no concurrency, no second
+writer, and provenance captured at the only moment it is known. A reviewer is not writing,
+so the same gesture would make them a concurrent writer in the file an agent is most likely
+editing.
+
+This also means **no migration step is needed**. Author annotations are read by the layer on
+every scan and disappear when someone resolves them in a normal edit — no hook rewriting
+files mid-commit, nothing changing under an agent's feet.
+
+### Why judgement, specifically, stays out
 
 - **A marker that exists only for this tool is annotation in disguise.** An author writes a
-  heading for the reader; nobody writes a block id for themselves. Calling it "content"
-  would be a way of smuggling the layer into the document.
+  heading for the reader, and a provenance line for the reader; nobody writes a block id for
+  themselves. Calling that "content" would be smuggling the layer into the document.
 - **Any write makes the reviewer a concurrent writer**, in the file an agent is most likely
   editing — 23 hunks in a single commit, measured.
 - **Markdown is unpaired by design**, so paired delimiters would also introduce a failure
