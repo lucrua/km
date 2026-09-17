@@ -34,9 +34,18 @@ has the "Viewed" checkbox that clears when the file changes, and Reviewable exis
 because GitHub loses that state across force-pushes. What is new here is wanting it **per
 block instead of per file**, and **outside a pull-request flow**.
 
-**Not a writer.** The layer never edits a document. Splitting a block is an edit, so it is
-done by whoever edits documents — a person in the editor, or an agent — never by the
-review tool. One writer per file stays the rule.
+**Not a writer.** The layer never edits a document, and the split below follows from that:
+
+| What | Who writes it | Where |
+|---|---|---|
+| **Structure** — headings, and optionally a block id | the author, in the same act that writes the text | in the file: it is content |
+| **Judgement** — chancel, confidence, comment | the reviewer, later, while others write | **outside the file, always** |
+
+Annotation is asynchronous by nature. Writing it into the document would make the reviewer
+one more concurrent writer, in exactly the file an agent is editing — and that file is the
+liveliest one (23 hunks in a single commit, measured). Structure is authored; judgement is
+annotated. In the common case, with headings as the boundary, **nothing at all is written
+into the file**.
 
 ## Block boundaries
 
@@ -69,9 +78,10 @@ Where a heading is too coarse, an invisible marker opens a block:
 <!-- block: alias-do-estado · origin: measurement 2026-09-16 · agent: design-v1 -->
 ```
 
-`origin` is written at write time by whoever writes the text. This is deliberate: audit
-systems that ask for evidence afterwards do not get it — Phabricator's own documentation
-says authors have a much weaker incentive to address anything raised after the fact.
+`origin` is written at write time by **the author** — never by the reviewer and never by
+this tool. This is deliberate: audit systems that ask for evidence afterwards do not get it
+— Phabricator's own documentation says authors have a much weaker incentive to address
+anything raised after the fact.
 
 ### Why no closing tag
 
@@ -107,6 +117,31 @@ blocks. A single commit touched 23 hunks in that file, several of them one line.
 would record *when an agent happened to touch a line*, not what the text says. The design
 file looks fine at 28.9 lines only because it was written in large passes — the mechanism
 appears to work exactly where nothing is being refined, and shreds whatever is alive.
+
+## Moving and renaming
+
+Annotations follow the content, in three levels:
+
+1. **A command that knows** (`km mv`, or wrapping `git mv`) rewrites the index. Exact.
+2. **A committed rename by someone else**: git detects it by content similarity and hands
+   it over as `R<score> old new`. Free.
+3. **A rename in the dirty tree** — the common case with agents: git cannot help, because
+   detection only runs between commits. Measured on the real repository: **zero renames in
+   the whole history**, and yet a decision file was renamed — in the working tree, before
+   the first commit, where git never saw it. The anchor carries this case: a file
+   disappears, another appears holding blocks with identical content hashes, and the
+   annotations re-point by content.
+
+When nothing matches, the annotation becomes an **orphan on a list**, with the text it was
+written against. It is never dropped silently.
+
+**Key by content, index by path.** An earlier version keyed claims by path *and* text, to
+solve collisions: boilerplate like `**Descartado.**` repeats once per decision file, and
+approving one would have approved seven. That fix made every move break every key in the
+file. The collisions were 16 of 17 cases of pure boilerplate, which is not a claim at all
+and leaves the queue through triage or a keystroke — the wrong problem to solve with the
+key. Keying by content makes moves free and turns duplication into a visible property: the
+record lists every location where that exact text appears.
 
 ## Review state
 
@@ -202,7 +237,9 @@ git; the layer would drift and lose.
 
 1. **Block ids.** Derived from the heading path (breaks on rename) or explicit in the
    marker (needs maintenance)? Probably: implicit until a block gets state, explicit from
-   then on — but the moment of promotion is an edit, so who performs it?
+   then on — but promotion is an edit, so it is the author's, never the reviewer's. The
+   fallback chain to resolve an anchor is: block id → heading path → content hash and
+   quoted text → orphan list.
 2. **Carry-over after a rewrite.** One commit replaced 98 claims with 105. The reviewer
    should see "this is the old block, reworded", not 105 new ones. Similarity matching is
    good at *same subject* — which is exactly what it is good for, and exactly what it is bad
