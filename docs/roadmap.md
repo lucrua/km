@@ -11,6 +11,10 @@ CLI. `triage` hands classification to a model and keeps it advisory.
 
 ## Next
 
+- **Blocks** — the unit of review moves from the claim to the block: heading-bounded by
+  default, split by intent, invalidated by content hash. Specified in
+  [blocks.md](blocks.md); not implemented.
+
 - **`km projections`** — generated views, no agent involved: what holds on a subject, what
   is to validate and when it expires, what changed after approval. Written to
   `.km/projections/`, git-ignored, regenerated on demand.
