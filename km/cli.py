@@ -10,6 +10,7 @@ from collections import Counter
 from datetime import date
 from pathlib import Path
 
+from . import blocks as blk
 from . import core
 
 MARK = {
@@ -415,6 +416,93 @@ exit 0
     return 0
 
 
+
+def _tracked_files(root: Path, arg: str | None) -> list[str]:
+    if arg:
+        return [arg]
+    config, claims = _scan(root)
+    return sorted({c.file for c in claims})
+
+
+def cmd_vouch(args) -> int:
+    """Seed the truth from a review that already happened, at the commit where it happened."""
+    root = _root(args)
+    ledger = blk.Ledger(root)
+    found = blk.of_file(root, args.file, args.source)
+    if not found:
+        raise SystemExit(f"{args.file} não existe em {args.source or 'disco'}")
+    for b in found:
+        ledger.vouch(b, state=args.state, by=args.by, note=args.note, source=args.source)
+    ledger.save()
+    print(f"{len(found)} blocos de {args.file} marcados como {args.state}"
+          + (f", no conteúdo de {args.source}" if args.source else ""))
+    live = blk.of_file(root, args.file)
+    mexidos = sum(1 for b in live if ledger.status_of(b).startswith("mexido"))
+    novos = sum(1 for b in live if ledger.status_of(b) == "não revisado")
+    print(f"no disco agora: {len(live)} blocos · {mexidos} mexidos desde então · {novos} novos")
+    return 0
+
+
+def cmd_blocks(args) -> int:
+    root = _root(args)
+    ledger = blk.Ledger(root)
+    total: Counter[str] = Counter()
+    todos: list[blk.Block] = []
+    for rel in _tracked_files(root, args.file):
+        live = blk.of_file(root, rel)
+        if not live:
+            continue
+        todos.extend(live)
+        linhas = []
+        for b in live:
+            st = ledger.status_of(b)
+            total[st] += 1
+            if args.changed and st in ("aprovado", "aceite"):
+                continue
+            linhas.append(f"  {st:<26} {b.lines:>3}l  {b.heading[:58]}")
+        if linhas:
+            print(f"\n{rel}")
+            print("\n".join(linhas))
+    orfas = ledger.orphans(todos)
+    print("\n" + " · ".join(f"{n} {st}" for st, n in total.most_common()))
+    if orfas:
+        print(f"{len(orfas)} com chancela e sem bloco correspondente (órfãs):")
+        for r in orfas[:5]:
+            print(f"  {r['file']} › {r['path'][:60]}")
+    return 0
+
+
+def cmd_review(args) -> int:
+    """What changed since you vouched, block by block."""
+    import difflib
+
+    root = _root(args)
+    ledger = blk.Ledger(root)
+    vistos = 0
+    for rel in _tracked_files(root, args.file):
+        for b in blk.of_file(root, rel):
+            st = ledger.status_of(b)
+            if not st.startswith("mexido"):
+                continue
+            rec = ledger.records[b.key]
+            antes = blk.of_file(root, rel, rec.get("from") or "HEAD")
+            old = next((x for x in antes if x.key == b.key), None)
+            vistos += 1
+            print(f"\n── {rel} › {b.heading}  [{st}]")
+            if rec.get("note"):
+                print(f"   sua nota: {rec['note']}")
+            if old:
+                d = difflib.unified_diff(old.body.splitlines(), b.body.splitlines(),
+                                         lineterm="", n=args.context)
+                for line in list(d)[2:]:
+                    print("   " + line)
+            if vistos >= args.limit:
+                print(f"\n… parando em {args.limit}; use --limit para ver mais")
+                return 0
+    print(f"\n{vistos} blocos mexidos desde a sua chancela")
+    return 0
+
+
 def cmd_serve(args) -> int:
     from . import serve
 
@@ -480,6 +568,25 @@ def main(argv: list[str]) -> int:
     sub.add_parser("install-hooks",
                    help="report the state after each commit, so no command has to be remembered"
                    ).set_defaults(func=cmd_install_hooks)
+
+    s = sub.add_parser("vouch", help="record blocks of a file as vouched, as of a commit")
+    s.add_argument("file")
+    s.add_argument("--from", dest="source", help="commit whose content you reviewed")
+    s.add_argument("--state", default="aprovado", choices=sorted(blk.STATES))
+    s.add_argument("--note")
+    s.add_argument("--by", default="human:" + os.environ.get("USER", "unknown"))
+    s.set_defaults(func=cmd_vouch)
+
+    s = sub.add_parser("blocks", help="status of every block against your chancel")
+    s.add_argument("file", nargs="?")
+    s.add_argument("--changed", action="store_true", help="hide what still stands")
+    s.set_defaults(func=cmd_blocks)
+
+    s = sub.add_parser("review", help="what changed since you vouched, block by block")
+    s.add_argument("file", nargs="?")
+    s.add_argument("--limit", type=int, default=8)
+    s.add_argument("--context", type=int, default=2)
+    s.set_defaults(func=cmd_review)
 
     s = sub.add_parser("serve", help="review the queue in a local page, one claim at a time")
     s.add_argument("--port", type=int, default=8431)
