@@ -424,10 +424,47 @@ def _tracked_files(root: Path, arg: str | None) -> list[str]:
     return sorted({c.file for c in claims})
 
 
+def _block_by_ref(root: Path, rel: str, ref: str) -> blk.Block:
+    """`--block` takes the number printed by `km blocks`, or part of the heading."""
+    live = blk.of_file(root, rel)
+    if ref.isdigit():
+        path = Path(root / core.KM_DIR / "last-blocks.json")
+        if not path.exists():
+            raise SystemExit("rode `km blocks` antes de usar número")
+        listagem = json.loads(path.read_text(encoding="utf-8"))
+        i = int(ref)
+        if not 1 <= i <= len(listagem):
+            raise SystemExit(f"fora da faixa: 1..{len(listagem)}")
+        chave = listagem[i - 1]
+        for b in live:
+            if b.key == chave:
+                return b
+        raise SystemExit("esse bloco já não está no arquivo — rode `km blocks` de novo")
+    achados = [b for b in live if ref.lower() in b.heading.lower()]
+    if len(achados) != 1:
+        raise SystemExit(f"{len(achados)} blocos casam com {ref!r}; seja mais específico")
+    return achados[0]
+
+
 def cmd_vouch(args) -> int:
     """Seed the truth from a review that already happened, at the commit where it happened."""
     root = _root(args)
     ledger = blk.Ledger(root)
+
+    if args.block:
+        b = _block_by_ref(root, args.file, args.block)
+        antes = ledger.status_of(b)
+        ledger.vouch(b, state=args.state, by=args.by, note=args.note,
+                     validate=args.validate, due=args.due)
+        ledger.save()
+        print(f"{b.heading}  ·  {antes} → {args.state}")
+        if args.note:
+            print(f"   nota: {args.note}")
+        restantes = [x for x in blk.of_file(root, args.file)
+                     if ledger.status_of(x) not in ("aprovado", "aceite")]
+        print(f"faltam {len(restantes)} blocos neste arquivo")
+        return 0
+
     found = blk.of_file(root, args.file, args.source)
     if not found:
         raise SystemExit(f"{args.file} não existe em {args.source or 'disco'}")
@@ -448,6 +485,7 @@ def cmd_blocks(args) -> int:
     ledger = blk.Ledger(root)
     total: Counter[str] = Counter()
     todos: list[blk.Block] = []
+    listagem: list[str] = []
     for rel in _tracked_files(root, args.file):
         live = blk.of_file(root, rel)
         if not live:
@@ -459,10 +497,13 @@ def cmd_blocks(args) -> int:
             total[st] += 1
             if args.changed and st in ("aprovado", "aceite"):
                 continue
-            linhas.append(f"  {st:<26} {b.lines:>3}l  {b.heading[:58]}")
+            listagem.append(f"{b.file}#{b.path}")
+            linhas.append(f"  {len(listagem):>3}  {st:<26} {b.lines:>3}l  {b.heading[:54]}")
         if linhas:
             print(f"\n{rel}")
             print("\n".join(linhas))
+    (root / core.KM_DIR / "last-blocks.json").write_text(
+        json.dumps(listagem, ensure_ascii=False), encoding="utf-8")
     orfas = ledger.orphans(todos)
     print("\n" + " · ".join(f"{n} {st}" for st, n in total.most_common()))
     if orfas:
@@ -572,8 +613,11 @@ def main(argv: list[str]) -> int:
     s = sub.add_parser("vouch", help="record blocks of a file as vouched, as of a commit")
     s.add_argument("file")
     s.add_argument("--from", dest="source", help="commit whose content you reviewed")
+    s.add_argument("--block", help="número do `km blocks`, ou parte do título")
     s.add_argument("--state", default="aprovado", choices=sorted(blk.STATES))
     s.add_argument("--note")
+    s.add_argument("--validate", help="o que confirmaria (estado a-validar)")
+    s.add_argument("--due", help="até quando (AAAA-MM-DD)")
     s.add_argument("--by", default="human:" + os.environ.get("USER", "unknown"))
     s.set_defaults(func=cmd_vouch)
 
