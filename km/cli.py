@@ -151,7 +151,7 @@ def cmd_pendente(args) -> int:
         for arquivo, l, prazo, txt in vencidas[:args.limit]:
             print(f"      {arquivo}:{l}  desde {prazo}  {txt[:60]}")
 
-    print(f"\n{total} trechos mexidos · " + _resumo(situacoes))
+    print("\n" + _resumo(situacoes))
     if novos and not args.novos:
         print("a lista dos sem chancela: km pendente --novos")
     if total:
@@ -162,7 +162,11 @@ def cmd_pendente(args) -> int:
 def cmd_chancela(args) -> int:
     """Write the accepted passages into the ref. The act is per passage; the ref holds files."""
     root = _root(args)
-    rel = args.file
+    if args.origem:
+        return _chancelar_de(root, args)
+    if len(args.file) > 1:
+        raise SystemExit("um arquivo por vez, a não ser com --from <commit>")
+    rel = args.file[0]
     if ch.atual(root, rel) is None:
         raise SystemExit(f"{rel} não existe no disco")
     if rel not in ch.documentos(root):
@@ -206,6 +210,41 @@ def cmd_chancela(args) -> int:
         # the previous listing would chancel a passage you did not look at.
         print("os números mudaram — rode `km pendente` de novo"
               " (ou passe vários --hunk de uma vez)")
+    return 0
+
+
+def _chancelar_de(root: Path, args) -> int:
+    """Endorse what a commit already held.
+
+    The review happened before the tool existed — in a reading, in a meeting, in the commit
+    itself. This states that, at once, and from then on the diff carries the conversation.
+    """
+    rev = args.origem
+    cobertos = ch.documentos(root)
+    mudancas: dict[str, str] = {}
+    for rel in args.file:
+        texto = ch.conteudo_em(root, rev, rel)
+        if texto is None:
+            print(f"   — {rel}: não existia em {rev}")
+            continue
+        if rel not in cobertos:
+            print(f"   — {rel}: fora do `include` do .km/config.json")
+            continue
+        mudancas[rel] = texto
+    if not mudancas:
+        raise SystemExit("nada a chancelar")
+
+    curto = ch.historico(root, rev, None, limite=1).strip() or rev
+    mensagem = (f"chancela: {len(mudancas)} arquivo(s), conteúdo de {rev}\n\n"
+                + "\n".join(sorted(mudancas)) + "\n"
+                + (f"\n{args.message}\n" if args.message else "")
+                + f"\npor: {args.by}\n")
+    commit = ch.escrever(root, mudancas, mensagem)
+    print(f"{len(mudancas)} arquivo(s) chancelados no conteúdo de {rev}  ·  {commit[:8]}")
+    for rel in sorted(mudancas):
+        pendentes = len(ch.situacao(root, rel).hunks)
+        print(f"   ✓ {rel}" + (f"  ·  {pendentes} trecho(s) mudaram desde então" if pendentes
+                               else "  ·  igual ao que está no disco"))
     return 0
 
 
@@ -361,7 +400,9 @@ def main(argv: list[str]) -> int:
 
     s = sub.add_parser("chancela", aliases=["chancel"],
                        help="escrever os trechos aceitos na chancela (refs/km/chancela)")
-    s.add_argument("file")
+    s.add_argument("file", nargs="+")
+    s.add_argument("--from", dest="origem", metavar="REV",
+                   help="chancelar o conteúdo que o arquivo tinha naquele commit ou branch")
     s.add_argument("--hunk", action="append", default=[],
                    help="número do `km pendente`, ou parte do título; repetível")
     s.add_argument("--all", action="store_true", help="o arquivo inteiro como está hoje")
