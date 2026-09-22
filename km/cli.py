@@ -440,7 +440,13 @@ def _block_by_ref(root: Path, rel: str, ref: str) -> blk.Block:
             if b.key == chave:
                 return b
         raise SystemExit("esse bloco já não está no arquivo — rode `km blocks` de novo")
-    achados = [b for b in live if ref.lower() in b.heading.lower()]
+    def sem_acento(t: str) -> str:
+        import unicodedata
+        return "".join(ch for ch in unicodedata.normalize("NFD", t.lower())
+                       if unicodedata.category(ch) != "Mn")
+
+    alvo = sem_acento(ref)
+    achados = [b for b in live if alvo in sem_acento(b.heading)]
     if len(achados) != 1:
         raise SystemExit(f"{len(achados)} blocos casam com {ref!r}; seja mais específico")
     return achados[0]
