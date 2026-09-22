@@ -289,8 +289,12 @@ def main() -> int:
     root = Path(sys.argv[1] if len(sys.argv) > 1 else ".").expanduser().resolve()
     out = Path(sys.argv[2]) if len(sys.argv) > 2 else Path("review.html")
     dados = montar(root)
-    out.write_text(PAGE.replace("__DATA__", json.dumps(dados, ensure_ascii=False)),
-                   encoding="utf-8")
+    # Any of `</script`, `<script` or `<!--` inside block text confuses the HTML tokenizer
+    # and the page dies mid-JSON. Escaping every angle bracket kills all three at once, and
+    # \u003c is just "<" once the string is parsed, so the data is untouched.
+    corpo = (json.dumps(dados, ensure_ascii=False)
+             .replace("<", "\\u003c").replace(">", "\\u003e"))
+    out.write_text(PAGE.replace("__DATA__", corpo), encoding="utf-8")
     n = sum(len(d["blocos"]) for d in dados["docs"])
     print(f"{out} · {len(dados['docs'])} arquivos · {n} blocos")
     return 0
