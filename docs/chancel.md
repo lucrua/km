@@ -1,8 +1,8 @@
 # The chancel: a reviewed copy, kept in a git ref
 
-Status: **design, current.** Supersedes `docs/blocks.md`, which stored review state per
-block; git history keeps it. Written 2026-09-22 from a working session, with every number
-below measured on a real repository.
+Status: **built, current.** Supersedes `docs/blocks.md`, which stored review state per
+block; git history keeps it. Written 2026-09-22 from a working session and implemented the
+same day, with every number below measured on a real repository.
 
 ## What the chancel is
 
@@ -87,24 +87,41 @@ its own mark in the review, separate from ordinary edits.
 Table canonicalisation survives, no longer to protect a hash but to let the diff ignore a
 cosmetic re-alignment.
 
-## What to build
+## The commands
 
-1. `km chancela <file> [--all|--hunk]` — write accepted passages into the ref, with a commit
-   message that carries the reasoning.
-2. `km pendente [<file>]` — the two questions: what changed since the chancel, and which
-   files have no chancel at all.
-3. `km restore` — already written; put back the chancelled text of a passage.
-4. The review surface reads `git diff`/`git show` instead of a ledger. The editor extension
-   and the standalone mock both survive: the view does not change, only where the left-hand
-   column comes from.
-5. A lint for the convention: a `🚫` line blocks the chancel of its passage; a `❓` past its
-   date is reported; a caveat that vanished is flagged on its own.
+| | |
+|---|---|
+| `km pendente [<arquivo>]` | what changed since the chancel, and what never had one. `--json` feeds the editor |
+| `km chancela <arquivo> --hunk <n\|título>` | write that passage into the ref. Repeatable; `--all` takes the file as it is |
+| `km restore <arquivo> --hunk <n\|título>` | put the chancelled text back on disk — the only command that writes a document |
+| `km lint [<arquivo>]` | the convention: a `🚫` pending, a `❓` past its date, a caveat that vanished |
+| `km quando <arquivo> --trecho <título>` | when this passage last had a chancel (`git log -L`) |
+| `km baseline <arquivo>` | the chancelled copy, for a diff's left-hand column |
+| `km status --short` | the line after every commit: files in step, passages moved, files with no chancel |
+
+`chancela`, `pendente` and `quando` also answer to `chancel`, `pending` and `when`.
+
+Hunk numbers come from the diff, and the diff moves when the ref does: after a partial
+chancel the command says so, and several `--hunk` in one call are applied against one
+listing. The `🚫` refusal is enforced here — the passage is left out and named, and only
+`--force` overrides it.
+
+The surfaces read the ref, not a ledger: `km baseline` is the left-hand column of the VS
+Code diff, the extension's passage states come from `km pendente --json`, and the standalone
+mock builds its word-level diff from `git show refs/km/chancela:<file>` against disk. The
+extension also **writes the marks**: approving, deferring with a date or disagreeing all
+insert the agreed blockquote into the document, so the convention is the path of least
+resistance rather than something to remember.
+
+`tools/migrar_ledger.py <repo> --apply` carries an old `.km/blocks.jsonl` into the ref: the
+vouched body of each block, projected as the reviewed copy of its file.
 
 ## Still open
 
-- **Deleting a passage that never had a chancel.** Reverting means removing text an agent
-  added. Today `restore` refuses with "nothing to go back to". Should deletion be possible
-  with a confirmation?
+- **Deleting a passage that never had a chancel.** `km restore --hunk` on a pure addition
+  already removes it, because reverting the hunk is removing the text; `restore` only
+  refuses when the file has no chancel at all. What is still missing is the reason going
+  anywhere but the commit message.
 - **Editing outside the editor.** A standalone surface needs a local server to save, with
   block-scoped writes and optimistic concurrency: re-read the file, compare, refuse and show
   both versions if it moved. Designed, not built.

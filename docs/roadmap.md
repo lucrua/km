@@ -2,7 +2,13 @@
 
 Ordered by what unlocks the next thing. Nothing here is committed to a date.
 
-## Now — shadow mode
+## Now — the chancel
+
+`pendente · chancela · restore · lint · quando · baseline`, over `refs/km/chancela`: a
+reviewed copy of each file, compared with `git diff`. The editor extension and the
+standalone mock both read it. Specified in [chancel.md](chancel.md).
+
+## Also now — the claim queue, in shadow mode
 
 `init · scan · status · list · show · approve · carry · gone · notes · triage · serve`. No
 document is modified. `serve` is the queue as a local page: the section around one claim,
@@ -11,15 +17,15 @@ CLI. `triage` hands classification to a model and keeps it advisory.
 
 ## Next
 
-- **The chancel in a git ref** — review state stops being a ledger and becomes a reviewed
-  copy of each file, compared with `git diff`. Specified in [chancel.md](chancel.md);
-  supersedes the block ledger.
+- **Editing outside the editor** — a standalone review surface that can save column two:
+  a local server, block-scoped writes and optimistic concurrency (re-read, compare, refuse
+  and show both versions if the file moved). Designed in [chancel.md](chancel.md), not built.
 
 - **`km projections`** — generated views, no agent involved: what holds on a subject, what
   is to validate and when it expires, what changed after approval. Written to
   `.km/projections/`, git-ignored, regenerated on demand.
-- **`km lint`** — mechanical checks only: a claim approved with a source that does not
-  exist, a due date in the past, a duplicate ID, a broken link.
+- **`km lint`, wider** — today it checks the caveat convention. Still to come: a claim
+  approved with a source that does not exist, a duplicate ID, a broken link.
 - **`km export --okf`** — the approval record rendered as Open Knowledge Format fields
   (`status`, `verified`, `sources`) for anything outside that expects it.
 - **Pre-commit hook** — refuses a commit that writes `.km/approvals.jsonl` without a human,
@@ -44,4 +50,5 @@ CLI. `triage` hands classification to a model and keeps it advisory.
 - **Locking and session coordination.** Editors already refuse stale writes and git already
   merges. A claim touched by two people simply loses its approval and comes back to the
   queue.
-- **Being a document editor.** `km` never rewrites a document.
+- **Being a document editor.** The only write into a document is `km restore`, putting
+  back text you had chancelled, and the marks the editor extension inserts at your request.

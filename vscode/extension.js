@@ -1,4 +1,10 @@
 // A thin surface over the km CLI: the model lives there, the editor only shows it.
+//
+// The chancel is a reviewed copy of the file in refs/km/chancela, so the left-hand column
+// is `km baseline` (which is `git show refs/km/chancela:<file>`) and the state of each
+// passage comes from `km pendente --json`. Reservations are not stored here: they are
+// written into the document as blockquotes, and this extension exists partly to insert
+// them in the agreed form.
 const vscode = require('vscode');
 const cp = require('child_process');
 const fs = require('fs');
@@ -7,11 +13,17 @@ const os = require('os');
 
 const SCHEME = 'km-baseline';
 const CORES = {
-  'aprovado': '#2B6647', 'aceite': '#94600F', 'a-validar': '#2A4B6E',
-  'reprovado': '#8B4E4E', 'suposicao': '#8A5A0B', 'nao revisado': '#5A6660',
+  'com chancela': '#2B6647',
+  'mexido': '#E3B665',
+  'sem chancela': '#5A6660',
 };
-const mexido = (e) => e.startsWith('mexido');
-const chave = (e) => e.normalize('NFD').replace(/[̀-ͯ]/g, '');
+const MARCAS = {
+  '⚠️': { rotulo: 'sem certeza', modelo: '> ⚠️ **sem certeza** — ' },
+  '❓': { rotulo: 'a confirmar', modelo: '> ❓ **a confirmar até DATA** — ' },
+  '🚫': { rotulo: 'discordo', modelo: '> 🚫 **discordo** — ' },
+};
+const hoje = () => new Date().toISOString().slice(0, 10);
+const emDias = (n) => new Date(Date.now() + n * 864e5).toISOString().slice(0, 10);
 
 function km(args, cwd) {
   const bin = vscode.workspace.getConfiguration('km').get('path')
@@ -28,11 +40,17 @@ function raizDe(arquivo) {
   return null;
 }
 
-function blocos(doc) {
+// Um trecho: titulo, estado contra a chancela, ressalvas e o que o diff comeu.
+function trechos(doc) {
   const r = raiz(doc);
   if (!r || doc.languageId !== 'markdown') return [];
-  try { return JSON.parse(km(['blocks', rel(doc), '--json'], r)); } catch (e) { return []; }
+  try { return JSON.parse(km(['pendente', rel(doc), '--json'], r)); } catch (e) { return []; }
 }
+
+const vencida = (c) => {
+  const m = /(\d{4}-\d{2}-\d{2})/.exec(c.text);
+  return c.mark === '❓' && m && m[1] < hoje();
+};
 
 // ---- a coluna da esquerda: o documento como voce o chancelou -------------------
 class Baseline {
@@ -48,7 +66,7 @@ class Baseline {
     const dir = raizDe(arquivo);
     if (!dir) return '# km\n\nArquivo fora do workspace.';
     try { return km(['baseline', arquivo], dir); }
-    catch (e) { return '# km\n\nNao consegui montar a baseline:\n\n' + e.message; }
+    catch (e) { return '# km\n\nNao consegui ler a chancela:\n\n' + e.message; }
   }
 }
 
@@ -59,24 +77,22 @@ class Aviso {
     this.onDidChangeCodeLenses = this.mudou.event;
   }
   provideCodeLenses(doc) {
-    const bs = blocos(doc);
-    if (!bs.length) return [];
-    const m = bs.filter(b => mexido(b.state)).length;
-    const nunca = bs.filter(b => chave(b.state) === 'nao revisado').length;
+    const ts = trechos(doc);
+    if (!ts.length) return [];
     const faixa = new vscode.Range(0, 0, 0, 0);
-    if (!m && !nunca) {
-      return [new vscode.CodeLens(faixa,
-        { title: 'km · ' + bs.length + ' blocos, todos com a sua chancela', command: 'km.review' })];
-    }
+    const m = ts.filter(t => t.state === 'mexido').length;
+    const nunca = ts.filter(t => t.state === 'sem chancela').length;
     const partes = [];
     if (m) partes.push(m + ' mexidos desde a sua chancela');
-    if (nunca) partes.push(nunca + ' nunca revisados');
-    return [new vscode.CodeLens(faixa,
-      { title: 'km · ' + partes.join(' · ') + ' — revisar', command: 'km.review' })];
+    if (nunca) partes.push(nunca + ' sem chancela');
+    const titulo = partes.length
+      ? 'km · ' + partes.join(' · ') + ' — revisar'
+      : 'km · ' + ts.length + ' trechos, todos com a sua chancela';
+    return [new vscode.CodeLens(faixa, { title: titulo, command: 'km.review' })];
   }
 }
 
-// ---- a fronteira de bloco, desenhada sem tocar no texto ------------------------
+// ---- as marcas, desenhadas sem tocar no texto ----------------------------------
 const fronteira = vscode.window.createTextEditorDecorationType({
   isWholeLine: true,
   borderWidth: '1px 0 0 0', borderStyle: 'dashed',
@@ -88,53 +104,44 @@ for (const estado of Object.keys(CORES)) {
     isWholeLine: true, overviewRulerColor: CORES[estado],
     overviewRulerLane: vscode.OverviewRulerLane.Right,
     borderWidth: '0 0 0 2px', borderStyle: 'solid', borderColor: CORES[estado],
+    after: estado === 'mexido'
+      ? { contentText: '   mexido depois da sua chancela', color: '#94600F', fontStyle: 'italic' }
+      : undefined,
   });
 }
-const mexidoDeco = vscode.window.createTextEditorDecorationType({
-  isWholeLine: true, overviewRulerColor: '#E3B665',
+const bloqueado = vscode.window.createTextEditorDecorationType({
+  isWholeLine: true, overviewRulerColor: '#8B4E4E',
   overviewRulerLane: vscode.OverviewRulerLane.Right,
-  borderWidth: '0 0 0 2px', borderStyle: 'solid', borderColor: '#E3B665',
-  after: { contentText: '   mexido depois da sua chancela', color: '#94600F', fontStyle: 'italic' },
+  borderWidth: '0 0 0 2px', borderStyle: 'solid', borderColor: '#8B4E4E',
+  after: { contentText: '   bloqueado por 🚫', color: '#8B4E4E', fontStyle: 'italic' },
 });
 
 function pintar(editor) {
   if (!editor || editor.document.languageId !== 'markdown') return;
-  const bs = blocos(editor.document);
-  const linhas = [], porCor = {}, mex = [];
-  for (const b of bs) {
-    const l = Math.max(0, b.line - 1);
+  const ts = trechos(editor.document);
+  const linhas = [], porCor = {}, travados = [];
+  for (const t of ts) {
+    const l = Math.max(0, t.line - 1);
     const faixa = new vscode.Range(l, 0, l, 0);
     linhas.push(faixa);
-    if (mexido(b.state)) mex.push(faixa);
-    else {
-      const k = chave(b.state);
-      (porCor[k] = porCor[k] || []).push(faixa);
-    }
+    if (t.blocked) travados.push(faixa);
+    else (porCor[t.state] = porCor[t.state] || []).push(faixa);
   }
   editor.setDecorations(fronteira, linhas);
-  editor.setDecorations(mexidoDeco, mex);
+  editor.setDecorations(bloqueado, travados);
   for (const estado of Object.keys(CORES)) {
     editor.setDecorations(porEstado[estado], porCor[estado] || []);
   }
 }
 
-// ---- as conversas -------------------------------------------------------------
-// Uma thread so aparece onde ha algo a dizer: nota escrita, reprovacao ou pergunta
-// em aberto. Bloco apenas mexido ja tem a marca na margem; virar thread seria ruido.
+// ---- as conversas: o que esta escrito no texto, lido como conversa -------------
+// Nada aqui e armazenado. Uma thread e a projecao das ressalvas do proprio arquivo,
+// e responder a ela escreve mais uma ressalva no arquivo, no formato combinado.
 let conversas = null;
 const abertas = new Map();
 
-function precisaDeThread(b) {
-  const notas = b.notes || [];
-  return notas.length > 0 || b.state === 'reprovado' || b.state === 'a-validar';
-}
-
-function rotulo(b) {
-  if (b.state === 'a-validar') {
-    return 'a validar' + (b.due ? ' ate ' + b.due : '') + (b.at ? ' · desde ' + b.at : '');
-  }
-  if (mexido(b.state)) return b.state + (b.at ? ' em ' + b.at : '');
-  return b.state + (b.at ? ' · ' + b.at : '');
+function precisaDeThread(t) {
+  return (t.caveats || []).length > 0 || (t.dropped || []).length > 0 || !!t.blocked;
 }
 
 function montarThreads(doc) {
@@ -143,55 +150,116 @@ function montarThreads(doc) {
   (abertas.get(chaveDoc) || []).forEach(t => t.dispose());
   abertas.set(chaveDoc, []);
 
-  for (const b of blocos(doc)) {
-    if (!precisaDeThread(b)) continue;
-    const l = Math.max(0, b.line - 1);
+  for (const t of trechos(doc)) {
+    if (!precisaDeThread(t)) continue;
     const comentarios = [];
-    if (b.state === 'a-validar' && b.validate) {
+    for (const c of (t.caveats || [])) {
+      const corpo = c.text.replace(/^\s*>\s*/, '');
       comentarios.push({
-        author: { name: 'a validar' },
-        body: new vscode.MarkdownString('**' + b.validate + '**'
-          + (b.due ? '\n\nate ' + b.due : '')),
+        author: { name: MARCAS[c.mark] ? MARCAS[c.mark].rotulo : c.mark },
+        body: new vscode.MarkdownString(vencida(c) ? corpo + '\n\n**prazo vencido**' : corpo),
         mode: vscode.CommentMode.Preview,
       });
     }
-    for (const n of (b.notes || [])) {
+    for (const d of (t.dropped || [])) {
       comentarios.push({
-        author: { name: n.by ? n.by.replace('human:', '') : 'voce' },
-        body: new vscode.MarkdownString(n.text),
+        author: { name: 'ressalva removida' },
+        body: new vscode.MarkdownString(
+          'Esta ressalva estava na chancela e sumiu nesta versão:\n\n' + d
+          + '\n\nAprovar aqui aprova também a remoção dela.'),
         mode: vscode.CommentMode.Preview,
-        label: n.at,
       });
     }
-    const t = conversas.createCommentThread(doc.uri, new vscode.Range(l, 0, l, 0), comentarios);
-    t.label = b.heading + '  ·  ' + rotulo(b);
-    t.contextValue = b.state;
-    const resolvida = b.state === 'aprovado' || b.state === 'aceite';
-    t.state = resolvida ? vscode.CommentThreadState.Resolved : vscode.CommentThreadState.Unresolved;
-    t.collapsibleState = (b.state === 'reprovado' || b.state === 'a-validar')
-      ? vscode.CommentThreadCollapsibleState.Expanded
-      : vscode.CommentThreadCollapsibleState.Collapsed;
-    abertas.get(chaveDoc).push(t);
+    const l = Math.max(0, t.line - 1);
+    const thread = conversas.createCommentThread(doc.uri, new vscode.Range(l, 0, l, 0), comentarios);
+    thread.label = t.heading + '  ·  ' + t.state;
+    thread.contextValue = t.state;
+    const resolvida = t.state === 'com chancela' && !t.blocked && !(t.dropped || []).length;
+    thread.state = resolvida
+      ? vscode.CommentThreadState.Resolved : vscode.CommentThreadState.Unresolved;
+    thread.collapsibleState = resolvida
+      ? vscode.CommentThreadCollapsibleState.Collapsed
+      : vscode.CommentThreadCollapsibleState.Expanded;
+    abertas.get(chaveDoc).push(thread);
   }
 }
 
-function blocoDaThread(thread) {
-  const doc = vscode.workspace.textDocuments.find(d => d.uri.toString() === thread.uri.toString());
-  if (!doc) return null;
-  const linha = thread.range.start.line + 1;
-  return blocos(doc).slice().reverse().find(b => b.line <= linha) || null;
+function docDa(uri) {
+  return vscode.workspace.textDocuments.find(d => d.uri.toString() === uri.toString());
 }
 
-function rodarNoBloco(thread, args, msg) {
-  const b = blocoDaThread(thread);
-  if (!b) { vscode.window.showWarningMessage('km: bloco nao encontrado'); return; }
-  const doc = vscode.workspace.textDocuments.find(d => d.uri.toString() === thread.uri.toString());
+function trechoDaLinha(doc, linha) {
+  return trechos(doc).slice().reverse().find(t => t.line <= linha) || null;
+}
+
+function trechoDaThread(thread) {
+  const doc = docDa(thread.uri);
+  return doc ? trechoDaLinha(doc, thread.range.start.line + 1) : null;
+}
+
+// ---- escrever a ressalva no proprio texto, no formato combinado ----------------
+async function inserirMarca(doc, trecho, marca, texto, prazo) {
+  const modelo = MARCAS[marca];
+  if (!modelo) return false;
+  let linha = modelo.modelo.replace('DATA', prazo || emDias(14)) + texto;
+  const alvo = Math.max(0, trecho.line - 1);
+  const abaixoDoTitulo = /^#{1,6}\s/.test(doc.lineAt(alvo).text) ? alvo + 1 : alvo;
+  const edit = new vscode.WorkspaceEdit();
+  edit.insert(doc.uri, new vscode.Position(abaixoDoTitulo, 0), '\n' + linha + '\n');
+  await vscode.workspace.applyEdit(edit);
+  await doc.save();
+  return true;
+}
+
+async function comentar(doc, trecho, marca) {
+  const texto = await vscode.window.showInputBox({
+    title: trecho.heading + ' — ' + MARCAS[marca].rotulo,
+    prompt: 'Vai para o texto, como citação. Quem abrir o arquivo vê.',
+  });
+  if (!texto) return false;
+  let prazo;
+  if (marca === '❓') {
+    prazo = await vscode.window.showInputBox({
+      title: 'A confirmar até quando?', value: emDias(14),
+      validateInput: (v) => /^\d{4}-\d{2}-\d{2}$/.test(v) ? null : 'AAAA-MM-DD',
+    });
+    if (!prazo) return false;
+  }
+  return inserirMarca(doc, trecho, marca, texto, prazo);
+}
+
+// ---- os tres veredictos --------------------------------------------------------
+async function aprovar(doc, trecho, extra) {
+  const args = ['chancela', trecho.file, '--hunk', trecho.heading];
+  if (extra) args.push('-m', extra);
   try {
-    km(['vouch', b.file, '--block', b.heading].concat(args), raiz(doc));
-    if (msg) vscode.window.showInformationMessage('km: ' + b.heading + ' → ' + msg);
-    thread.dispose();
+    km(args, raiz(doc));
+    vscode.window.showInformationMessage('km: ' + trecho.heading + ' → na chancela');
     atualizar(doc);
-  } catch (err) { vscode.window.showErrorMessage('km: ' + err.message); }
+    return true;
+  } catch (e) {
+    vscode.window.showErrorMessage('km: ' + (e.stdout || e.message));
+    return false;
+  }
+}
+
+async function aValidar(doc, trecho) {
+  if (!(await comentar(doc, trecho, '❓'))) return;
+  const novo = trechoDaLinha(doc, trecho.line) || trecho;
+  await aprovar(doc, novo, 'a validar, com prazo no texto');
+}
+
+async function reverter(doc, trecho) {
+  const motivo = await vscode.window.showInputBox({
+    title: trecho.heading + ' — reverter', prompt: 'Por que a mudança não serve?' });
+  if (motivo === undefined) return;
+  try {
+    km(['restore', trecho.file, '--hunk', trecho.heading, '-m', motivo || 'sem motivo'],
+      raiz(doc));
+    vscode.window.showInformationMessage(
+      'km: ' + trecho.heading + ' voltou ao texto chancelado. O motivo vai no commit.');
+    atualizar(doc);
+  } catch (e) { vscode.window.showErrorMessage('km: ' + (e.stdout || e.message)); }
 }
 
 function atualizar(doc) {
@@ -204,124 +272,103 @@ function atualizar(doc) {
   if (raiz(doc)) baseline.invalidar(rel(doc));
 }
 
-// ---- dar status ao bloco sob o cursor -----------------------------------------
+// ---- o painel de problemas e a barra -------------------------------------------
 const avisos = new Aviso();
 const baseline = new Baseline();
 const problemas = vscode.languages.createDiagnosticCollection('km');
 const barra = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
 barra.command = 'km.review';
 
-const GRAVIDADE = {
-  'reprovado': vscode.DiagnosticSeverity.Warning,
-  'a-validar': vscode.DiagnosticSeverity.Information,
-  'nao revisado': vscode.DiagnosticSeverity.Information,
-};
-
 function marcarProblemas(doc) {
   if (!doc || doc.languageId !== 'markdown' || !raiz(doc)) return;
-  const bs = blocos(doc);
+  const ts = trechos(doc);
   const achados = [];
-  let mexidos = 0, pendentes = 0;
-  for (const b of bs) {
-    const l = Math.max(0, b.line - 1);
-    const faixa = new vscode.Range(l, 0, l, Math.max(1, b.heading.length + 2));
-    if (mexido(b.state)) {
-      mexidos += 1;
-      achados.push(new vscode.Diagnostic(faixa,
-        b.heading + ' — ' + b.state, vscode.DiagnosticSeverity.Warning));
-    } else if (GRAVIDADE[chave(b.state)] !== undefined) {
-      pendentes += 1;
-      const extra = b.validate ? ' — ' + b.validate + (b.due ? ' (ate ' + b.due + ')' : '') : '';
-      achados.push(new vscode.Diagnostic(faixa,
-        b.heading + ' — ' + b.state + extra, GRAVIDADE[chave(b.state)]));
+  let mexidos = 0, semChancela = 0;
+  for (const t of ts) {
+    const l = Math.max(0, t.line - 1);
+    const faixa = new vscode.Range(l, 0, l, Math.max(1, t.heading.length + 2));
+    const põe = (msg, sev) => achados.push(new vscode.Diagnostic(faixa, msg, sev));
+    if (t.state === 'mexido') { mexidos += 1; põe(t.heading + ' — mexido desde a sua chancela', vscode.DiagnosticSeverity.Warning); }
+    else if (t.state === 'sem chancela') { semChancela += 1; põe(t.heading + ' — nunca teve chancela', vscode.DiagnosticSeverity.Information); }
+    if (t.blocked) põe(t.heading + ' — 🚫 ' + t.blocked.replace(/^\s*>\s*/, ''), vscode.DiagnosticSeverity.Warning);
+    for (const c of (t.caveats || [])) {
+      if (vencida(c)) põe(t.heading + ' — ❓ prazo vencido: ' + c.text.replace(/^\s*>\s*/, ''), vscode.DiagnosticSeverity.Warning);
+    }
+    for (const d of (t.dropped || [])) {
+      põe(t.heading + ' — ressalva removida nesta versão: ' + d, vscode.DiagnosticSeverity.Warning);
     }
   }
   for (const d of achados) d.source = 'km';
   problemas.set(doc.uri, achados);
 
-  const comChancela = bs.length - mexidos - pendentes;
-  barra.text = mexidos || pendentes
-    ? '$(alert) km ' + comChancela + '/' + bs.length
-    : '$(check) km ' + bs.length;
-  barra.tooltip = mexidos + ' mexidos desde a sua chancela, ' + pendentes + ' pendentes';
+  const comChancela = ts.length - mexidos - semChancela;
+  barra.text = (mexidos || semChancela)
+    ? '$(alert) km ' + comChancela + '/' + ts.length
+    : '$(check) km ' + ts.length;
+  barra.tooltip = mexidos + ' mexidos desde a sua chancela, ' + semChancela + ' sem chancela';
   barra.show();
 }
 
-async function vouch() {
+// ---- o menu do trecho sob o cursor ---------------------------------------------
+async function veredicto() {
   const ed = vscode.window.activeTextEditor;
   if (!ed) return;
-  const bs = blocos(ed.document);
-  const linha = ed.selection.active.line + 1;
-  const alvo = bs.slice().reverse().find(b => b.line <= linha);
-  if (!alvo) { vscode.window.showWarningMessage('km: nenhum bloco aqui'); return; }
+  const alvo = trechoDaLinha(ed.document, ed.selection.active.line + 1);
+  if (!alvo) { vscode.window.showWarningMessage('km: nenhum trecho aqui'); return; }
   const escolha = await vscode.window.showQuickPick([
-    { label: 'aprovado', detail: 'li e endosso' },
-    { label: 'aceite', detail: 'passei o olho; expira em 14 dias' },
-    { label: 'a-validar', detail: 'depende de alguem de fora' },
-    { label: 'reprovado', detail: 'esta errado; a nota e a instrucao' },
+    { label: 'aprovar', detail: 'entra na chancela como está' },
+    { label: 'a validar', detail: 'entra na chancela com um ❓ e um prazo, no texto' },
+    { label: 'reverter', detail: 'volta ao texto que você chancelou' },
+    { label: 'ressalva ⚠️', detail: 'escreve a dúvida no texto, sem travar nada' },
+    { label: 'discordo 🚫', detail: 'escreve no texto e bloqueia a chancela deste trecho' },
   ], { title: alvo.heading + ' — hoje: ' + alvo.state });
   if (!escolha) return;
-  const args = ['vouch', alvo.file, '--block', alvo.heading, '--state', escolha.label];
-  if (escolha.label === 'reprovado' || escolha.label === 'a-validar') {
-    const nota = await vscode.window.showInputBox({
-      title: escolha.label === 'reprovado' ? 'O que esta errado?' : 'O que confirmaria isso?' });
-    if (nota) args.push(escolha.label === 'reprovado' ? '--note' : '--validate', nota);
-  }
-  try {
-    km(args, raiz(ed.document));
-    vscode.window.showInformationMessage('km: ' + alvo.heading + ' → ' + escolha.label);
-    atualizar(ed.document);
-  } catch (e) { vscode.window.showErrorMessage('km: ' + e.message); }
+  if (escolha.label === 'aprovar') return void aprovar(ed.document, alvo);
+  if (escolha.label === 'a validar') return void aValidar(ed.document, alvo);
+  if (escolha.label === 'reverter') return void reverter(ed.document, alvo);
+  const marca = escolha.label.endsWith('🚫') ? '🚫' : '⚠️';
+  if (await comentar(ed.document, alvo, marca)) atualizar(ed.document);
+}
+
+function naThread(thread, fn) {
+  const t = trechoDaThread(thread);
+  const doc = docDa(thread.uri);
+  if (!t || !doc) { vscode.window.showWarningMessage('km: trecho não encontrado'); return; }
+  thread.dispose();          // a interface criou esta; quem redesenha somos nos
+  fn(doc, t);
 }
 
 function activate(ctx) {
   conversas = vscode.comments.createCommentController('km', 'km · chancela');
-  // O '+' so aparece onde comeca um bloco: comentar linha solta criaria conversa
-  // presa a um ponto que o proximo agente reescreve sem saber que ela existia.
+  // O '+' aparece em qualquer linha do trecho: a ressalva e do trecho, nao da linha.
   conversas.commentingRangeProvider = {
     provideCommentingRanges(doc) {
       if (doc.languageId !== 'markdown' || !raiz(doc)) return [];
-      return blocos(doc).map(function (b) {
-        const ini = Math.max(0, b.line - 1);
-        const fim = Math.max(ini, ini + b.lines - 1);
-        return new vscode.Range(ini, 0, fim, 0);   // hover em qualquer linha do bloco
+      return trechos(doc).map(function (t) {
+        const ini = Math.max(0, t.line - 1);
+        return new vscode.Range(ini, 0, Math.max(ini, ini + t.lines - 1), 0);
       });
     },
   };
 
   ctx.subscriptions.push(
     conversas,
-    vscode.commands.registerCommand('km.reply', (reply) => {
-      const b = blocoDaThread(reply.thread);
-      const doc = vscode.workspace.textDocuments.find(
-        d => d.uri.toString() === reply.thread.uri.toString());
-      if (!b || !reply.text) return;
-      try {
-        km(['note', b.file, '--block', b.heading, reply.text], raiz(doc));
-        reply.thread.dispose();   // a interface criou esta; quem redesenha somos nos
-        atualizar(doc);
-      } catch (err) { vscode.window.showErrorMessage('km: ' + err.message); }
+    // Responder a uma conversa escreve uma ressalva no texto, no formato combinado:
+    // e por isso que a UI existe — para que a convencao seja a saida natural.
+    vscode.commands.registerCommand('km.reply', async (reply) => {
+      const t = trechoDaThread(reply.thread);
+      const doc = docDa(reply.thread.uri);
+      if (!t || !doc || !reply.text) return;
+      reply.thread.dispose();
+      await inserirMarca(doc, t, '⚠️', reply.text);
+      atualizar(doc);
     }),
-    vscode.commands.registerCommand('km.aprovarThread',
-      (t) => rodarNoBloco(t, ['--state', 'aprovado'], 'aprovado')),
-    vscode.commands.registerCommand('km.reprovarThread', async (t) => {
-      const nota = await vscode.window.showInputBox({ title: 'O que esta errado?' });
-      if (nota !== undefined) {
-        rodarNoBloco(t, ['--state', 'reprovado'].concat(nota ? ['--note', nota] : []), 'reprovado');
-      }
-    }),
-    vscode.commands.registerCommand('km.validarThread', async (t) => {
-      const q = await vscode.window.showInputBox({ title: 'O que confirmaria isso?' });
-      if (q === undefined) return;
-      const prazo = await vscode.window.showInputBox({
-        title: 'Ate quando? (AAAA-MM-DD, vazio = sem prazo)' });
-      const extra = ['--state', 'a-validar'].concat(q ? ['--validate', q] : [])
-        .concat(prazo ? ['--due', prazo] : []);
-      rodarNoBloco(t, extra, 'a validar');
-    }),
+    vscode.commands.registerCommand('km.aprovarThread', (t) => naThread(t, aprovar)),
+    vscode.commands.registerCommand('km.validarThread', (t) => naThread(t, aValidar)),
+    vscode.commands.registerCommand('km.reverterThread', (t) => naThread(t, reverter)),
     vscode.workspace.registerTextDocumentContentProvider(SCHEME, baseline),
     vscode.languages.registerCodeLensProvider({ language: 'markdown' }, avisos),
-    vscode.commands.registerCommand('km.vouch', vouch),
+    vscode.commands.registerCommand('km.veredicto', veredicto),
     vscode.commands.registerCommand('km.review', async () => {
       const ed = vscode.window.activeTextEditor;
       if (!ed) return;
@@ -329,6 +376,19 @@ function activate(ctx) {
       const esq = vscode.Uri.parse(SCHEME + ':' + arquivo).with({ query: arquivo });
       await vscode.commands.executeCommand('vscode.diff', esq, ed.document.uri,
         path.basename(arquivo) + ' · chancela ↔ agora');
+    }),
+    vscode.commands.registerCommand('km.chancelarArquivo', async () => {
+      const ed = vscode.window.activeTextEditor;
+      if (!ed) return;
+      const motivo = await vscode.window.showInputBox({
+        title: 'Chancelar o arquivo inteiro', prompt: 'Por que você endossa? (vai no commit da chancela)' });
+      if (motivo === undefined) return;
+      try {
+        km(['chancela', rel(ed.document), '--all'].concat(motivo ? ['-m', motivo] : []),
+          raiz(ed.document));
+        atualizar(ed.document);
+        vscode.window.showInformationMessage('km: arquivo inteiro na chancela');
+      } catch (e) { vscode.window.showErrorMessage('km: ' + (e.stdout || e.message)); }
     }),
     problemas, barra,
     vscode.window.onDidChangeActiveTextEditor(function (ed) {

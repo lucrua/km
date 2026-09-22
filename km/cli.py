@@ -10,7 +10,7 @@ from collections import Counter
 from datetime import date
 from pathlib import Path
 
-from . import blocks as blk
+from . import chancela as ch
 from . import core
 
 MARK = {
@@ -65,6 +65,23 @@ def cmd_scan(args) -> int:
 
 def cmd_status(args) -> int:
     root = _root(args)
+
+    if getattr(args, "short", False):
+        # The one line printed after every commit. It is about the chancel, because that is
+        # what review means now; the claim queue keeps its own commands. The only thing
+        # borrowed from there is a clash with something already approved, which is the one
+        # finding you cannot see by reading the diff — and the documents are only parsed
+        # when there is a clash recorded, so the hook stays under a second.
+        linha = _resumo_chancela(root)
+        conflicts = core.KeyedLog(root, core.CONFLICTS)
+        if conflicts.records:
+            live = {c.key for c in _scan(root)[1]}
+            abertos = sum(1 for r in conflicts.records.values() if r.get("claim") in live)
+            if abertos:
+                linha += f" · ⚠ {abertos} conflitam com algo aprovado"
+        print(linha)
+        return 0
+
     config, claims = _scan(root)
     store = core.Store(root)
     counts: Counter[str] = Counter()
@@ -73,38 +90,6 @@ def cmd_status(args) -> int:
         s = "question" if c.is_question else core.status_of(c, store)
         counts[s] += 1
         per_file.setdefault(c.file, Counter())[s] += 1
-
-    if getattr(args, "short", False):
-        # The one line printed after every commit. It has to agree with `km list`, so it is
-        # built from the same queue — triage, ignored and deferrals included.
-        deferrals = core.KeyedLog(root, core.DEFERRALS)
-        ignored = core.KeyedLog(root, core.IGNORED)
-        triage = core.KeyedLog(root, core.TRIAGE)
-        conflicts = core.KeyedLog(root, core.CONFLICTS)
-        queue = core.build_queue(claims, store, config, {"proposed", "changed", "expired"},
-                                 deferrals, ignored=ignored, triage=triage)
-        norms = [c for c in claims
-                 if not c.is_question and c.key not in ignored.records
-                 and (triage.records.get(c.key, {}).get("kind", "norma") == "norma"
-                      or triage.records.get(c.key, {}).get("text_hash") != c.text_hash)]
-        approved = sum(1 for c in norms
-                       if core.status_of(c, store) in ("approved", "to-validate"))
-        live = {c.key for c in claims}
-        open_conflicts = sum(1 for r in conflicts.records.values() if r.get("claim") in live)
-        sampled = sum(1 for row in queue if row.sampled)
-        bits = [f"km: {approved}/{len(norms)} normas aprovadas", f"{len(queue)} na fila"]
-        if sampled:
-            # Otherwise the two numbers read as a contradiction on the line seen after
-            # every commit, and a number nobody trusts is worse than no number.
-            bits.append(f"{sampled} são amostras da triagem")
-        if counts["changed"]:
-            bits.append(f"{counts['changed']} mexidas depois de aprovadas")
-        if counts["expired"]:
-            bits.append(f"{counts['expired']} com prazo vencido")
-        if open_conflicts:
-            bits.append(f"⚠ {open_conflicts} conflitam com algo aprovado")
-        print(" · ".join(bits))
-        return 0
 
     width = max((len(f) for f in per_file), default=10)
     print(f"{'document'.ljust(width)}  appr  valid  chgd  prop  ques")
@@ -418,176 +403,243 @@ exit 0
 
 
 def _tracked_files(root: Path, arg: str | None) -> list[str]:
+    """Which files the chancel covers: the documents `km` already tracks, plus anything
+    that has a chancel and is no longer on disk."""
     if arg:
         return [arg]
-    config, claims = _scan(root)
-    return sorted({c.file for c in claims})
+    config = core.load_config(root)
+    vivos = [p.relative_to(root).as_posix() for p in core.documents(root, config)]
+    return sorted(set(vivos) | set(ch.arquivos(root)))
 
 
-def _block_by_ref(root: Path, rel: str, ref: str) -> blk.Block:
-    """`--block` takes the number printed by `km blocks`, or part of the heading."""
-    live = blk.of_file(root, rel)
+def _hunk_por_ref(root: Path, rel: str, ref: str, hs: list[ch.Hunk]) -> ch.Hunk:
+    """`--hunk` takes the number printed by `km pendente`, or part of the heading."""
     if ref.isdigit():
-        path = Path(root / core.KM_DIR / "last-blocks.json")
-        if not path.exists():
-            raise SystemExit("rode `km blocks` antes de usar número")
-        listagem = json.loads(path.read_text(encoding="utf-8"))
-        i = int(ref)
-        if not 1 <= i <= len(listagem):
-            raise SystemExit(f"fora da faixa: 1..{len(listagem)}")
-        chave = listagem[i - 1]
-        for b in live:
-            if b.key == chave:
-                return b
-        raise SystemExit("esse bloco já não está no arquivo — rode `km blocks` de novo")
+        n = int(ref)
+        for h in hs:
+            if h.n == n:
+                return h
+        raise SystemExit(f"{rel}: não há trecho {n} — rode `km pendente {rel}`")
+
+    import unicodedata
+
     def sem_acento(t: str) -> str:
-        import unicodedata
-        return "".join(ch for ch in unicodedata.normalize("NFD", t.lower())
-                       if unicodedata.category(ch) != "Mn")
+        return "".join(c for c in unicodedata.normalize("NFD", t.lower())
+                       if unicodedata.category(c) != "Mn")
 
     alvo = sem_acento(ref)
-    achados = [b for b in live if alvo in sem_acento(b.heading)]
-    if len(achados) != 1:
-        raise SystemExit(f"{len(achados)} blocos casam com {ref!r}; seja mais específico")
+    achados = [h for h in hs if alvo in sem_acento(h.titulo)]
+    if not achados:
+        raise SystemExit(f"{rel}: nenhuma mudança pendente em um título com {ref!r}")
     return achados[0]
 
 
-def cmd_vouch(args) -> int:
-    """Seed the truth from a review that already happened, at the commit where it happened."""
-    root = _root(args)
-    ledger = blk.Ledger(root)
+def _resumo_chancela(root: Path) -> str:
+    """One line: what the chancel covers, what moved, what it never saw."""
+    if not (root / ".git").exists():
+        return "km: fora de um repositório git — a chancela é um ref"
+    situacoes = [ch.situacao(root, rel) for rel in _tracked_files(root, None)]
+    em_dia = sum(1 for s in situacoes if s.em_dia)
+    mexidos = sum(len(s.hunks) for s in situacoes if s.tem_chancela)
+    nunca = sum(1 for s in situacoes if not s.tem_chancela)
+    vencidas = sum(len(s.vencidas) for s in situacoes)
+    bits = [f"km: {em_dia} arquivos em dia com a chancela"]
+    if mexidos:
+        bits.append(f"{mexidos} trechos mexidos")
+    if nunca:
+        bits.append(f"{nunca} sem chancela")
+    if vencidas:
+        bits.append(f"❓ {vencidas} com prazo vencido")
+    return " · ".join(bits)
 
-    if args.block:
-        b = _block_by_ref(root, args.file, args.block)
-        antes = ledger.status_of(b)
-        ledger.vouch(b, state=args.state, by=args.by, note=args.note,
-                     validate=args.validate, due=args.due)
-        ledger.save()
-        print(f"{b.heading}  ·  {antes} → {args.state}")
-        if args.note:
-            print(f"   nota: {args.note}")
-        restantes = [x for x in blk.of_file(root, args.file)
-                     if ledger.status_of(x) not in ("aprovado", "aceite")]
-        print(f"faltam {len(restantes)} blocos neste arquivo")
+
+def cmd_pendente(args) -> int:
+    """The two questions: what changed since the chancel, and what never had one."""
+    root = _root(args)
+    hoje = date.today().isoformat()
+    situacoes = [ch.situacao(root, rel, hoje) for rel in _tracked_files(root, args.file)]
+
+    if args.json:
+        print(json.dumps([e for s in situacoes for e in ch.estados(s)], ensure_ascii=False))
         return 0
 
-    found = blk.of_file(root, args.file, args.source)
-    if not found:
-        raise SystemExit(f"{args.file} não existe em {args.source or 'disco'}")
-    for b in found:
-        ledger.vouch(b, state=args.state, by=args.by, note=args.note, source=args.source)
-    ledger.save()
-    print(f"{len(found)} blocos de {args.file} marcados como {args.state}"
-          + (f", no conteúdo de {args.source}" if args.source else ""))
-    live = blk.of_file(root, args.file)
-    mexidos = sum(1 for b in live if ledger.status_of(b).startswith("mexido"))
-    novos = sum(1 for b in live if ledger.status_of(b) == "não revisado")
-    print(f"no disco agora: {len(live)} blocos · {mexidos} mexidos desde então · {novos} novos")
+    sem_chancela = [s for s in situacoes if not s.tem_chancela]
+    mexidos = [s for s in situacoes if s.tem_chancela and s.hunks]
+    total = 0
+    for s in mexidos:
+        # The number is the hunk's own, inside its file: `km chancela <arquivo> --hunk 2`.
+        # A list numbered across files would need a sidecar to be resolved again, and a
+        # sidecar is what this design just removed.
+        print(f"\n{s.arquivo}")
+        for h in s.hunks:
+            total += 1
+            sinal = "🚫" if h.bloqueio else ("⚠️" if h.sumidas else "  ")
+            print(f"  {h.n:>3} {sinal} -{len(h.antes):<3} +{len(h.depois):<3}"
+                  f" {h.titulo[:40]:<40} {h.resumo(38)}")
+            for l in h.sumidas:
+                print(f"       ressalva removida: {l[:70]}")
+            if h.bloqueio:
+                print(f"       trecho bloqueado: {h.bloqueio[:70]}")
+
+    if sem_chancela:
+        print(f"\nsem chancela nenhuma ({len(sem_chancela)}):")
+        for s in sem_chancela[:args.limit]:
+            print(f"      {s.arquivo}  ·  {len(s.depois.splitlines())} linhas")
+        if len(sem_chancela) > args.limit:
+            print(f"      … e mais {len(sem_chancela) - args.limit}")
+
+    vencidas = [(s.arquivo, l, prazo, txt) for s in situacoes for l, prazo, txt in s.vencidas]
+    if vencidas:
+        print(f"\n❓ com prazo vencido ({len(vencidas)}):")
+        for arquivo, l, prazo, txt in vencidas[:args.limit]:
+            print(f"      {arquivo}:{l}  desde {prazo}  {txt[:60]}")
+
+    em_dia = sum(1 for s in situacoes if s.em_dia)
+    print(f"\n{total} trechos mexidos em {len(mexidos)} arquivos"
+          f" · {em_dia} arquivos em dia · {len(sem_chancela)} sem chancela")
+    if total:
+        print("chancelar: km chancela <arquivo> --hunk <n|título>   ·   tudo: --all")
     return 0
 
 
-def cmd_blocks(args) -> int:
+def cmd_chancela(args) -> int:
+    """Write the accepted passages into the ref. The act is per passage; the ref holds files."""
     root = _root(args)
-    ledger = blk.Ledger(root)
-
-    if args.json:
-        saida = []
-        for rel in _tracked_files(root, args.file):
-            for b in blk.of_file(root, rel):
-                rec = ledger.records.get(b.key, {})
-                saida.append({"file": b.file, "heading": b.heading, "path": b.path,
-                              "line": b.line, "lines": b.lines,
-                              "state": ledger.status_of(b), "at": rec.get("at"),
-                              "notes": rec.get("notes", []), "validate": rec.get("validate"),
-                              "due": rec.get("due"), "vouched": rec.get("body")})
-        print(json.dumps(saida, ensure_ascii=False))
+    rel = args.file
+    s = ch.situacao(root, rel)
+    if ch.atual(root, rel) is None:
+        raise SystemExit(f"{rel} não existe no disco")
+    if not s.hunks:
+        print(f"{rel}: nada pendente — a chancela já é o arquivo de hoje")
         return 0
-    total: Counter[str] = Counter()
-    todos: list[blk.Block] = []
-    listagem: list[str] = []
+
+    if args.all:
+        escolhidos = [h for h in s.hunks]
+    elif args.hunk:
+        escolhidos = [_hunk_por_ref(root, rel, r, s.hunks) for r in args.hunk]
+    else:
+        raise SystemExit("diga o que entra: --hunk <n|título> (um ou mais) ou --all")
+
+    barrados = [h for h in escolhidos if h.bloqueio and not args.force]
+    escolhidos = [h for h in escolhidos if h not in barrados]
+    if not escolhidos:
+        for h in barrados:
+            print(f"🚫 {h.titulo}: {h.bloqueio}")
+        raise SystemExit("nada entrou: resolva o 🚫 (ou --force, que o deixa no texto)")
+
+    novo = ch.aplicar(s.antes, s.depois, {h.n for h in escolhidos}, s.hunks)
+    titulos = ", ".join(dict.fromkeys(h.titulo for h in escolhidos))
+    corpo = args.message or ""
+    cabeca = (f"chancela: {rel} · {len(escolhidos)} trecho(s)"
+              if not args.all or len(escolhidos) != len(s.hunks)
+              else f"chancela: {rel} · arquivo inteiro")
+    mensagem = f"{cabeca}\n\n{titulos}\n"
+    if corpo:
+        mensagem += f"\n{corpo}\n"
+    mensagem += f"\npor: {args.by}\n"
+    commit = ch.escrever(root, {rel: novo}, mensagem)
+
+    print(f"{rel}  ·  {len(escolhidos)} trecho(s) na chancela  ·  {commit[:8]}")
+    for h in escolhidos:
+        print(f"   ✓ {h.titulo}")
+        for l in h.sumidas:
+            print(f"     (a ressalva {l[:56]} saiu junto)")
+    for h in barrados:
+        print(f"   🚫 {h.titulo} — ficou de fora: {h.bloqueio[:60]}")
+    resto = ch.situacao(root, rel).hunks
+    print(f"faltam {len(resto)} trecho(s) neste arquivo")
+    if resto:
+        # The numbers come from the diff, and the diff just moved. Acting on a number from
+        # the previous listing would chancel a passage you did not look at.
+        print("os números mudaram — rode `km pendente` de novo"
+              " (ou passe vários --hunk de uma vez)")
+    return 0
+
+
+def cmd_lint(args) -> int:
+    """Mechanical checks on the convention. No judgement, no model."""
+    root = _root(args)
+    hoje = date.today().isoformat()
+    achados = 0
     for rel in _tracked_files(root, args.file):
-        live = blk.of_file(root, rel)
-        if not live:
+        s = ch.situacao(root, rel, hoje)
+        texto = ch.atual(root, rel)
+        if texto is None:
+            print(f"{rel}: tem chancela e não está mais no disco")
+            achados += 1
             continue
-        todos.extend(live)
         linhas = []
-        for b in live:
-            st = ledger.status_of(b)
-            total[st] += 1
-            if args.changed and st in ("aprovado", "aceite"):
-                continue
-            listagem.append(f"{b.file}#{b.path}")
-            linhas.append(f"  {len(listagem):>3}  {st:<26} {b.lines:>3}l  {b.heading[:54]}")
+        for n, prazo, txt in s.vencidas:
+            linhas.append(f"  ❓ :{n} venceu em {prazo} — {txt[:60]}")
+        for _, marca, txt in ch.ressalvas(texto):
+            if marca == "🚫":
+                linhas.append(f"  🚫 bloqueia a chancela do trecho — {txt[:60]}")
+        for h in s.hunks:
+            for l in h.sumidas:
+                linhas.append(f"  ⚠️ ressalva removida em {h.titulo[:30]} — {l[:50]}")
         if linhas:
             print(f"\n{rel}")
             print("\n".join(linhas))
-    (root / core.KM_DIR / "last-blocks.json").write_text(
-        json.dumps(listagem, ensure_ascii=False), encoding="utf-8")
-    orfas = ledger.orphans(todos, files=set(_tracked_files(root, args.file)))
-    print("\n" + " · ".join(f"{n} {st}" for st, n in total.most_common()))
-    if orfas:
-        print(f"{len(orfas)} com chancela e sem bloco correspondente (órfãs):")
-        for r in orfas[:5]:
-            print(f"  {r['file']} › {r['path'][:60]}")
-    return 0
+            achados += len(linhas)
+    print(f"\n{achados} apontamento(s)")
+    return 1 if achados and args.strict else 0
 
 
 def cmd_restore(args) -> int:
+    """Put back the chancelled text of a passage — refusing a change and leaving it in
+    place would keep in the document exactly what you just rejected."""
     root = _root(args)
-    ledger = blk.Ledger(root)
-    b = _block_by_ref(root, args.file, args.block)
-    if not ledger.restore(root, b, args.note, by=args.by):
-        raise SystemExit("esse bloco nunca teve chancela — não há texto para devolver")
-    ledger.save()
-    print(f"{b.heading}  ·  texto devolvido ao que você tinha chancelado")
-    print(f"   motivo: {args.note}")
-    return 0
-
-
-def cmd_note(args) -> int:
-    """Add to the conversation on a block without changing its state."""
-    root = _root(args)
-    ledger = blk.Ledger(root)
-    b = _block_by_ref(root, args.file, args.block)
-    rec = ledger.note(b, args.text, by=args.by)
-    ledger.save()
-    print(f"{b.heading}  ·  {len(rec['notes'])} nota(s)  ·  estado: {rec['state']}")
+    rel = args.file
+    s = ch.situacao(root, rel)
+    if not s.tem_chancela:
+        raise SystemExit(f"{rel} nunca teve chancela — não há texto para devolver")
+    if not s.hunks:
+        print(f"{rel}: nada mudou desde a chancela")
+        return 0
+    alvos = ([h for h in s.hunks] if args.all
+             else [_hunk_por_ref(root, rel, r, s.hunks) for r in args.hunk])
+    if not alvos:
+        raise SystemExit("diga o que volta: --hunk <n|título> ou --all")
+    manter = {h.n for h in s.hunks} - {h.n for h in alvos}
+    (root / rel).write_text(ch.aplicar(s.antes, s.depois, manter, s.hunks), encoding="utf-8")
+    print(f"{rel}  ·  {len(alvos)} trecho(s) de volta ao texto chancelado")
+    for h in alvos:
+        print(f"   ↩ {h.titulo}")
+    if args.message:
+        print(f"   motivo: {args.message}  (escreva-o no commit, ou como ⚠️ no texto)")
     return 0
 
 
 def cmd_baseline(args) -> int:
-    print(blk.Ledger(_root(args)).vouched_file(_root(args), args.file), end="")
+    """The left-hand column: the document as you last endorsed it."""
+    texto = ch.chancelado(_root(args), args.file)
+    if texto is None:
+        print(f"<!-- km: {args.file} nunca teve chancela -->")
+        return 0
+    print(texto, end="")
     return 0
 
 
-def cmd_review(args) -> int:
-    """What changed since you vouched, block by block."""
-    import difflib
-
+def cmd_quando(args) -> int:
+    """When did this passage last have a chancel — the question blocks were storing for."""
     root = _root(args)
-    ledger = blk.Ledger(root)
-    vistos = 0
-    for rel in _tracked_files(root, args.file):
-        for b in blk.of_file(root, rel):
-            st = ledger.status_of(b)
-            if not st.startswith("mexido"):
-                continue
-            rec = ledger.records[b.key]
-            antes = blk.of_file(root, rel, rec.get("from") or "HEAD")
-            old = next((x for x in antes if x.key == b.key), None)
-            vistos += 1
-            print(f"\n── {rel} › {b.heading}  [{st}]")
-            if rec.get("note"):
-                print(f"   sua nota: {rec['note']}")
-            if old:
-                d = difflib.unified_diff(old.body.splitlines(), b.body.splitlines(),
-                                         lineterm="", n=args.context)
-                for line in list(d)[2:]:
-                    print("   " + line)
-            if vistos >= args.limit:
-                print(f"\n… parando em {args.limit}; use --limit para ver mais")
-                return 0
-    print(f"\n{vistos} blocos mexidos desde a sua chancela")
+    alvo = None
+    if args.trecho:
+        import unicodedata
+
+        def sem_acento(t: str) -> str:
+            return "".join(c for c in unicodedata.normalize("NFD", t.lower())
+                           if unicodedata.category(c) != "Mn")
+
+        base = ch.chancelado(root, args.file) or ch.atual(root, args.file) or ""
+        ref = sem_acento(args.trecho)
+        achados = [t for t in ch.trechos(base) if ref in sem_acento(t.titulo)]
+        if not achados:
+            raise SystemExit(f"nenhum trecho com {args.trecho!r} em {args.file}")
+        alvo = achados[0]
+        print(f"{args.file} › {alvo.titulo}")
+    saida = ch.historico(root, args.file, alvo, limite=args.limit).strip()
+    print(saida or "nunca teve chancela")
     return 0
 
 
@@ -657,46 +709,43 @@ def main(argv: list[str]) -> int:
                    help="report the state after each commit, so no command has to be remembered"
                    ).set_defaults(func=cmd_install_hooks)
 
-    s = sub.add_parser("vouch", help="record blocks of a file as vouched, as of a commit")
+    s = sub.add_parser("chancela", help="escrever os trechos aceitos na chancela (refs/km/chancela)", aliases=["chancel"])
     s.add_argument("file")
-    s.add_argument("--from", dest="source", help="commit whose content you reviewed")
-    s.add_argument("--block", help="número do `km blocks`, ou parte do título")
-    s.add_argument("--state", default="aprovado", choices=sorted(blk.STATES))
-    s.add_argument("--note")
-    s.add_argument("--validate", help="o que confirmaria (estado a-validar)")
-    s.add_argument("--due", help="até quando (AAAA-MM-DD)")
+    s.add_argument("--hunk", action="append", default=[],
+                   help="número do `km pendente`, ou parte do título; repetível")
+    s.add_argument("--all", action="store_true", help="o arquivo inteiro como está hoje")
+    s.add_argument("-m", "--message", help="por que você endossa (vai na mensagem do commit)")
+    s.add_argument("--force", action="store_true", help="chancelar mesmo com 🚫 no trecho")
     s.add_argument("--by", default="human:" + os.environ.get("USER", "unknown"))
-    s.set_defaults(func=cmd_vouch)
+    s.set_defaults(func=cmd_chancela)
 
-    s = sub.add_parser("blocks", help="status of every block against your chancel")
+    s = sub.add_parser("pendente", help="o que mudou desde a chancela, e o que nunca teve uma", aliases=["pending"])
     s.add_argument("file", nargs="?")
-    s.add_argument("--changed", action="store_true", help="hide what still stands")
-    s.add_argument("--json", action="store_true", help="for the editor extension")
-    s.set_defaults(func=cmd_blocks)
+    s.add_argument("--json", action="store_true", help="para o editor")
+    s.add_argument("--limit", type=int, default=12)
+    s.set_defaults(func=cmd_pendente)
 
-    s = sub.add_parser("restore", help="put back the text you had vouched for")
+    s = sub.add_parser("lint", help="a convenção das ressalvas: 🚫 pendente, ❓ vencida, ⚠️ sumida")
+    s.add_argument("file", nargs="?")
+    s.add_argument("--strict", action="store_true", help="sai com erro se houver apontamento")
+    s.set_defaults(func=cmd_lint)
+
+    s = sub.add_parser("restore", help="devolver ao texto que você chancelou")
     s.add_argument("file")
-    s.add_argument("--block", required=True)
-    s.add_argument("note", help="por que a mudança não serve")
-    s.add_argument("--by", default="human:" + os.environ.get("USER", "unknown"))
+    s.add_argument("--hunk", action="append", default=[])
+    s.add_argument("--all", action="store_true")
+    s.add_argument("-m", "--message", help="por que a mudança não serve")
     s.set_defaults(func=cmd_restore)
 
-    s = sub.add_parser("note", help="add a note to a block, leaving its state alone")
-    s.add_argument("file")
-    s.add_argument("--block", required=True, help="número do `km blocks`, ou parte do título")
-    s.add_argument("text")
-    s.add_argument("--by", default="human:" + os.environ.get("USER", "unknown"))
-    s.set_defaults(func=cmd_note)
-
-    s = sub.add_parser("baseline", help="the document as you last vouched it (for the left pane)")
+    s = sub.add_parser("baseline", help="o documento como você o chancelou (coluna da esquerda)")
     s.add_argument("file")
     s.set_defaults(func=cmd_baseline)
 
-    s = sub.add_parser("review", help="what changed since you vouched, block by block")
-    s.add_argument("file", nargs="?")
-    s.add_argument("--limit", type=int, default=8)
-    s.add_argument("--context", type=int, default=2)
-    s.set_defaults(func=cmd_review)
+    s = sub.add_parser("quando", help="quando este trecho teve chancela pela última vez", aliases=["when"])
+    s.add_argument("file")
+    s.add_argument("--trecho", help="parte do título")
+    s.add_argument("--limit", type=int, default=5)
+    s.set_defaults(func=cmd_quando)
 
     s = sub.add_parser("serve", help="review the queue in a local page, one claim at a time")
     s.add_argument("--port", type=int, default=8431)

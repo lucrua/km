@@ -17,7 +17,7 @@ from datetime import date
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
-from km import blocks as blk  # noqa: E402
+from km import chancela as ch  # noqa: E402
 from km import core  # noqa: E402
 
 PALAVRA = re.compile(r"\s+|\w+|[^\w\s]")
@@ -67,61 +67,97 @@ def diff_palavras(antes: str, agora: str) -> tuple[str, str]:
 
 def montar(root: Path, simular: bool = True) -> dict:
     cfg = core.load_config(root)
-    ledger = blk.Ledger(root)
-    arquivos = sorted({c.file for c in core.scan(root, cfg) if not c.is_question})
+    arquivos = sorted({p.relative_to(root).as_posix() for p in core.documents(root, cfg)}
+                      | set(ch.arquivos(root)))
+    hoje = date.today().isoformat()
     docs = []
     for rel in arquivos:
-        vivos = blk.of_file(root, rel)
-        if not vivos:
+        s = ch.situacao(root, rel, hoje)
+        if not s.depois.strip():
             continue
+        chancelados = {t.caminho: t for t in (ch.trechos(s.antes) if s.tem_chancela else [])}
         blocos = []
-        for b in vivos:
-            rec = ledger.records.get(b.key, {})
-            estado = ledger.status_of(b)
-            antes = rec.get("body")
-            esq = dir_ = None
-            inline, proporcao, mexidas = None, 0.0, 0
-            if antes is not None and rec.get("hash") != b.hash:
-                esq, dir_ = diff_palavras(antes, b.body)
-                inline, proporcao, mexidas = diff_inline(antes, b.body)
+        for e in ch.estados(s):
+            agora = next((x for x in ch.trechos(s.depois) if x.caminho == e["path"]), None)
+            antigo = chancelados.get(e["path"])
+            texto = _corpo(agora)
+            base = _corpo(antigo)
+            esq = dir_ = inline = None
+            proporcao, mexidas = 0.0, 0
+            if e["state"] == "mexido" and base:
+                esq, dir_ = diff_palavras(base, texto)
+                inline, proporcao, mexidas = diff_inline(base, texto)
             blocos.append({
-                "heading": b.heading, "line": b.line, "lines": b.lines,
-                "estado": estado, "base": rec.get("state"), "em": rec.get("at"),
-                "por": (rec.get("by") or "").replace("human:", ""),
-                "origem": rec.get("from"), "expira": rec.get("expires"),
-                "validar": rec.get("validate"), "prazo": rec.get("due"),
-                "notas": rec.get("notes", []),
-                "texto": b.body.strip(), "chancelado": (antes or "").strip(),
-                "esq": esq, "dir": dir_, "inline": inline, "proporcao": proporcao,
-                "simulado": False,
+                "heading": e["heading"], "line": e["line"], "lines": e["lines"],
+                "estado": e["state"], "bloqueado": e["blocked"],
+                "ressalvas": [{"mark": c["mark"],
+                               "text": c["text"].lstrip("> ").strip(),
+                               "vencida": c["mark"] == "❓" and _vencida(c["text"], hoje)}
+                              for c in e["caveats"]],
+                "sumidas": e["dropped"],
+                "texto": texto.strip(), "chancelado": base.strip(),
+                "esq": esq, "dir": dir_, "inline": inline,
+                "proporcao": proporcao, "mexidas": mexidas, "simulado": False,
             })
-        docs.append({"file": rel, "blocos": blocos,
-                     "rastreado": any(b["base"] for b in blocos),
-                     "linhas": sum(x["lines"] for x in blocos)})
+        docs.append({"file": rel, "blocos": blocos, "rastreado": s.tem_chancela,
+                     "em": _ultima_chancela(root, rel),
+                     "linhas": len(s.depois.splitlines())})
 
     docs.sort(key=lambda d: (not d["rastreado"], d["file"]))
+    if simular and docs:
+        _simular(docs)
+    return {"repo": root.name, "docs": docs, "hoje": hoje}
 
-    if simular:
-        alvo = next((d for d in docs if d["file"] == "regras-de-sla.md"), docs[0])
-        for i, (estado, extra) in enumerate((
-            ("mexido depois de aprovado", {}),
-            ("reprovado", {"notas": [{"at": date.today().isoformat(), "by": "lucas",
-                                      "text": "o Delta não é lido de chamado aberto; isto "
-                                              "contradiz a decisão 0001"}]}),
-            ("a-validar", {"validar": "confirmar o limite com o gestor do contrato",
-                           "prazo": "2026-10-15"}),
-        )):
-            b = dict(alvo["blocos"][i + 1])
-            b.update({"estado": estado, "simulado": True, "em": date.today().isoformat(),
-                      "por": "lucas", "notas": b.get("notas", [])})
-            b.update(extra)
-            if not b["esq"]:
-                velho = b["texto"].replace("chamado", "ticket", 3)
-                b["esq"], b["dir"] = diff_palavras(velho, b["texto"])
-                b["inline"], b["proporcao"], b["mexidas"] = diff_inline(velho, b["texto"])
-                b["chancelado"] = velho
-            alvo["blocos"].insert(i + 1, b)
-    return {"repo": root.name, "docs": docs, "hoje": date.today().isoformat()}
+
+def _corpo(trecho) -> str:
+    """The passage without its own heading — the heading is already the card's title."""
+    if trecho is None:
+        return ""
+    if trecho.titulo_bruto:
+        return trecho.texto.split("\n", 1)[1] if "\n" in trecho.texto else ""
+    return trecho.texto
+
+
+def _vencida(linha: str, hoje: str) -> bool:
+    m = re.search(r"(\d{4}-\d{2}-\d{2})", linha)
+    return bool(m and m.group(1) < hoje)
+
+
+def _ultima_chancela(root: Path, rel: str) -> str:
+    if not ch.existe(root):
+        return ""
+    saida = ch.historico(root, rel, None, limite=1).strip().splitlines()
+    return saida[0].split(" ")[1] if saida and len(saida[0].split(" ")) > 1 else ""
+
+
+def _simular(docs: list[dict]) -> None:
+    """Three cards the real data does not have today, so the shapes can be judged.
+
+    Marked `simulado` on screen: a mock that cannot be told from the truth is a lie.
+    """
+    alvo = next((d for d in docs if d["blocos"]), None)
+    if not alvo or len(alvo["blocos"]) < 3:
+        return
+    exemplos = [
+        ("mexido", {}, lambda txt: txt.replace("chamado", "ticket", 3)),
+        ("mexido", {"sumidas": ["> ⚠️ **sem certeza** — a ordem veio de um print, "
+                                "não do export."]},
+         lambda txt: "> ⚠️ **sem certeza** — a ordem veio de um print, não do export.\n\n" + txt),
+        ("com chancela", {"ressalvas": [{"mark": "❓", "vencida": True,
+                                         "text": "**a confirmar até 2026-09-15** — "
+                                                 "o limite do contrato, com quem assina"}]},
+         None),
+    ]
+    for i, (estado, extra, mexer) in enumerate(exemplos):
+        b = dict(alvo["blocos"][min(i + 1, len(alvo["blocos"]) - 1)])
+        b.update({"estado": estado, "simulado": True, "ressalvas": [], "sumidas": []})
+        b.update(extra)
+        if mexer:
+            velho = mexer(b["texto"])
+            b["chancelado"] = velho
+            b["esq"], b["dir"] = diff_palavras(velho, b["texto"])
+            b["inline"], b["proporcao"], b["mexidas"] = diff_inline(velho, b["texto"])
+        alvo["blocos"].insert(i + 1, b)
 
 
 PAGE = """<!doctype html><html lang="pt-br"><head><meta charset="utf-8">
@@ -202,7 +238,7 @@ max-height:calc(100vh - 53px);overflow:auto}
 .dl{display:grid;grid-template-columns:auto 1fr;gap:4px 10px;font-size:12.5px;margin-bottom:16px}
 .dl dt{color:var(--mut)}.dl dd{margin:0}
 .nota{border-left:3px solid var(--acc);padding:7px 10px;margin-bottom:8px;font-size:13px}
-.nota .q{color:var(--mut);font-size:11px;font-family:ui-monospace,Menlo,monospace}
+.q{color:var(--mut);font-size:11px;font-family:ui-monospace,Menlo,monospace}
 textarea{width:100%;min-height:62px;font:inherit;font-size:13px;padding:7px;border-radius:6px;
 border:1px solid var(--rule);background:var(--bg);color:var(--ink)}
 .vazio{color:var(--mut);font-size:13px;padding:20px 0}
@@ -217,9 +253,9 @@ border:1px solid var(--rule);background:var(--bg);color:var(--ink)}
 <section class="meio" id="meio"></section><aside class="dir" id="dir"></aside></div>
 <script>
 const D = __DATA__;
-const CH = {'aprovado':'e-aprovado','a-validar':'e-avalidar','vencido':'e-aceite',
-  'não revisado':'e-pendente'};
-const FILTROS = ['tudo','pede você','mexidos','negados','a validar','pendentes','de pé'];
+const CH = {'com chancela':'e-aprovado','mexido':'e-mexido','sem chancela':'e-pendente'};
+const MARCA = {'⚠️':'e-aceite','❓':'e-avalidar','🚫':'e-reprovado'};
+const FILTROS = ['tudo','pede você','mexidos','sem chancela','com ressalva','de pé'];
 const ESTILOS = [['st-sublinhado','sublinhado'],['st-margem','margem'],['st-fundo','fundo']];
 const VISTAS = [['auto','automática'],['marcacao','marcação'],['lado','lado a lado']];
 let estilo = 'st-fundo', vista = 'auto';
@@ -227,25 +263,27 @@ let estilo = 'st-fundo', vista = 'auto';
 const usaMarcacao = b => vista === 'marcacao' || (vista === 'auto' && b.proporcao <= 0.4);
 let doc = 0, filtro = 'pede você', foco = null;
 const esc = s => (s==null?'':String(s)).replace(/[&<>]/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[m]));
-const mexido = e => e.startsWith('mexido');
-const classe = e => mexido(e) ? 'e-mexido' : (CH[e] || 'e-pendente');
+const mexido = e => e === 'mexido';
+const classe = e => CH[e] || 'e-pendente';
+// Uma ressalva vencida ou uma ressalva que sumiu pedem voce tanto quanto um trecho mexido.
+const pedeVoce = b => mexido(b.estado) || b.estado === 'sem chancela' || !!b.bloqueado
+  || (b.sumidas||[]).length > 0 || (b.ressalvas||[]).some(r => r.vencida);
 
 function passa(b){
   if (filtro === 'tudo') return true;
-  if (filtro === 'pede você') return mexido(b.estado) || ['não revisado','reprovado','a-validar','suposição'].includes(b.estado);
+  if (filtro === 'pede você') return pedeVoce(b);
   if (filtro === 'mexidos') return mexido(b.estado);
-  if (filtro === 'negados') return b.estado === 'reprovado';
-  if (filtro === 'a validar') return b.estado === 'a-validar';
-  if (filtro === 'pendentes') return b.estado === 'não revisado';
-  return b.estado === 'aprovado' || b.estado === 'aceite';
+  if (filtro === 'sem chancela') return b.estado === 'sem chancela';
+  if (filtro === 'com ressalva') return (b.ressalvas||[]).length > 0 || (b.sumidas||[]).length > 0;
+  return b.estado === 'com chancela' && !b.bloqueado;
 }
 function contar(d){
   const c = {pe:0, mex:0, pend:0, neg:0, val:0};
   for (const b of d.blocos){
-    if (mexido(b.estado)) c.mex++;
-    else if (b.estado === 'reprovado') c.neg++;
-    else if (b.estado === 'a-validar') c.val++;
-    else if (b.estado === 'não revisado') c.pend++;
+    if (b.bloqueado) c.neg++;
+    else if (mexido(b.estado)) c.mex++;
+    else if (b.estado === 'sem chancela') c.pend++;
+    else if ((b.ressalvas||[]).length) c.val++;
     else c.pe++;
   }
   return c;
@@ -274,10 +312,12 @@ function cartao(b, i){
       <h3>${esc(b.heading)}</h3>
       <span class="chip ${classe(b.estado)}">${esc(b.estado)}</span>
       ${b.simulado?'<span class="chip sim">simulado</span>':''}
-      ${b.expira?`<span class="chip e-aceite">expira ${esc(b.expira)}</span>`:''}
+      ${b.bloqueado?'<span class="chip e-reprovado">🚫 bloqueado</span>':''}
       <span class="meta">linha ${b.line} · ${b.lines}l</span></div>
-    ${b.estado==='reprovado'&&b.notas.length?`<div class="motivo"><b>motivo:</b> ${esc(b.notas[b.notas.length-1].text)}</div>`:''}
-    ${b.validar?`<div class="pergunta"><b>a validar:</b> ${esc(b.validar)}${b.prazo?' · até '+esc(b.prazo):''}</div>`:''}
+    ${(b.sumidas||[]).map(s=>`<div class="motivo"><b>ressalva removida:</b> ${esc(s.replace(/^\\s*>\\s*/,''))}
+      <br><span class="q">estava na chancela. Aprovar aqui aprova a remoção.</span></div>`).join('')}
+    ${(b.ressalvas||[]).map(r=>`<div class="pergunta"><span class="chip ${MARCA[r.mark]||'e-pendente'}">${esc(r.mark)}</span>
+      ${esc(r.text)}${r.vencida?' <b>— prazo vencido</b>':''}</div>`).join('')}
     ${dif ? (usaMarcacao(b)
       ? `<div class="aviso">marcação · ${b.mexidas} palavras mexidas de ${Math.round(b.mexidas/(b.proporcao||1))}${vista==='auto'?'':' · escolha sua'}</div>
          <div class="marcacao">${b.inline}</div>`
@@ -286,10 +326,10 @@ function cartao(b, i){
          <div><div class="rot">agora</div>${b.dir}</div></div>`)
       : `<div class="corpo">${esc(b.texto.slice(0,600))}${b.texto.length>600?'…':''}</div>`}
     <div class="acoes">
-      <button class="pri">Aprovar</button>
+      <button class="pri" ${b.bloqueado?'disabled title="resolva o 🚫 primeiro"':''}>Aprovar</button>
       <button>A validar…</button>
       ${dif?'<button>Reverter…</button>':''}
-      <span style="width:10px"></span><button title="mock">+ comentário</button></div></div>`;
+      <span style="width:10px"></span><button title="mock">+ ressalva ⚠️</button></div></div>`;
 }
 function meio(){
   const d = D.docs[doc];
@@ -307,16 +347,15 @@ function dir(){
   el.innerHTML = `<h4>${esc(b.heading)}</h4>
     <dl class="dl">
       <dt>estado</dt><dd><span class="chip ${classe(b.estado)}">${esc(b.estado)}</span></dd>
-      <dt>chancela</dt><dd>${b.base?esc(b.base)+(b.em?' em '+esc(b.em):''):'nunca'}</dd>
-      <dt>por</dt><dd>${esc(b.por||'—')}</dd>
-      <dt>origem</dt><dd>${b.origem?'commit '+esc(b.origem):'conteúdo do dia'}</dd>
+      <dt>chancela</dt><dd>${d.em?'última em '+esc(d.em):'nunca'}</dd>
+      <dt>arquivo</dt><dd>${esc(d.file)}</dd>
       <dt>tamanho</dt><dd>${b.lines} linhas · linha ${b.line}</dd>
     </dl>
-    <h4>conversa</h4>
-    ${b.notas.length?b.notas.map(n=>`<div class="nota">${esc(n.text)}
-      <div class="q">${esc(n.by||'você')} · ${esc(n.at)}</div></div>`).join('')
-      :'<div class="vazio" style="padding:0 0 10px">Nada dito ainda.</div>'}
-    <textarea placeholder="escrever… (mock)"></textarea>`;
+    <h4>ressalvas, no próprio texto</h4>
+    ${(b.ressalvas||[]).length?b.ressalvas.map(r=>`<div class="nota">${esc(r.mark)} ${esc(r.text)}
+      <div class="q">${r.vencida?'prazo vencido':'vive no arquivo, não aqui'}</div></div>`).join('')
+      :'<div class="vazio" style="padding:0 0 10px">Nenhuma ressalva neste trecho.</div>'}
+    <textarea placeholder="⚠️ sem certeza — … (mock: iria para o texto)"></textarea>`;
 }
 function focar(i){ foco = i; document.querySelectorAll('.bloco').forEach(e=>e.classList.remove('foco'));
   document.getElementById('b'+i)?.classList.add('foco'); dir(); }
@@ -347,7 +386,7 @@ document.getElementById('resumo').textContent =
   `${D.docs.length} arquivos · ${tot} blocos · ` +
   `${D.docs.reduce((a,d)=>a+contar(d).pe,0)} de pé · ` +
   `${D.docs.reduce((a,d)=>a+contar(d).mex,0)} mexidos · ` +
-  `${D.docs.reduce((a,d)=>a+contar(d).pend,0)} nunca revisados`;
+  `${D.docs.reduce((a,d)=>a+contar(d).pend,0)} sem chancela`;
 lado(); meio();
 </script></body></html>"""
 

@@ -1,7 +1,7 @@
 {
   "name": "km-review",
-  "displayName": "km · revisão por bloco",
-  "description": "What changed since you vouched for it, block by block.",
+  "displayName": "km · chancela",
+  "description": "O que mudou desde a sua chancela, trecho a trecho.",
   "version": "0.1.0",
   "publisher": "local",
   "engines": {
@@ -21,12 +21,16 @@
         "title": "km: revisar este arquivo contra a minha chancela"
       },
       {
-        "command": "km.vouch",
-        "title": "km: dar status ao bloco sob o cursor"
+        "command": "km.veredicto",
+        "title": "km: aprovar, a validar ou reverter o trecho sob o cursor"
+      },
+      {
+        "command": "km.chancelarArquivo",
+        "title": "km: chancelar o arquivo inteiro"
       },
       {
         "command": "km.reply",
-        "title": "km: comentar"
+        "title": "km: escrever uma ressalva ⚠️ no texto"
       },
       {
         "command": "km.aprovarThread",
@@ -34,14 +38,14 @@
         "icon": "$(check)"
       },
       {
-        "command": "km.reprovarThread",
-        "title": "Reprovar",
-        "icon": "$(x)"
-      },
-      {
         "command": "km.validarThread",
         "title": "A validar",
         "icon": "$(clock)"
+      },
+      {
+        "command": "km.reverterThread",
+        "title": "Reverter",
+        "icon": "$(discard)"
       }
     ],
     "configuration": {
@@ -56,7 +60,7 @@
     },
     "keybindings": [
       {
-        "command": "km.vouch",
+        "command": "km.veredicto",
         "key": "ctrl+alt+k",
         "when": "editorTextFocus && editorLangId == markdown"
       }
@@ -81,20 +85,25 @@
           "when": "commentController == km"
         },
         {
-          "command": "km.reprovarThread",
+          "command": "km.reverterThread",
           "group": "navigation@3",
           "when": "commentController == km"
         }
       ],
       "editor/context": [
         {
-          "command": "km.vouch",
+          "command": "km.veredicto",
           "group": "km@1",
           "when": "editorLangId == markdown"
         },
         {
           "command": "km.review",
           "group": "km@2",
+          "when": "editorLangId == markdown"
+        },
+        {
+          "command": "km.chancelarArquivo",
+          "group": "km@3",
           "when": "editorLangId == markdown"
         }
       ]

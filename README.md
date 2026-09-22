@@ -2,10 +2,42 @@
 
 Your documents say what is true. This tells you **which of it you actually approved.**
 
-`km` reads Markdown documents in a repository, splits them into claims, and keeps a
+## The chancel
+
+**A copy of each file, as you last endorsed it, kept in `refs/km/chancela`.** Reviewing is
+comparing that copy with the file on disk; endorsing a passage is writing that passage into
+the copy. Nothing is stored per passage — no identity, no anchor, no hash — and the ref is
+written with plumbing and never checked out, so your branch, index and working tree are
+untouched.
+
+```bash
+km pendente                       # what changed since the chancel, and what never had one
+km chancela regras.md --hunk 2    # that passage, into the ref — `git add -p` semantics
+km chancela regras.md --all       # the file as it is today
+km restore regras.md --hunk 2     # put the chancelled text back on disk
+km lint                           # the writing convention, mechanically
+km quando regras.md --trecho "colunas"   # when that passage last had a chancel
+```
+
+Reservations live **in the document**, as blockquotes, because a note only a tool can see is
+a note the next agent rewrites without knowing it existed:
+
+```markdown
+> ⚠️ **sem certeza** — enters the chancel and stays visible
+> ❓ **a confirmar até 2026-10-15** — a pending item, with a date
+> 🚫 **discordo** — blocks the chancel of this passage until it is resolved
+```
+
+One ref and a writing convention, not a parallel store of comments. A caveat that disappears
+from a rewrite is flagged on its own, apart from ordinary edits, because that is the change
+designed to pass unnoticed. The design, with the measurements behind it, is in
+[docs/chancel.md](docs/chancel.md).
+
+## The claim queue
+
+The older half of the tool reads Markdown documents, splits them into claims, and keeps a
 separate record of the claims a human approved — together with the exact text that was
-approved. When the text changes, the approval stops counting. Nothing else changes: the
-tool never rewrites your documents.
+approved. When the text changes, the approval stops counting.
 
 Status is **derived**, never written by hand:
 
@@ -73,10 +105,10 @@ the same `.km/` files the CLI writes, so terminal and page are interchangeable.
 km install-hooks
 ```
 
-Writes a `post-commit` hook that prints one line after every commit — how many norms are
-approved, how many are in the queue, what changed after approval, what conflicts with
-something settled. It reports and exits 0: it never blocks a commit, and the only command
-left to remember is `km serve`.
+Writes a `post-commit` hook that prints one line after every commit — how many files are in
+step with the chancel, how many passages moved, how many files it never saw, and anything
+that clashes with something already approved. It reports and exits 0: it never blocks a
+commit, and the only command left to remember is `km pendente`.
 
 ## Does this fight something already settled?
 
@@ -114,7 +146,8 @@ by its hash, so rewording no longer looks like a new claim.
 
 ## What it does not do
 
-- It does not edit your documents, ever. Only `.km/` is written.
+- It does not edit your documents, except when you ask it to: `km restore` puts back text
+  you had chancelled, and that is the only command that writes a document.
 - It does not decide anything. No LLM call, no network, no telemetry.
 - It does not merge, lock or coordinate sessions. Concurrency is handled where it already
   is: the editor refuses stale writes, git merges, and a claim touched by two sessions
@@ -131,8 +164,9 @@ export PATH="$HOME/knowledge-manager/bin:$PATH"
 
 ## Documentation
 
-- [docs/chancel.md](docs/chancel.md) — **the current design**: the chancel as a reviewed
-  copy in a git ref, caveats as a writing convention, and what git answers for free.
+- [docs/chancel.md](docs/chancel.md) — **the current model, built**: the chancel as a
+  reviewed copy in a git ref, caveats as a writing convention, the commands, and what git
+  answers for free.
 - [docs/format.md](docs/format.md) — what counts as a claim, how text is normalised, what
   the approval record stores.
 - [docs/roadmap.md](docs/roadmap.md) — what comes after shadow mode, and what is
@@ -143,5 +177,6 @@ language.
 
 ## Status
 
-Early. Shadow mode only. The format of `.km/approvals.jsonl` may still change; it is small
-and versioned in git, so migration is a script.
+Early. The chancel is built and in use; the claim queue stays as it was. `.km/` holds
+configuration and the claim record — the chancel itself is in git, under `refs/km/chancela`,
+and `git update-ref -d refs/km/chancela` undoes it entirely.
