@@ -532,6 +532,18 @@ def cmd_blocks(args) -> int:
     return 0
 
 
+def cmd_restore(args) -> int:
+    root = _root(args)
+    ledger = blk.Ledger(root)
+    b = _block_by_ref(root, args.file, args.block)
+    if not ledger.restore(root, b, args.note, by=args.by):
+        raise SystemExit("esse bloco nunca teve chancela — não há texto para devolver")
+    ledger.save()
+    print(f"{b.heading}  ·  texto devolvido ao que você tinha chancelado")
+    print(f"   motivo: {args.note}")
+    return 0
+
+
 def cmd_note(args) -> int:
     """Add to the conversation on a block without changing its state."""
     root = _root(args)
@@ -661,6 +673,13 @@ def main(argv: list[str]) -> int:
     s.add_argument("--changed", action="store_true", help="hide what still stands")
     s.add_argument("--json", action="store_true", help="for the editor extension")
     s.set_defaults(func=cmd_blocks)
+
+    s = sub.add_parser("restore", help="put back the text you had vouched for")
+    s.add_argument("file")
+    s.add_argument("--block", required=True)
+    s.add_argument("note", help="por que a mudança não serve")
+    s.add_argument("--by", default="human:" + os.environ.get("USER", "unknown"))
+    s.set_defaults(func=cmd_restore)
 
     s = sub.add_parser("note", help="add a note to a block, leaving its state alone")
     s.add_argument("file")

@@ -24,13 +24,14 @@ from . import core
 BLOCKS = "blocks.jsonl"
 HEADING = re.compile(r"^(#{1,6})\s+(.*)$")
 
-#: A state earns its place only by changing what happens next.
+#: Two states, because a third never changed what happened next. "Skimmed it" is just
+#: `a-validar` waiting on your own attention, with a date — which is the honest version.
+#: Refusing a change is not a state either: if it is wrong, revert it, and the note says why.
 STATES = {
     "aprovado": "lido e endossado",
-    "aceite": "endossado sem leitura real; expira",
-    "a-validar": "depende de alguém de fora, com prazo",
-    "reprovado": "errado; o comentário é a instrução de conserto",
+    "a-validar": "endossado, mas pendente de algo — sua atenção, um agente, um teste — com prazo",
 }
+LEGADO = {"aceite": "a-validar", "reprovado": "a-validar"}
 ACCEPT_EXPIRES_DAYS = 14
 
 
@@ -123,6 +124,7 @@ class Ledger(core.KeyedLog):
     def vouch(self, block: Block, state: str, by: str, note: str | None = None,
               validate: str | None = None, due: str | None = None,
               source: str | None = None) -> dict:
+        state = LEGADO.get(state, state)
         if state not in STATES:
             raise ValueError(f"estado desconhecido: {state}")
         rec = {
@@ -133,8 +135,8 @@ class Ledger(core.KeyedLog):
             # vouched against a dirty working tree exists in no commit.
             "body": block.body,
         }
-        if state == "aceite":
-            rec["expires"] = (date.today() + timedelta(days=ACCEPT_EXPIRES_DAYS)).isoformat()
+        if state == "a-validar" and not due:
+            rec["due"] = (date.today() + timedelta(days=ACCEPT_EXPIRES_DAYS)).isoformat()
         anterior = self.records.get(block.key, {})
         rec["notes"] = list(anterior.get("notes", []))
         if note:
@@ -163,9 +165,11 @@ class Ledger(core.KeyedLog):
             return "não revisado"
         if rec["hash"] != block.hash:
             return f"mexido depois de {rec['state']}"
-        if rec.get("expires") and (today or date.today().isoformat()) > rec["expires"]:
-            return "suposição"
-        return rec["state"]
+        estado = LEGADO.get(rec["state"], rec["state"])
+        prazo = rec.get("due") or rec.get("expires")
+        if estado == "a-validar" and prazo and (today or date.today().isoformat()) > prazo:
+            return "vencido"
+        return estado
 
     def vouched_body(self, block: Block) -> str | None:
         rec = self.records.get(block.key)
@@ -186,6 +190,20 @@ class Ledger(core.KeyedLog):
             head = "#" * (b.path.count(" › ") + 1) + " " + b.heading
             out.append(head + "\n" + body)
         return "\n".join(out)
+
+    def restore(self, root: Path, block: Block, note: str, by: str) -> bool:
+        """Put back the text you had vouched for. Refusing a change and leaving it in place
+        would keep in the document exactly what you just rejected."""
+        corpo = self.vouched_body(block)
+        if corpo is None:
+            return False
+        caminho = root / block.file
+        linhas = caminho.read_text(encoding="utf-8").splitlines()
+        i = block.line          # a linha do titulo; o corpo comeca depois dela
+        novo = linhas[:i] + corpo.splitlines() + linhas[i + block.lines - 1:]
+        caminho.write_text("\n".join(novo) + "\n", encoding="utf-8")
+        self.note(block, note, by=by)
+        return True
 
     def orphans(self, live: list[Block], files: set[str] | None = None) -> list[dict]:
         """Vouched blocks with no counterpart on disk — within the files actually looked at."""

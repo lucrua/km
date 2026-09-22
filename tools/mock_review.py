@@ -98,12 +98,10 @@ def montar(root: Path, simular: bool = True) -> dict:
 PAGE = """<!doctype html><html lang="pt-br"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>km · revisão</title><style>
-:root{--bg:#F5F6F3;--card:#FCFCFA;--ink:#1B2320;--mut:#5C6862;--rule:#DCE0DB;--acc:#2A4B6E;
---ok:#2B6647;--ok-bg:#E3F0E8;--ace:#8A5A0B;--ace-bg:#FAF0DA;--neg:#8B4E4E;--neg-bg:#F8E7E5;
---val:#2A4B6E;--val-bg:#E4EAF1;--pend:#5C6862;--pend-bg:#E9ECE8}
-@media(prefers-color-scheme:dark){:root{--bg:#121614;--card:#191E1C;--ink:#E4E8E5;--mut:#98A39E;
---rule:#2B3230;--acc:#8FB3D9;--ok:#86C9A2;--ok-bg:#152A1F;--ace:#E3B665;--ace-bg:#2B2314;
---neg:#D9A0A0;--neg-bg:#2E1D1D;--val:#8FB3D9;--val-bg:#1B2734;--pend:#98A39E;--pend-bg:#212927}}
+/* Escuro por decisao, nao por preferencia do sistema: e onde o autor trabalha. */
+:root{--bg:#0F1419;--card:#161D24;--ink:#DCE3EA;--mut:#8695A2;--rule:#232D36;--acc:#6EA8D8;
+--ok:#7BC49A;--ok-bg:#16301F;--ace:#E0B463;--ace-bg:#2E2513;--neg:#E09A9A;--neg-bg:#331F1F;
+--val:#6EA8D8;--val-bg:#152433;--pend:#8695A2;--pend-bg:#1C242B}
 *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);
 font:14.5px/1.55 system-ui,-apple-system,"Segoe UI",sans-serif}
 .topo{display:flex;gap:14px;align-items:baseline;flex-wrap:wrap;padding:12px 20px;
@@ -150,10 +148,8 @@ body.st-margem del{display:none}
 body.st-margem ins{color:var(--ink);background:none;text-decoration:none;font-weight:600}
 body.st-margem .par>div:last-child{box-shadow:inset 3px 0 0 var(--ok)}
 body.st-margem .par>div:first-child{box-shadow:inset 3px 0 0 var(--neg)}
-body.st-fundo del{background:color-mix(in srgb,var(--neg) 12%,transparent);color:inherit;
-  text-decoration:line-through;text-decoration-color:var(--neg)}
-body.st-fundo ins{background:color-mix(in srgb,var(--ok) 14%,transparent);color:inherit;
-  text-decoration:none}
+body.st-fundo del{background:var(--neg-bg);color:var(--neg);text-decoration:line-through}
+body.st-fundo ins{background:var(--ok-bg);color:var(--ok);text-decoration:none}
 .estilos{display:flex;gap:4px;align-items:center;font-size:12px;color:var(--mut)}
 .estilos button{font:inherit;font-size:12px;padding:2px 9px;border-radius:5px;cursor:pointer;
   border:1px solid var(--rule);background:transparent;color:var(--mut)}
@@ -189,11 +185,11 @@ border:1px solid var(--rule);background:var(--bg);color:var(--ink)}
 <section class="meio" id="meio"></section><aside class="dir" id="dir"></aside></div>
 <script>
 const D = __DATA__;
-const CH = {'aprovado':'e-aprovado','aceite':'e-aceite','reprovado':'e-reprovado',
-  'a-validar':'e-avalidar','não revisado':'e-pendente','suposição':'e-aceite'};
+const CH = {'aprovado':'e-aprovado','a-validar':'e-avalidar','vencido':'e-aceite',
+  'não revisado':'e-pendente'};
 const FILTROS = ['tudo','pede você','mexidos','negados','a validar','pendentes','de pé'];
 const ESTILOS = [['st-sublinhado','sublinhado'],['st-margem','margem'],['st-fundo','fundo']];
-let estilo = 'st-sublinhado';
+let estilo = 'st-fundo';
 let doc = 0, filtro = 'pede você', foco = null;
 const esc = s => (s==null?'':String(s)).replace(/[&<>]/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[m]));
 const mexido = e => e.startsWith('mexido');
@@ -251,10 +247,10 @@ function cartao(b, i){
       <div><div class="rot">agora</div>${b.dir}</div></div>`
       :`<div class="corpo">${esc(b.texto.slice(0,600))}${b.texto.length>600?'…':''}</div>`}
     <div class="acoes">
-      <button class="pri">Aprovar</button><button>Adiar</button><button>Recusar</button>
-      <span style="width:10px"></span>
-      <button title="mock">+ comentário</button>
-      ${dif?'<button>Devolver o meu texto</button>':''}</div></div>`;
+      <button class="pri">Aprovar</button>
+      <button>A validar…</button>
+      ${dif?'<button>Reverter…</button>':''}
+      <span style="width:10px"></span><button title="mock">+ comentário</button></div></div>`;
 }
 function meio(){
   const d = D.docs[doc];
