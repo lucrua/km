@@ -226,10 +226,15 @@ async function vouch() {
 
 function activate(ctx) {
   conversas = vscode.comments.createCommentController('km', 'km · chancela');
+  // O '+' so aparece onde comeca um bloco: comentar linha solta criaria conversa
+  // presa a um ponto que o proximo agente reescreve sem saber que ela existia.
   conversas.commentingRangeProvider = {
     provideCommentingRanges(doc) {
-      return doc.languageId === 'markdown' && raiz(doc)
-        ? [new vscode.Range(0, 0, Math.max(0, doc.lineCount - 1), 0)] : [];
+      if (doc.languageId !== 'markdown' || !raiz(doc)) return [];
+      return blocos(doc).map(function (b) {
+        const l = Math.max(0, b.line - 1);
+        return new vscode.Range(l, 0, l, 0);
+      });
     },
   };
 
