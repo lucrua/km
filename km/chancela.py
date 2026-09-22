@@ -12,6 +12,9 @@ supposed to rewrite a file on disk.
 
 from __future__ import annotations
 
+import fnmatch
+import hashlib
+import json
 import os
 import re
 import subprocess
@@ -21,6 +24,21 @@ from difflib import SequenceMatcher
 from pathlib import Path
 
 REF = "refs/km/chancela"
+KM_DIR = ".km"
+CONFIG = "config.json"
+
+#: Which files the chancel covers. Opt-in: a document outside `include` never appears.
+DEFAULT_CONFIG = {
+    "include": ["**/*.md"],
+    "exclude": [
+        "**/node_modules/**",
+        "**/.git/**",
+        "**/.km/**",
+        "**/sandbox/**",
+        "**/CHANGELOG.md",
+        "**/LICENSE*",
+    ],
+}
 
 HEADING = re.compile(r"^(#{1,6})\s+(.*)$")
 
@@ -388,3 +406,98 @@ def estados(s: Situacao) -> list[dict]:
             "dropped": [l for h in meus for l in h.sumidas],
         })
     return out
+
+
+# ---- which files ---------------------------------------------------------------------
+
+def load_config(root: Path) -> dict:
+    config = dict(DEFAULT_CONFIG)
+    path = root / KM_DIR / CONFIG
+    if path.exists():
+        config.update(json.loads(path.read_text(encoding="utf-8")))
+    return config
+
+
+def _casa(rel: str, padroes: list[str]) -> bool:
+    return any(fnmatch.fnmatch(rel, p) or fnmatch.fnmatch("/" + rel, p) for p in padroes)
+
+
+def documentos(root: Path, config: dict | None = None) -> list[str]:
+    """The documents this repository opted in, plus anything that already has a chancel."""
+    config = config if config is not None else load_config(root)
+    achados = []
+    for path in sorted(root.rglob("*.md")):
+        rel = path.relative_to(root).as_posix()
+        if _casa(rel, config.get("exclude", [])):
+            continue
+        if config.get("include") and not _casa(rel, config["include"]):
+            continue
+        achados.append(rel)
+    return sorted(set(achados) | set(arquivos(root)))
+
+
+# ---- writing in the document ---------------------------------------------------------
+#
+# Two writes, both asked for explicitly: putting back text you had chancelled, and writing
+# a reservation in the agreed form. Everything else `km` does is read-only.
+
+def marca_da(marca: str) -> str:
+    return {"⚠️": "⚠️ **sem certeza** — ",
+            "❓": "❓ **a confirmar até {prazo}** — ",
+            "🚫": "🚫 **discordo** — "}.get(marca, "")
+
+
+def inserir_marca(root: Path, rel: str, caminho: str, marca: str, texto: str,
+                  prazo: str | None = None) -> bool:
+    """Write the reservation as a blockquote, right under the passage's heading.
+
+    The form is not the author's to remember: the surface writes it, which is the only
+    reason a convention survives contact with a Tuesday.
+    """
+    modelo = marca_da(marca)
+    if not modelo:
+        return False
+    atual_texto = atual(root, rel)
+    if atual_texto is None:
+        return False
+    linhas = atual_texto.splitlines()
+    alvo = next((t for t in trechos(atual_texto) if t.caminho == caminho), None)
+    if alvo is None:
+        return False
+    corpo = "> " + modelo.format(prazo=prazo or "") + texto.strip()
+    i = alvo.linha if alvo.titulo_bruto else alvo.linha - 1
+    novas = linhas[:i] + ["", corpo] + linhas[i:]
+    (root / rel).write_text("\n".join(novas) + "\n", encoding="utf-8")
+    return True
+
+
+def sha_do(texto: str) -> str:
+    return hashlib.sha256(texto.encode("utf-8")).hexdigest()[:12]
+
+
+class Conflito(Exception):
+    """The file moved under you: someone else's editor, or an agent, got there first."""
+
+    def __init__(self, atual: str):
+        super().__init__("o texto mudou desde que você abriu")
+        self.atual = atual
+
+
+def substituir_trecho(root: Path, rel: str, caminho: str, novo: str, sha_base: str) -> str:
+    """Save an edited passage, refusing to overwrite what changed meanwhile.
+
+    Optimistic concurrency, which is what the situation asks for: three sessions and an
+    editor write the same files, and a lock nobody can see is worse than a refusal you can.
+    """
+    atual_texto = atual(root, rel)
+    if atual_texto is None:
+        raise FileNotFoundError(rel)
+    alvo = next((t for t in trechos(atual_texto) if t.caminho == caminho), None)
+    if alvo is None:
+        raise Conflito(atual_texto)
+    if sha_base and sha_do(alvo.texto) != sha_base:
+        raise Conflito(alvo.texto)
+    linhas = atual_texto.splitlines()
+    novas = linhas[:alvo.linha - 1] + novo.rstrip("\n").splitlines() + linhas[alvo.fim - 1:]
+    (root / rel).write_text("\n".join(novas) + "\n", encoding="utf-8")
+    return sha_do(novo)

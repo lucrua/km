@@ -106,15 +106,19 @@ chancel the command says so, and several `--hunk` in one call are applied agains
 listing. The `🚫` refusal is enforced here — the passage is left out and named, and only
 `--force` overrides it.
 
-The surfaces read the ref, not a ledger: `km baseline` is the left-hand column of the VS
-Code diff, the extension's passage states come from `km pendente --json`, and the standalone
-mock builds its word-level diff from `git show refs/km/chancela:<file>` against disk. The
-extension also **writes the marks**: approving, deferring with a date or disagreeing all
-insert the agreed blockquote into the document, so the convention is the path of least
-resistance rather than something to remember.
+`km serve` is where reviewing happens: a local page, started when you sit down and stopped
+with Ctrl-C, with the word-level diff, the three verdicts, the marks and an editable passage
+saved back to the file under optimistic concurrency. Inside VS Code, one command starts it
+and opens it in the same window, bound to the window's lifetime.
 
-`tools/migrar_ledger.py <repo> --apply` carries an old `.km/blocks.jsonl` into the ref: the
-vouched body of each block, projected as the reviewed copy of its file.
+Both surfaces read the ref, not a ledger, and both **write the marks**: approving, deferring
+with a date or disagreeing insert the agreed blockquote into the document, so the convention
+is the path of least resistance rather than something to remember.
+
+The claim queue that preceded this — parsing documents into claims, approving by hash,
+triage and conflicts — was removed in the same change. It answered a different question and
+having two models on screen was the confusion this design set out to end; git history keeps
+it, and `tools/migrar_ledger.py` (deleted with it) carried the block ledger into the ref.
 
 ## Still open
 

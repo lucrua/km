@@ -10,6 +10,7 @@ const cp = require('child_process');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
+const http = require('http');
 
 const SCHEME = 'km-baseline';
 const CORES = {
@@ -32,6 +33,42 @@ function km(args, cwd) {
 }
 const raiz = (doc) => vscode.workspace.getWorkspaceFolder(doc.uri)?.uri.fsPath;
 const rel = (doc) => vscode.workspace.asRelativePath(doc.uri, false);
+
+// ---- o painel: um servidor local sob demanda, aberto na propria janela ----------
+let painel = null;   // o processo do `km serve`, preso a esta janela
+
+function porta() {
+  return vscode.workspace.getConfiguration('km').get('port') || 8431;
+}
+
+function respondendo(p) {
+  return new Promise((ok) => {
+    const req = http.get({ host: '127.0.0.1', port: p, path: '/api/state' }, (res) => {
+      res.resume(); ok(res.statusCode === 200);
+    });
+    req.on('error', () => ok(false));
+    req.setTimeout(400, () => { req.destroy(); ok(false); });
+  });
+}
+
+async function abrirPainel() {
+  const pasta = (vscode.workspace.workspaceFolders || [])[0];
+  if (!pasta) { vscode.window.showWarningMessage('km: abra uma pasta primeiro'); return; }
+  const p = porta();
+  const url = 'http://127.0.0.1:' + p + '/';
+  if (!(await respondendo(p))) {
+    const bin = vscode.workspace.getConfiguration('km').get('path')
+      || path.join(os.homedir(), 'knowledge-manager', 'bin', 'km');
+    // Preso a esta janela de proposito: fechar o VS Code encerra o servidor, e ninguem
+    // fica com um processo esquecido escutando numa porta.
+    painel = cp.spawn(bin, ['serve', '--port', String(p)], { cwd: pasta.uri.fsPath });
+    painel.on('error', (e) => vscode.window.showErrorMessage('km: ' + e.message));
+    for (let i = 0; i < 20 && !(await respondendo(p)); i++) {
+      await new Promise((r) => setTimeout(r, 150));
+    }
+  }
+  await vscode.commands.executeCommand('simpleBrowser.show', url);
+}
 
 function raizDe(arquivo) {
   for (const f of vscode.workspace.workspaceFolders || []) {
@@ -369,6 +406,7 @@ function activate(ctx) {
     vscode.workspace.registerTextDocumentContentProvider(SCHEME, baseline),
     vscode.languages.registerCodeLensProvider({ language: 'markdown' }, avisos),
     vscode.commands.registerCommand('km.veredicto', veredicto),
+    vscode.commands.registerCommand('km.abrirPainel', abrirPainel),
     vscode.commands.registerCommand('km.review', async () => {
       const ed = vscode.window.activeTextEditor;
       if (!ed) return;
@@ -403,4 +441,7 @@ function activate(ctx) {
   if (ativo) { pintar(ativo); montarThreads(ativo.document); marcarProblemas(ativo.document); }
 }
 
-module.exports = { activate: activate, deactivate: function () {} };
+module.exports = {
+  activate: activate,
+  deactivate: function () { if (painel) { painel.kill(); painel = null; } },
+};

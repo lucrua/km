@@ -206,7 +206,7 @@ class CliTest(RepoTest):
     def test_chancela_all_then_nothing_is_pending(self):
         self.km("chancela", "regras.md", "--all", "-m", "li inteiro")
         _, saida = self.km("pendente")
-        self.assertIn("1 arquivos em dia", self.km("status", "--short")[1])
+        self.assertIn("1 arquivo(s) em dia", self.km("pendente", "--short")[1])
         self.assertIn("0 trechos mexidos", saida)
 
     def test_one_passage_at_a_time(self):
@@ -248,6 +248,92 @@ class CliTest(RepoTest):
         self.escrever(DOC.replace("> ⚠️ **sem certeza** — a ordem veio de um print, não do export.\n\n", ""))
         _, saida = self.km("pendente", "regras.md")
         self.assertIn("ressalva removida", saida)
+
+class PainelTest(RepoTest):
+    """The page acts through the same functions as the CLI — these are those functions."""
+
+    def setUp(self):
+        super().setUp()
+        from km import serve
+        self.serve = serve
+
+    def caminho(self, titulo):
+        atual = ch.atual(self.dir, "regras.md")
+        return next(t.caminho for t in ch.trechos(atual) if t.titulo == titulo)
+
+    def agir(self, **pedido):
+        pedido.setdefault("file", "regras.md")
+        return self.serve.agir(self.dir, pedido, by="teste")
+
+    def test_state_carries_the_word_diff_and_the_caveats(self):
+        self.serve.agir(self.dir, {"acao": "aprovar", "file": "regras.md",
+                                   "path": self.caminho("Regras")}, by="t")
+        self.escrever(DOC.replace("horas úteis", "horas corridas"))
+        d = self.serve.estado(self.dir)["docs"][0]
+        prazo = [b for b in d["blocos"] if b["heading"] == "Prazo"][0]
+        self.assertEqual(prazo["estado"], "mexido")
+        self.assertIn("<del>", prazo["inline"])
+        lista = [b for b in d["blocos"] if b["heading"].startswith("A lista")][0]
+        self.assertEqual(lista["ressalvas"][0]["mark"], "⚠")
+
+    def test_aprovar_advances_the_ref(self):
+        r = self.agir(acao="aprovar", path=self.caminho("Regras"))
+        self.assertTrue(r["ok"], r)
+        self.assertEqual(ch.chancelado(self.dir, "regras.md"), DOC)
+
+    def test_validar_writes_the_deadline_in_the_text_and_chancels(self):
+        self.agir(acao="aprovar", path=self.caminho("Regras"))
+        self.escrever(DOC.replace("horas úteis", "horas corridas"))
+        r = self.agir(acao="validar", path=self.caminho("Prazo"),
+                      texto="confirmar com quem assina", prazo="2026-10-15")
+        self.assertTrue(r["ok"], r)
+        texto = (self.dir / "regras.md").read_text(encoding="utf-8")
+        self.assertIn("> ❓ **a confirmar até 2026-10-15** — confirmar com quem assina", texto)
+        self.assertIn("a confirmar até 2026-10-15", ch.chancelado(self.dir, "regras.md"))
+
+    def test_reverter_puts_the_text_back(self):
+        self.agir(acao="aprovar", path=self.caminho("Regras"))
+        self.escrever(DOC.replace("horas úteis", "dias corridos"))
+        r = self.agir(acao="reverter", path=self.caminho("Prazo"), motivo="já decidido")
+        self.assertTrue(r["ok"], r)
+        self.assertIn("horas úteis", (self.dir / "regras.md").read_text(encoding="utf-8"))
+
+    def test_a_refusal_keeps_the_passage_out(self):
+        self.agir(acao="aprovar", path=self.caminho("Regras"))
+        self.escrever(DOC.replace("O prazo conta em horas úteis.",
+                                  "O prazo conta em dias.\n\n> 🚫 **discordo** — não é isso."))
+        r = self.agir(acao="aprovar", path=self.caminho("Prazo"))
+        self.assertFalse(r["ok"])
+        self.assertIn("🚫", r["erro"])
+        self.assertIn("horas úteis", ch.chancelado(self.dir, "regras.md"))
+
+    def test_marca_writes_the_agreed_form(self):
+        r = self.agir(acao="marca", path=self.caminho("Prazo"), marca="⚠️",
+                      texto="veio de um print")
+        self.assertTrue(r["ok"], r)
+        self.assertIn("> ⚠️ **sem certeza** — veio de um print",
+                      (self.dir / "regras.md").read_text(encoding="utf-8"))
+
+    def test_editing_a_passage_saves_only_that_passage(self):
+        d = self.serve.estado(self.dir)["docs"][0]
+        prazo = [b for b in d["blocos"] if b["heading"] == "Prazo"][0]
+        r = self.agir(acao="salvar", path=prazo["path"], sha=prazo["sha"],
+                      texto="## Prazo\n\nO prazo conta em horas úteis, sempre.")
+        self.assertTrue(r["ok"], r)
+        texto = (self.dir / "regras.md").read_text(encoding="utf-8")
+        self.assertIn("horas úteis, sempre", texto)
+        self.assertIn("Onze colunas", texto)             # o resto do arquivo ficou
+
+    def test_saving_over_someone_else_is_refused_and_shows_both(self):
+        d = self.serve.estado(self.dir)["docs"][0]
+        prazo = [b for b in d["blocos"] if b["heading"] == "Prazo"][0]
+        self.escrever(DOC.replace("horas úteis", "horas corridas"))   # outro agente escreveu
+        r = self.agir(acao="salvar", path=prazo["path"], sha=prazo["sha"],
+                      texto="## Prazo\n\nminha versão")
+        self.assertFalse(r["ok"])
+        self.assertIn("horas corridas", r["conflito"]["atual"])
+        self.assertNotIn("minha versão", (self.dir / "regras.md").read_text(encoding="utf-8"))
+
 
 if __name__ == "__main__":
     unittest.main()

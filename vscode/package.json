@@ -17,6 +17,10 @@
   "contributes": {
     "commands": [
       {
+        "command": "km.abrirPainel",
+        "title": "km: abrir o painel da chancela"
+      },
+      {
         "command": "km.review",
         "title": "km: revisar este arquivo contra a minha chancela"
       },
@@ -55,6 +59,11 @@
           "type": "string",
           "default": "",
           "description": "Caminho do executável km. Vazio = ~/knowledge-manager/bin/km"
+        },
+        "km.port": {
+          "type": "number",
+          "default": 8431,
+          "description": "Porta do painel local (`km serve`). Ele sobe quando você abre o painel e morre com a janela."
         }
       }
     },
@@ -63,6 +72,11 @@
         "command": "km.veredicto",
         "key": "ctrl+alt+k",
         "when": "editorTextFocus && editorLangId == markdown"
+      },
+      {
+        "command": "km.abrirPainel",
+        "key": "ctrl+alt+p",
+        "when": "editorLangId == markdown"
       }
     ],
     "menus": {
@@ -91,6 +105,11 @@
         }
       ],
       "editor/context": [
+        {
+          "command": "km.abrirPainel",
+          "group": "km@0",
+          "when": "editorLangId == markdown"
+        },
         {
           "command": "km.veredicto",
           "group": "km@1",
