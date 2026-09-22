@@ -277,7 +277,7 @@ function activate(ctx) {
         .concat(prazo ? ['--due', prazo] : []);
       rodarNoBloco(t, extra, 'a validar');
     }),
-    vscode.workspace.registerTextDocumentContentProvider(SCHEME, new Baseline()),
+    vscode.workspace.registerTextDocumentContentProvider(SCHEME, baseline),
     vscode.languages.registerCodeLensProvider({ language: 'markdown' }, avisos),
     vscode.commands.registerCommand('km.vouch', vouch),
     vscode.commands.registerCommand('km.review', async () => {
