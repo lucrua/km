@@ -131,8 +131,8 @@ export PATH="$HOME/knowledge-manager/bin:$PATH"
 
 ## Documentation
 
-- [docs/blocks.md](docs/blocks.md) — **design in progress**: the block as the unit of
-  review, why boundaries follow headings, and why nobody invalidates a check by hand.
+- [docs/chancel.md](docs/chancel.md) — **the current design**: the chancel as a reviewed
+  copy in a git ref, caveats as a writing convention, and what git answers for free.
 - [docs/format.md](docs/format.md) — what counts as a claim, how text is normalised, what
   the approval record stores.
 - [docs/roadmap.md](docs/roadmap.md) — what comes after shadow mode, and what is
