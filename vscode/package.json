@@ -85,6 +85,18 @@
           "group": "navigation@3",
           "when": "commentController == km"
         }
+      ],
+      "editor/context": [
+        {
+          "command": "km.vouch",
+          "group": "km@1",
+          "when": "editorLangId == markdown"
+        },
+        {
+          "command": "km.review",
+          "group": "km@2",
+          "when": "editorLangId == markdown"
+        }
       ]
     }
   }
