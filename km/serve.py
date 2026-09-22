@@ -23,7 +23,7 @@ from pathlib import Path
 from . import chancela as ch
 from . import cli
 
-PALAVRA = re.compile(r"\s+|\w+|[^\w\s]")
+PALAVRA = re.compile(r"\d{4}-\d{2}-\d{2}|\s+|\w+|[^\w\s]")
 
 
 def diff_inline(antes: str, agora: str) -> tuple[str, float, int]:
@@ -67,6 +67,187 @@ def diff_palavras(antes: str, agora: str) -> tuple[str, str]:
     return "".join(esq), "".join(dir_)
 
 
+
+# ---- markdown, realçado e marcado ----------------------------------------------------
+#
+# O diff é feito por linha e, dentro da linha mexida, por palavra — é o que pandiff faz
+# com prosa: você lê o texto corrido e vê no lugar o que entrou, o que saiu e o que mudou.
+# O realce é do **fonte** markdown, não do markdown renderizado: a coluna do meio é
+# editável, e editar texto renderizado é WYSIWYG, que reescreve o arquivo inteiro na hora
+# de salvar.
+
+CERCA = re.compile(r"^\s*(```|~~~)")
+TITULO = re.compile(r"^(#{1,6})\s+(.*)$")
+CITACAO = re.compile(r"^(\s*>\s?)(.*)$")
+ITEM = re.compile(r"^(\s*)([-*+]|\d{1,3}[.)])\s+(.*)$")
+TABELA = re.compile(r"^\s*\|.*\|\s*$")
+INLINE = re.compile(r"(`[^`]+`|\*\*[^*]+\*\*|__[^_]+__|\*[^*\s][^*]*\*|_[^_\s][^_]*_"
+                    r"|\[[^\]]+\]\([^)]+\)|~~[^~]+~~)")
+
+
+def realce_inline(texto: str) -> str:
+    """Emphasis, code, links — enough for the eye to find its way in the source."""
+    out = []
+    for parte in INLINE.split(texto):
+        if not parte:
+            continue
+        e = html.escape(parte)
+        if parte.startswith("`"):
+            out.append(f'<span class="m-cod">{e}</span>')
+        elif parte.startswith(("**", "__")):
+            out.append(f'<span class="m-forte">{e}</span>')
+        elif parte.startswith("~~"):
+            out.append(f'<span class="m-riscado">{e}</span>')
+        elif parte.startswith("["):
+            alvo = e.split("](", 1)
+            out.append(f'<span class="m-link">{alvo[0]}]</span>'
+                       f'<span class="m-url">({alvo[1]}</span>' if len(alvo) == 2 else e)
+        elif parte.startswith(("*", "_")):
+            out.append(f'<span class="m-enfase">{e}</span>')
+        else:
+            out.append(e)
+    return "".join(out)
+
+
+def _classe_da_linha(linha: str, em_codigo: bool) -> str:
+    if em_codigo or CERCA.match(linha):
+        return "l-cod"
+    m = TITULO.match(linha)
+    if m:
+        return f"l-t{len(m.group(1))}"
+    if CITACAO.match(linha):
+        marca = next((c for c in linha if c in MARCAS_TXT), "")
+        return "l-cit" + (" l-marca" if marca else "")
+    if TABELA.match(linha):
+        return "l-tab"
+    if ITEM.match(linha):
+        return "l-item"
+    return ""
+
+
+MARCAS_TXT = "⚠❓🚫"
+
+
+def realce_linha(linha: str, em_codigo: bool) -> str:
+    if em_codigo or CERCA.match(linha):
+        return html.escape(linha)
+    m = TITULO.match(linha)
+    if m:
+        return (f'<span class="m-cerquilha">{m.group(1)}</span> '
+                + realce_inline(m.group(2)))
+    m = CITACAO.match(linha)
+    if m:
+        return f'<span class="m-cerquilha">{html.escape(m.group(1))}</span>' + realce_inline(m.group(2))
+    m = ITEM.match(linha)
+    if m:
+        return (html.escape(m.group(1)) + f'<span class="m-cerquilha">{m.group(2)}</span> '
+                + realce_inline(m.group(3)))
+    return realce_inline(linha)
+
+
+def _palavras(a: str, b: str) -> str:
+    """One changed line, word by word — where the eye actually needs the detail."""
+    pa, pb = PALAVRA.findall(a), PALAVRA.findall(b)
+    out = []
+    for tag, i1, i2, j1, j2 in difflib.SequenceMatcher(None, pa, pb, autojunk=False).get_opcodes():
+        ta, tb = "".join(pa[i1:i2]), "".join(pb[j1:j2])
+        if tag == "equal":
+            out.append(realce_inline(tb))
+        elif tag == "delete":
+            out.append(f"<del>{realce_inline(ta)}</del>")
+        elif tag == "insert":
+            out.append(f"<ins>{realce_inline(tb)}</ins>")
+        else:
+            out.append(f"<del>{realce_inline(ta)}</del><ins>{realce_inline(tb)}</ins>")
+    return "".join(out)
+
+
+def _casar(velhas: list[str], novas: list[str], corte: float = 0.45) -> list[tuple]:
+    """Which old line became which new one, inside one changed block.
+
+    Pairing by position turns a rewritten paragraph into soup — two lines with nothing to
+    do with each other shown word by word. Pairing by similarity, in order, gives the
+    "edited" line where there is one and an honest gone/new where there is not.
+    """
+    saida: list[tuple] = []
+    disponiveis = list(enumerate(velhas))
+    usadas: set[int] = set()
+    casos: dict[int, int] = {}
+    for j, nova in enumerate(novas):
+        melhor, nota = None, corte
+        for i, velha in disponiveis:
+            if i in usadas:
+                continue
+            r = difflib.SequenceMatcher(None, velha, nova).ratio()
+            if r >= nota:
+                melhor, nota = i, r
+        if melhor is not None:
+            usadas.add(melhor)
+            casos[j] = melhor
+    # A linha que saiu aparece onde ela estava, e não empilhada no começo do bloco: quem
+    # lê está lendo o texto, não um relatório de diferenças.
+    posicao = 0
+    for j, nova in enumerate(novas):
+        alvo = casos.get(j)
+        limite = alvo if alvo is not None else len(velhas)
+        while posicao < limite:
+            if posicao not in usadas:
+                saida.append(("sumiu", velhas[posicao], None))
+            posicao += 1
+        if alvo is not None:
+            saida.append(("mexido", nova, velhas[alvo]))
+            posicao = alvo + 1
+        else:
+            saida.append(("novo", nova, None))
+    while posicao < len(velhas):
+        if posicao not in usadas:
+            saida.append(("sumiu", velhas[posicao], None))
+        posicao += 1
+    return saida
+
+
+def marcar(antes: str, depois: str) -> list[dict]:
+    """The passage as continuous text, with what is new, gone or edited marked in place."""
+    a, b = antes.splitlines(), depois.splitlines()
+    saida: list[dict] = []
+    if antes is None or not antes:
+        pares = [("novo", l, None) for l in b]
+    else:
+        pares = []
+        for tag, i1, i2, j1, j2 in difflib.SequenceMatcher(None, a, b, autojunk=False).get_opcodes():
+            if tag == "equal":
+                pares += [("igual", l, None) for l in b[j1:j2]]
+            elif tag == "insert":
+                pares += [("novo", l, None) for l in b[j1:j2]]
+            elif tag == "delete":
+                pares += [("sumiu", l, None) for l in a[i1:i2]]
+            else:
+                pares += _casar(a[i1:i2], b[j1:j2])
+
+    em_codigo = False
+    for tipo, linha, velha in pares:
+        classe = _classe_da_linha(linha, em_codigo)
+        if CERCA.match(linha):
+            em_codigo = not em_codigo
+        corpo = (_palavras(velha, linha) if tipo == "mexido"
+                 else realce_linha(linha, em_codigo and not CERCA.match(linha)))
+        saida.append({"tipo": tipo, "classe": classe, "html": corpo or "&nbsp;"})
+    return saida
+
+
+def realcar(texto: str) -> list[dict]:
+    """The same, with nothing to compare: the left-hand column."""
+    em_codigo = False
+    saida = []
+    for linha in texto.splitlines():
+        classe = _classe_da_linha(linha, em_codigo)
+        if CERCA.match(linha):
+            em_codigo = not em_codigo
+        saida.append({"tipo": "igual", "classe": classe,
+                      "html": realce_linha(linha, em_codigo and not CERCA.match(linha)) or "&nbsp;"})
+    return saida
+
+
 def _corpo(trecho) -> str:
     """The passage without its own heading — the heading is already the card's title."""
     if trecho is None:
@@ -89,43 +270,80 @@ def _ultima(root: Path, rel: str) -> str:
     return partes[1] if len(partes) > 1 else ""
 
 
-def estado(root: Path, by: str = "") -> dict:
-    """Everything the page needs, straight from the ref and the disk."""
+def estado(root: Path, by: str = "", base: str | None = None,
+           arquivo: str | None = None) -> dict:
+    """The state for the page.
+
+    The heavy part — every line of every passage, highlighted and marked — is built only
+    for the document being read. Building it for the whole repository was 4.7 MB and 1.3 s
+    per request, and the page asks again every eight seconds.
+    """
     hoje = date.today().isoformat()
     docs = []
     for rel in ch.documentos(root):
-        s = ch.situacao(root, rel, hoje)
+        s = ch.situacao(root, rel, hoje, base=base)
         if not s.depois.strip():
             continue
-        chancelados = {t.caminho: t for t in (ch.trechos(s.antes) if s.tem_chancela else [])}
-        agora = {t.caminho: t for t in ch.trechos(s.depois)}
-        blocos = []
+        cheio = rel == arquivo
+        # O texto que a tela mostra e a caixa edita é o do arquivo, cru. A versão
+        # canonizada (tabela re-alinhada vira a mesma tabela) serve só para decidir o que
+        # mudou de verdade — mostrar ou salvar o texto canonizado reescreveria o arquivo
+        # do autor por conta própria.
+        base_cru = ""
+        antes: dict = {}
+        agora: dict = {}
+        if cheio:
+            base_cru = (ch.chancelado(root, rel) if base in (None, ch.REF)
+                        else ch.conteudo_em(root, base, rel)) or ""
+            antes = {x.caminho: x for x in ch.trechos(base_cru)}
+            agora = {x.caminho: x for x in ch.trechos(ch.atual(root, rel) or "")}
+
+        trechos = []
         for e in ch.estados(s):
-            atual = _corpo(agora.get(e["path"]))
-            base = _corpo(chancelados.get(e["path"]))
-            esq = dir_ = inline = None
-            proporcao, mexidas = 0.0, 0
-            if e["state"] == "mexido" and base:
-                esq, dir_ = diff_palavras(base, atual)
-                inline, proporcao, mexidas = diff_inline(base, atual)
-            blocos.append({
+            t = {
                 "heading": e["heading"], "path": e["path"], "line": e["line"],
                 "lines": e["lines"], "estado": e["state"], "bloqueado": e["blocked"],
                 "ressalvas": [{"mark": c["mark"], "text": c["text"].lstrip("> ").strip(),
                                "vencida": c["mark"] == "❓" and _vencida(c["text"], hoje)}
                               for c in e["caveats"]],
-                "sumidas": e["dropped"], "hunks": e["hunks"],
-                "texto": atual, "chancelado": base,
-                # The sha of what the page is showing: saving sends it back, and the server
-                # refuses if the passage moved meanwhile.
-                "sha": ch.sha_do(agora[e["path"]].texto) if e["path"] in agora else "",
-                "esq": esq, "dir": dir_, "inline": inline,
-                "proporcao": proporcao, "mexidas": mexidas,
-            })
-        docs.append({"file": rel, "blocos": blocos, "rastreado": s.tem_chancela,
-                     "em": _ultima(root, rel), "linhas": len(s.depois.splitlines())})
+            }
+            if cheio:
+                atual_txt = agora[e["path"]].texto if e["path"] in agora else ""
+                base_txt = antes[e["path"]].texto if e["path"] in antes else ""
+                t.update({
+                    "texto": atual_txt,
+                    # The sha of what the page is showing: saving sends it back, and the
+                    # server refuses if the passage moved meanwhile.
+                    "sha": ch.sha_do(atual_txt),
+                    "sumidas": ch.sumidas(base_txt.splitlines(), atual_txt.splitlines()),
+                    "base": realcar(base_txt) if base_txt else [],
+                    # De pé é de pé: se a única diferença for cosmética — uma tabela
+                    # re-alinhada —, o texto aparece limpo, sem marcas que não pedem nada.
+                    "marcado": (realcar(atual_txt) if e["state"] == "com chancela"
+                                else marcar(base_txt, atual_txt)),
+                })
+            else:
+                t["sumidas"] = e["dropped"]
+            trechos.append(t)
+
+        # Passages that exist in the chancel and no longer in the file: the deletion is a
+        # change like any other, and nothing else on screen would show it.
+        if cheio:
+            for caminho, velho in antes.items():
+                if caminho in agora:
+                    continue
+                trechos.append({
+                    "heading": velho.titulo, "path": caminho, "line": velho.linha,
+                    "lines": velho.linhas, "estado": "apagado", "bloqueado": "",
+                    "ressalvas": [], "sumidas": [], "texto": "", "sha": "",
+                    "base": realcar(velho.texto), "marcado": [],
+                })
+        docs.append({"file": rel, "trechos": trechos, "rastreado": s.tem_chancela,
+                     "cheio": cheio, "em": _ultima(root, rel) if cheio else "",
+                     "linhas": len(s.depois.splitlines())})
     docs.sort(key=lambda d: (not d["rastreado"], d["file"]))
-    return {"repo": root.name, "root": str(root), "docs": docs, "hoje": hoje, "by": by}
+    return {"repo": root.name, "root": str(root), "docs": docs, "hoje": hoje, "by": by,
+            "base": base or ch.REF, "revisoes": ch.revisoes(root)}
 
 
 # ---- the actions ---------------------------------------------------------------------
@@ -212,7 +430,10 @@ class Handler(BaseHTTPRequestHandler):
 
     def do_GET(self) -> None:  # noqa: N802
         if self.path.startswith("/api/state"):
-            self._json(estado(self.root, self.by))
+            from urllib.parse import parse_qs, urlparse
+            q = parse_qs(urlparse(self.path).query)
+            self._json(estado(self.root, self.by, base=q.get("base", [None])[0],
+                              arquivo=q.get("file", [None])[0]))
         elif self.path in ("/", "/index.html"):
             self._envia(PAGE.encode("utf-8"), "text/html; charset=utf-8")
         else:
@@ -228,7 +449,9 @@ class Handler(BaseHTTPRequestHandler):
             resposta = agir(self.root, pedido, self.by)
         except Exception as e:                      # o servidor é local; o erro vai à tela
             resposta = {"ok": False, "erro": f"{type(e).__name__}: {e}"}
-        resposta["estado"] = estado(self.root, self.by)
+        resposta["estado"] = estado(self.root, self.by,
+                                    base=pedido.get("base") or None,
+                                    arquivo=pedido.get("file"))
         self._json(resposta)
 
     def log_message(self, *args) -> None:           # sem ruído no terminal
@@ -262,165 +485,153 @@ def run(root: Path, port: int = 8431, by: str = "", abrir: bool = False) -> int:
 
 PAGE = """<!doctype html><html lang="pt-br"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
-<title>km · revisão</title><style>
+<title>km · chancela</title><style>
 /* Escuro por decisao, nao por preferencia do sistema: e onde o autor trabalha. */
-:root{--bg:#0F1419;--card:#161D24;--ink:#DCE3EA;--mut:#8695A2;--rule:#232D36;--acc:#6EA8D8;
+:root{--bg:#0F1419;--card:#141B22;--ink:#DCE3EA;--mut:#8695A2;--rule:#232D36;--acc:#6EA8D8;
 --ok:#7BC49A;--ok-bg:#16301F;--ace:#E0B463;--ace-bg:#2E2513;--neg:#E09A9A;--neg-bg:#331F1F;
 --val:#6EA8D8;--val-bg:#152433;--pend:#8695A2;--pend-bg:#1C242B}
-*{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--ink);
 font:14.5px/1.55 system-ui,-apple-system,"Segoe UI",sans-serif}
-.topo{display:flex;gap:14px;align-items:baseline;flex-wrap:wrap;padding:12px 20px;
-border-bottom:1px solid var(--rule);position:sticky;top:0;background:var(--bg);z-index:3}
-.topo b{font-size:16px}.topo .n{color:var(--mut);font-size:12.5px;font-family:ui-monospace,Menlo,monospace}
-.filtros{display:flex;gap:6px;margin-left:auto;flex-wrap:wrap}
-.filtros button{font:inherit;font-size:12.5px;padding:3px 11px;border-radius:999px;cursor:pointer;
-border:1px solid var(--rule);background:transparent;color:var(--mut)}
-.filtros button[aria-pressed=true]{background:var(--ink);color:var(--bg);border-color:var(--ink)}
-.grade{display:grid;grid-template-columns:minmax(200px,250px) minmax(0,1fr) minmax(250px,330px)}
-.lado{border-right:1px solid var(--rule);padding:10px 8px;position:sticky;top:53px;
-max-height:calc(100vh - 53px);overflow:auto}
-.lado button{display:block;width:100%;text-align:left;background:none;border:0;color:inherit;
-font:inherit;padding:7px 9px;border-radius:6px;cursor:pointer}
-.lado button:hover{background:var(--card)}
-.lado button[aria-current=true]{background:var(--card);box-shadow:inset 2px 0 0 var(--acc)}
-.lado .f{font-family:ui-monospace,Menlo,monospace;font-size:12px;word-break:break-all}
-.barra{display:flex;height:5px;border-radius:3px;overflow:hidden;margin-top:5px;background:var(--rule)}
-.barra i{display:block;height:100%}
-.meio{padding:14px 18px 80px;min-width:0}
-.bloco{background:var(--card);border:1px solid var(--rule);border-radius:9px;margin:0 0 12px;
-overflow:hidden;scroll-margin-top:64px}
-.bloco.foco{border-color:var(--acc);box-shadow:0 0 0 1px var(--acc)}
-.cab{display:flex;gap:10px;align-items:baseline;flex-wrap:wrap;padding:11px 14px;cursor:pointer}
-.cab h3{margin:0;font-size:15px;font-weight:600}
-.cab .meta{color:var(--mut);font-size:11.5px;font-family:ui-monospace,Menlo,monospace;margin-left:auto}
-.chip{font:11px/1.7 ui-monospace,Menlo,monospace;padding:0 9px;border-radius:999px;white-space:nowrap}
-.e-aprovado{color:var(--ok);background:var(--ok-bg)}.e-aceite{color:var(--ace);background:var(--ace-bg)}
-.e-reprovado{color:var(--neg);background:var(--neg-bg)}.e-avalidar{color:var(--val);background:var(--val-bg)}
-.e-pendente{color:var(--pend);background:var(--pend-bg)}.e-mexido{color:var(--ace);background:var(--ace-bg)}
-.sim{color:var(--mut);border:1px dashed var(--rule)}
-.marcacao{padding:12px 15px;border-top:1px solid var(--rule);font:13px/1.7 ui-monospace,Menlo,monospace;
-white-space:pre-wrap;word-break:break-word;overflow-wrap:anywhere}
-.aviso{font-family:system-ui,sans-serif;font-size:11.5px;color:var(--mut);padding:7px 15px 0}
-.par{display:grid;grid-template-columns:1fr 1fr;gap:0;border-top:1px solid var(--rule)}
-.par>div{padding:11px 14px;font:12.5px/1.5 ui-monospace,Menlo,monospace;white-space:pre-wrap;
-word-break:break-word;overflow-wrap:anywhere}
-.par>div:first-child{border-right:1px solid var(--rule);background:color-mix(in srgb,var(--bg) 60%,transparent)}
-.rot{font-family:system-ui,sans-serif;font-size:10.5px;text-transform:uppercase;letter-spacing:.07em;
-color:var(--mut);margin-bottom:6px}
-/* fundo preenchido funciona em codigo, onde a linha e curta; em prosa vira mancha */
-body.st-sublinhado del{color:var(--neg);text-decoration:line-through;text-decoration-thickness:1px;
-  opacity:.75;background:none}
-body.st-sublinhado ins{color:var(--ink);text-decoration:none;background:none;
-  border-bottom:2px solid var(--ok);padding-bottom:1px}
-body.st-margem del{display:none}
-body.st-margem ins{color:var(--ink);background:none;text-decoration:none;font-weight:600}
-body.st-margem .par>div:last-child{box-shadow:inset 3px 0 0 var(--ok)}
-body.st-margem .par>div:first-child{box-shadow:inset 3px 0 0 var(--neg)}
-body.st-fundo del{background:var(--neg-bg);color:var(--neg);text-decoration:line-through}
-body.st-fundo ins{background:var(--ok-bg);color:var(--ok);text-decoration:none}
-.estilos{display:flex;gap:4px;align-items:center;font-size:12px;color:var(--mut)}
-.estilos button{font:inherit;font-size:12px;padding:2px 9px;border-radius:5px;cursor:pointer;
-  border:1px solid var(--rule);background:transparent;color:var(--mut)}
-.estilos button[aria-pressed=true]{background:var(--ink);color:var(--bg);border-color:var(--ink)}
-.corpo{padding:11px 14px;font:12.5px/1.5 ui-monospace,Menlo,monospace;white-space:pre-wrap;
-border-top:1px solid var(--rule);color:var(--mut)}
-.motivo{padding:9px 14px;border-top:1px solid var(--rule);border-left:3px solid var(--neg);
-background:var(--neg-bg);font-size:13.5px}
-.pergunta{padding:9px 14px;border-top:1px solid var(--rule);border-left:3px solid var(--val);
-background:var(--val-bg);font-size:13.5px}
-.acoes{display:flex;gap:7px;padding:10px 14px;border-top:1px solid var(--rule);flex-wrap:wrap}
-.acoes button{font:inherit;font-size:13px;padding:5px 12px;border-radius:6px;cursor:pointer;
-border:1px solid var(--rule);background:var(--bg);color:var(--ink)}
-.acoes button.pri{background:var(--ok-bg);border-color:var(--ok-bg);color:var(--ok)}
-.dir{border-left:1px solid var(--rule);padding:14px;position:sticky;top:53px;
-max-height:calc(100vh - 53px);overflow:auto}
-.dir h4{margin:0 0 8px;font-size:12px;text-transform:uppercase;letter-spacing:.07em;color:var(--mut)}
-.dl{display:grid;grid-template-columns:auto 1fr;gap:4px 10px;font-size:12.5px;margin-bottom:16px}
-.dl dt{color:var(--mut)}.dl dd{margin:0}
-.nota{border-left:3px solid var(--acc);padding:7px 10px;margin-bottom:8px;font-size:13px}
-.q{color:var(--mut);font-size:11px;font-family:ui-monospace,Menlo,monospace}
-textarea{width:100%;min-height:62px;font:inherit;font-size:13px;padding:7px;border-radius:6px;
-border:1px solid var(--rule);background:var(--bg);color:var(--ink)}
-.vazio{color:var(--mut);font-size:13px;padding:20px 0}
-@media(max-width:1100px){.grade{grid-template-columns:minmax(180px,220px) minmax(0,1fr)}.dir{display:none}}
-@media(max-width:760px){.grade{grid-template-columns:1fr}.lado{position:static;max-height:170px}
-.par{grid-template-columns:1fr}.par>div:first-child{border-right:0;border-bottom:1px solid var(--rule)}}
-.recado{padding:8px 20px;font-size:13px;background:var(--ok-bg);color:var(--ok);
+.topo{display:flex;gap:12px;align-items:center;flex-wrap:wrap;padding:9px 16px;
+border-bottom:1px solid var(--rule);position:sticky;top:0;background:var(--bg);z-index:5}
+.topo b{font-size:15px}
+.q,.topo .n{color:var(--mut);font-size:12px;font-family:ui-monospace,Menlo,monospace}
+select,.topo button{font:inherit;font-size:12.5px;padding:3px 9px;border-radius:6px;
+border:1px solid var(--rule);background:var(--bg);color:var(--ink);cursor:pointer}
+.topo .dir{margin-left:auto;display:flex;gap:8px;align-items:center}
+.recado{padding:7px 16px;font-size:13px;background:var(--ok-bg);color:var(--ok);
 border-bottom:1px solid var(--rule)}
 .recado.ruim{background:var(--neg-bg);color:var(--neg)}
-.form{display:flex;gap:7px;padding:10px 14px;border-top:1px solid var(--rule);flex-wrap:wrap;
-align-items:center}
-.form input{flex:1 1 240px;font:inherit;font-size:13px;padding:5px 9px;border-radius:6px;
+.corpo{display:flex;align-items:flex-start}
+.lado{width:210px;flex:0 0 210px;border-right:1px solid var(--rule);padding:9px 7px;
+position:sticky;top:45px;max-height:calc(100vh - 45px);overflow:auto}
+.lado button{display:block;width:100%;text-align:left;background:none;border:0;color:inherit;
+font:inherit;padding:6px 8px;border-radius:6px;cursor:pointer}
+.lado button:hover{background:var(--card)}
+.lado button[aria-current=true]{background:var(--card);box-shadow:inset 2px 0 0 var(--acc)}
+.lado .f{font-family:ui-monospace,Menlo,monospace;font-size:11.5px;word-break:break-all}
+.barra{display:flex;height:4px;border-radius:3px;overflow:hidden;margin-top:4px;background:var(--rule)}
+.barra i{display:block;height:100%}
+.rot{font-family:system-ui,sans-serif;font-size:10px;text-transform:uppercase;
+letter-spacing:.08em;color:var(--mut)}
+
+/* A grade: uma linha por trecho, tres colunas alinhadas. O texto corre de cima a baixo;
+   o que separa um trecho do outro e uma regua fina, nao um cartao. */
+.doc{flex:1;min-width:0;display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr) 168px;
+align-items:stretch}
+.cabgrade{position:sticky;top:45px;background:var(--bg);border-bottom:1px solid var(--rule);
+padding:6px 14px;z-index:4}
+.tr{display:contents}
+.col{padding:10px 14px 14px;border-bottom:1px solid var(--rule);min-width:0}
+.col.base{border-right:1px solid var(--rule);background:color-mix(in srgb,var(--bg) 55%,#000)}
+.col.agora{border-right:1px solid var(--rule)}
+.col.agora.inteiro{grid-column:1 / 3}
+.col.acoes{display:flex;flex-direction:column;gap:4px;align-items:stretch;padding:10px 10px 12px}
+.tr.foco .col{background:color-mix(in srgb,var(--card) 70%,transparent)}
+.tr.foco .col.agora{box-shadow:inset 2px 0 0 var(--acc)}
+.txt{font:12.9px/1.62 ui-monospace,SFMono-Regular,Menlo,monospace;white-space:pre-wrap;
+word-break:break-word;overflow-wrap:anywhere}
+.ln{display:block;padding:0 2px;border-radius:2px}
+.ln.novo{background:var(--ok-bg)}
+.ln.sumiu{background:var(--neg-bg);color:var(--neg);text-decoration:line-through;
+text-decoration-color:color-mix(in srgb,var(--neg) 60%,transparent)}
+.ln.mexido{background:color-mix(in srgb,var(--ace-bg) 55%,transparent)}
+del{background:var(--neg-bg);color:var(--neg);text-decoration:line-through;
+padding:0 2px;border-radius:2px}
+ins{background:var(--ok-bg);color:var(--ok);text-decoration:none;padding:0 2px;border-radius:2px}
+/* o realce do fonte markdown */
+.l-t1,.l-t2,.l-t3,.l-t4,.l-t5,.l-t6{color:#EDF2F7;font-weight:600}
+.l-t1{font-size:16.5px}.l-t2{font-size:15px}.l-t3{font-size:13.8px}
+.l-cit{color:#B9C6D2}.l-marca{color:var(--ace)}
+.l-cod{color:#9FD3B8}.l-tab{color:#B9C6D2}
+.m-cerquilha{color:#54626E}.m-forte{color:#EDF2F7}.m-enfase{color:#CBD5DE;font-style:italic}
+.m-cod{color:#9FD3B8}.m-link{color:var(--acc)}.m-url{color:#54626E}
+.m-riscado{color:var(--mut)}
+.vaziocol{color:#3C4752;font-size:11.5px;font-family:ui-monospace,Menlo,monospace}
+.chip{font:10.5px/1.7 ui-monospace,Menlo,monospace;padding:0 8px;border-radius:999px;
+white-space:nowrap;align-self:flex-start}
+.e-aprovado{color:var(--ok);background:var(--ok-bg)}.e-mexido{color:var(--ace);background:var(--ace-bg)}
+.e-pendente{color:var(--pend);background:var(--pend-bg)}.e-negado{color:var(--neg);background:var(--neg-bg)}
+.acoes button{font:inherit;font-size:12.5px;padding:4px 10px;border-radius:6px;cursor:pointer;
+border:1px solid var(--rule);background:var(--bg);color:var(--ink);text-align:left}
+.acoes button:hover{border-color:var(--acc)}
+.acoes button.pri{background:var(--ok-bg);border-color:var(--ok-bg);color:var(--ok)}
+.acoes button[disabled]{opacity:.35;cursor:not-allowed}
+.acoes .marcas{display:flex;gap:4px}
+.acoes .marcas button{flex:1;text-align:center;padding:3px 0;font-size:12px}
+.nota{font-size:12px;border-left:3px solid var(--neg);background:var(--neg-bg);
+padding:6px 9px;margin-bottom:8px;border-radius:0 4px 4px 0}
+.nota.aviso{border-color:var(--ace);background:var(--ace-bg)}
+textarea{width:100%;min-height:200px;font:12.9px/1.62 ui-monospace,Menlo,monospace;padding:8px;
+border-radius:6px;border:1px solid var(--acc);background:var(--bg);color:var(--ink);resize:vertical}
+.form{display:flex;flex-direction:column;gap:5px}
+.form input{font:inherit;font-size:12.5px;padding:4px 8px;border-radius:6px;
 border:1px solid var(--rule);background:var(--bg);color:var(--ink)}
-.form button{font:inherit;font-size:13px;padding:5px 12px;border-radius:6px;cursor:pointer;
-border:1px solid var(--rule);background:var(--bg);color:var(--ink)}
-.form button.pri{background:var(--ok-bg);border-color:var(--ok-bg);color:var(--ok)}
-.acoes button[disabled]{opacity:.4;cursor:not-allowed}
+.vazio{padding:24px;color:var(--mut)}
+@media(max-width:1200px){.doc{grid-template-columns:minmax(0,1fr) 150px}
+.col.base{display:none}.col.agora.inteiro{grid-column:auto}.lado{width:170px;flex-basis:170px}}
 </style></head><body>
 <div class="topo"><b id="repo">km</b><span class="n" id="resumo"></span>
-<div class="estilos" id="estilos"></div>
-<div class="filtros" id="filtros"></div></div>
+<div class="dir">
+  <span class="q">comparar com</span><select id="base" onchange="trocarBase()"></select>
+  <button onclick="setVer('tudo')" id="v-tudo" aria-pressed="true">texto inteiro</button>
+  <button onclick="setVer('mudou')" id="v-mudou">só o que mudou</button>
+</div></div>
 <div class="recado" id="recado" hidden></div>
-<div class="grade"><nav class="lado" id="lado"></nav>
-<section class="meio" id="meio"></section><aside class="dir" id="dir"></aside></div>
+<div class="corpo"><nav class="lado" id="lado"></nav><main class="doc" id="doc"></main></div>
 <script>
 const $ = (id) => document.getElementById(id);
 const esc = s => (s==null?'':String(s)).replace(/[&<>]/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[m]));
-// A ressalva e markdown no arquivo; na tela ela e so texto com enfase.
 const neg = s => esc(s).replace(/\\*\\*(.+?)\\*\\*/g, '<b>$1</b>');
-const CH = {'com chancela':'e-aprovado','mexido':'e-mexido','sem chancela':'e-pendente'};
-const MARCA = {'⚠️':'e-aceite','❓':'e-avalidar','🚫':'e-reprovado'};
-const FILTROS = ['tudo','pede você','mexidos','sem chancela','com ressalva','de pé'];
-const ESTILOS = [['st-sublinhado','sublinhado'],['st-margem','margem'],['st-fundo','fundo']];
-const VISTAS = [['auto','automática'],['marcacao','marcação'],['lado','lado a lado']];
+const CH = {'com chancela':'e-aprovado','mexido':'e-mexido','sem chancela':'e-pendente',
+            'apagado':'e-negado'};
 const emDias = n => new Date(Date.now()+n*864e5).toISOString().slice(0,10);
-const mexido = e => e === 'mexido';
-const classe = e => CH[e] || 'e-pendente';
-// Uma ressalva vencida, ou uma que sumiu, pede voce tanto quanto um trecho mexido.
-const pedeVoce = b => mexido(b.estado) || b.estado === 'sem chancela' || !!b.bloqueado
-  || (b.sumidas||[]).length > 0 || (b.ressalvas||[]).some(r => r.vencida);
-// Acima de 40% das palavras mexidas, marcacao vira sopa: o trecho cai para duas colunas.
-const usaMarcacao = b => vista === 'marcacao' || (vista === 'auto' && b.proporcao <= 0.4);
+const pedeVoce = t => t.estado !== 'com chancela' || !!t.bloqueado
+  || (t.sumidas||[]).length > 0 || (t.ressalvas||[]).some(r => r.vencida);
 
-let D = null, doc = 0, filtro = 'pede você', foco = null;
-let estilo = 'st-fundo', vista = 'auto';
+let D = null, doc = 0, foco = 0, ver = 'tudo', base = null;
 let form = null, editor = null, recado = '', meuTexto = '';
 
-async function carregar(){
-  const r = await fetch('/api/state');
-  D = await r.json();
+async function carregar(arquivo){
+  // Só o documento aberto vem com o texto inteiro marcado; o resto é a régua lateral.
+  const q = new URLSearchParams();
+  if (base) q.set('base', base);
+  const alvoArq = arquivo || (D && D.docs[doc] ? D.docs[doc].file : '');
+  if (alvoArq) q.set('file', alvoArq);
+  const nova = await (await fetch('/api/state?' + q)).json();
+  base = nova.base;
+  const i = nova.docs.findIndex(d => d.file === alvoArq);
+  D = nova;
+  doc = i >= 0 ? i : 0;
+  if (!D.docs[doc] || !D.docs[doc].cheio) return carregar(D.docs[doc] ? D.docs[doc].file : '');
   desenhar();
 }
 
 async function agir(corpo){
   const r = await fetch('/api/act', {method:'POST',
-    headers:{'Content-Type':'application/json'}, body: JSON.stringify(corpo)});
+    headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({...corpo, base: base === 'refs/km/chancela' ? '' : base})});
   const j = await r.json();
-  if (j.estado) D = j.estado;
+  if (j.estado) { D = j.estado; }
   recado = j.ok ? '✓ ' + (j.msg || 'feito') : '✕ ' + (j.erro || 'não deu');
-  if (j.conflito) { editor = {i: editor ? editor.i : 0, conflito: j.conflito.atual}; }
+  if (j.conflito) { editor = {i: editor ? editor.i : foco, conflito: j.conflito.atual}; }
   else { form = null; if (j.ok) editor = null; }
   desenhar();
+  if (j.ok) setTimeout(() => { if (!form && !editor) carregar(); }, 50);
 }
 
-function bloco(i){ return D.docs[doc].blocos[i]; }
-function base(i){ const b = bloco(i); return {acao:'', file: D.docs[doc].file, path: b.path}; }
+const trechos = () => (D && D.docs[doc] ? D.docs[doc].trechos : []);
+const trecho = (i) => trechos()[i];
+const alvo = (i) => ({file: D.docs[doc].file, path: trecho(i).path});
+const visiveis = () => trechos().map((t,i)=>[t,i]).filter(([t])=> ver === 'tudo' || pedeVoce(t));
 
-function passa(b){
-  if (filtro === 'tudo') return true;
-  if (filtro === 'pede você') return pedeVoce(b);
-  if (filtro === 'mexidos') return mexido(b.estado);
-  if (filtro === 'sem chancela') return b.estado === 'sem chancela';
-  if (filtro === 'com ressalva') return (b.ressalvas||[]).length > 0 || (b.sumidas||[]).length > 0;
-  return b.estado === 'com chancela' && !b.bloqueado;
-}
 function contar(d){
-  const c = {pe:0, mex:0, pend:0, neg:0, val:0};
-  for (const b of d.blocos){
-    if (b.bloqueado) c.neg++;
-    else if (mexido(b.estado)) c.mex++;
-    else if (b.estado === 'sem chancela') c.pend++;
-    else if ((b.ressalvas||[]).length) c.val++;
+  const c = {pe:0, mex:0, pend:0, neg:0};
+  for (const t of d.trechos){
+    if (t.bloqueado || t.estado === 'apagado') c.neg++;
+    else if (t.estado === 'mexido') c.mex++;
+    else if (t.estado === 'sem chancela') c.pend++;
     else c.pe++;
   }
   return c;
@@ -430,197 +641,158 @@ function lado(){
   let divisor = false;
   $('lado').innerHTML = D.docs.map((d,i)=>{
     let antes = '';
-    if (!d.rastreado && !divisor) {
-      divisor = true;
-      antes = '<div class="rot" style="padding:12px 9px 5px">sem chancela ainda</div>';
-    }
-    const c = contar(d), t = d.blocos.length || 1;
-    const seg = [[c.pe,'var(--ok)'],[c.mex,'var(--ace)'],[c.neg,'var(--neg)'],
-                 [c.val,'var(--val)'],[c.pend,'var(--rule)']]
+    if (!d.rastreado && !divisor) { divisor = true;
+      antes = '<div class="rot" style="padding:11px 8px 5px">sem chancela ainda</div>'; }
+    const c = contar(d), t = d.trechos.length || 1;
+    const seg = [[c.pe,'var(--ok)'],[c.mex,'var(--ace)'],[c.neg,'var(--neg)'],[c.pend,'var(--rule)']]
       .map(([n,cor])=>n?`<i style="width:${100*n/t}%;background:${cor}"></i>`:'').join('');
     return antes + `<button aria-current="${i===doc}" onclick="abrir(${i})">
       <div class="f">${esc(d.file)}</div>
-      <div class="n q">${c.pe}/${d.blocos.length} de pé${c.mex?' · '+c.mex+' mexidos':''}</div>
+      <div class="q">${c.pe}/${d.trechos.length} de pé${c.mex?' · '+c.mex+' mexidos':''}</div>
       <div class="barra">${seg}</div></button>`;}).join('');
 }
 
-function formulario(i){
-  if (!form || form.i !== i) return '';
-  const b = bloco(i);
-  const campos = {
-    validar: ['O que falta confirmar?', 'prazo'],
-    reverter: ['Por que a mudança não serve?', ''],
-    '⚠️': ['A dúvida, como ela vai para o texto', ''],
-    '🚫': ['O que está errado — isto bloqueia a chancela deste trecho', ''],
-    aprovar: ['Por que você endossa (vai na mensagem do commit)', ''],
-  }[form.tipo];
-  return `<div class="form">
-    <input id="f-texto" placeholder="${esc(campos[0])}" autofocus
-      onkeydown="if(event.key==='Enter')enviarForm(${i});if(event.key==='Escape')fechar()">
-    ${campos[1]==='prazo'?`<input id="f-prazo" value="${emDias(14)}" size="11"
-      onkeydown="if(event.key==='Enter')enviarForm(${i})">`:''}
-    <button class="pri" onclick="enviarForm(${i})">${form.tipo==='reverter'?'Reverter':'Escrever'}</button>
-    <button onclick="fechar()">cancelar</button>
-    <div class="q" style="flex-basis:100%">${form.tipo==='validar'
-      ? 'entra na chancela com um ❓ e o prazo, escritos no próprio texto'
-      : (form.tipo==='reverter' ? 'o texto volta ao que você chancelou; o motivo vai no commit'
-      : (form.tipo==='aprovar' ? 'o trecho entra na chancela'
-      : 'vira uma citação no arquivo, visível para quem abrir'))}</div></div>`;
+function linhas(ls){
+  if (!ls || !ls.length) return '<div class="vaziocol">— nada aqui —</div>';
+  return '<div class="txt">' + ls.map(l =>
+    `<span class="ln ${l.tipo === 'igual' ? '' : l.tipo} ${l.classe}">${l.html}</span>`).join('') + '</div>';
 }
 
-function caixaEditor(i){
-  if (!editor || editor.i !== i) return '';
-  const b = bloco(i);
-  if (editor.conflito !== undefined) {
-    return `<div class="form" style="display:block">
-      <div class="motivo" style="border:0;padding:8px 0">O arquivo mudou enquanto você
-      editava — outro agente ou o editor chegaram primeiro. Nada foi sobrescrito.</div>
-      <div class="rot">no arquivo agora</div>
-      <textarea readonly>${esc(editor.conflito)}</textarea>
-      <div class="rot" style="margin-top:8px">o seu texto</div>
-      <textarea id="e-texto">${esc(meuTexto)}</textarea>
-      <div class="acoes" style="border:0;padding:8px 0">
-        <button class="pri" onclick="salvar(${i}, true)">salvar por cima</button>
-        <button onclick="fechar()">descartar o meu</button></div></div>`;
+function avisos(t){
+  let out = '';
+  for (const s of (t.sumidas||[])) {
+    out += `<div class="nota"><b>ressalva removida</b> — ${neg(s.replace(/^\\s*>\\s*/,''))}
+      <div class="q">estava na chancela. Aprovar aqui aprova a remoção.</div></div>`;
   }
-  return `<div class="form" style="display:block">
-    <textarea id="e-texto" style="min-height:160px"
-      onkeydown="if(event.key==='Escape')fechar()">${esc(b.texto)}</textarea>
-    <div class="acoes" style="border:0;padding:8px 0">
-      <button class="pri" onclick="salvar(${i})">Salvar no arquivo</button>
+  if (t.bloqueado) out += `<div class="nota"><b>🚫 bloqueado</b> — ${neg(t.bloqueado.replace(/^\\s*>\\s*/,''))}</div>`;
+  for (const r of (t.ressalvas||[])) {
+    if (r.vencida) out += `<div class="nota aviso"><b>❓ prazo vencido</b> — ${neg(r.text)}</div>`;
+  }
+  return out;
+}
+
+function acoes(t, i){
+  if (editor && editor.i === i) {
+    return `<button class="pri" onclick="salvar(${i})">Salvar</button>
       <button onclick="fechar()">cancelar</button>
-      <span class="q">salva só este trecho; se o arquivo tiver mudado, a tela avisa</span>
-    </div></div>`;
-}
-
-function cartao(b, i){
-  const dif = b.esq && b.dir;
-  const acoes = editor && editor.i === i ? '' : `<div class="acoes">
-    <button class="pri" ${b.bloqueado?'disabled title="resolva o 🚫 primeiro"':''}
-      onclick="aprovar(${i})">Aprovar</button>
+      <div class="q">salva só este trecho</div>`;
+  }
+  if (form && form.i === i) {
+    const rot = {validar:['o que falta confirmar','prazo'], reverter:['por que não serve',''],
+                 '⚠️':['a dúvida, como vai para o texto',''], '🚫':['o que está errado','']}[form.tipo];
+    return `<div class="form">
+      <input id="f-texto" placeholder="${esc(rot[0])}" autofocus
+        onkeydown="if(event.key==='Enter')enviar(${i});if(event.key==='Escape')fechar()">
+      ${rot[1]==='prazo'?`<input id="f-prazo" value="${emDias(14)}">`:''}
+      <button class="pri" onclick="enviar(${i})">${form.tipo==='reverter'?'Reverter':'Escrever'}</button>
+      <button onclick="fechar()">cancelar</button></div>`;
+  }
+  if (t.estado === 'apagado') {
+    return `<span class="chip e-negado">apagado</span>
+      <div class="q">saiu do arquivo depois da chancela</div>
+      <button onclick="agir({...alvo(${i}), acao:'aprovar', motivo:'trecho removido'})">Aprovar a remoção</button>`;
+  }
+  const trava = t.bloqueado ? 'disabled title="resolva o 🚫 primeiro"' : '';
+  const marcas = `<div class="marcas">
+      <button onclick="abrirForm(${i},'⚠️')" title="ressalva: sem certeza">⚠️</button>
+      <button onclick="abrirForm(${i},'🚫')" title="discordo — bloqueia a chancela">🚫</button>
+      <button onclick="abrirForm(${i},'validar')" title="a validar, com prazo">❓</button>
+      <button onclick="editar(${i})" title="editar este trecho">✎</button></div>`;
+  // Um trecho que esta de pe nao precisa de tres botoes ocupando a altura do texto: ele
+  // precisa de uma marca dizendo que esta de pe, e das marcas se voce quiser escrever algo.
+  if (t.estado === 'com chancela' && !t.bloqueado && !(t.sumidas||[]).length) {
+    return `<span class="chip e-aprovado">de pé</span>${marcas}
+      <div class="q">linha ${t.line} · ${t.lines}l</div>`;
+  }
+  return `<span class="chip ${CH[t.estado]||'e-pendente'}">${esc(t.estado)}</span>
+    <button class="pri" ${trava} onclick="agir({...alvo(${i}), acao:'aprovar'})">Aprovar</button>
     <button onclick="abrirForm(${i},'validar')">A validar…</button>
-    ${dif?`<button onclick="abrirForm(${i},'reverter')">Reverter…</button>`:''}
-    <span style="width:10px"></span>
-    <button onclick="abrirForm(${i},'⚠️')" title="sem certeza">⚠️</button>
-    <button onclick="abrirForm(${i},'🚫')" title="discordo — bloqueia a chancela">🚫</button>
-    <button onclick="editarBloco(${i})">Editar</button></div>`;
-  return `<div class="bloco ${foco===i?'foco':''}" id="b${i}">
-    <div class="cab" onclick="focar(${i})">
-      <h3>${esc(b.heading)}</h3>
-      <span class="chip ${classe(b.estado)}">${esc(b.estado)}</span>
-      ${b.bloqueado?'<span class="chip e-reprovado">🚫 bloqueado</span>':''}
-      <span class="meta">linha ${b.line} · ${b.lines}l</span></div>
-    ${(b.sumidas||[]).map(s=>`<div class="motivo"><b>ressalva removida:</b> ${neg(s.replace(/^\\s*>\\s*/,''))}
-      <br><span class="q">estava na chancela. Aprovar aqui aprova a remoção.</span></div>`).join('')}
-    ${(b.ressalvas||[]).map(r=>`<div class="pergunta"><span class="chip ${MARCA[r.mark]||'e-pendente'}">${esc(r.mark)}</span>
-      ${neg(r.text)}${r.vencida?' <b>— prazo vencido</b>':''}</div>`).join('')}
-    ${editor && editor.i === i ? '' : (dif ? (usaMarcacao(b)
-      ? `<div class="aviso">marcação · ${b.mexidas} palavras mexidas</div>
-         <div class="marcacao">${b.inline}</div>`
-      : `<div class="aviso">lado a lado · ${Math.round(b.proporcao*100)}% das palavras mexidas — demais para marcação</div>
-         <div class="par"><div><div class="rot">sua chancela${D.docs[doc].em?' · '+esc(D.docs[doc].em):''}</div>${b.esq}</div>
-         <div><div class="rot">agora</div>${b.dir}</div></div>`)
-      : `<div class="corpo">${esc((b.texto||'').slice(0,600))}${(b.texto||'').length>600?'…':''}</div>`)}
-    ${caixaEditor(i)}${formulario(i)}${acoes}</div>`;
-}
-
-function meio(){
-  const d = D.docs[doc];
-  const vis = d.blocos.map((b,i)=>[b,i]).filter(([b])=>passa(b));
-  $('meio').innerHTML = vis.length
-    ? vis.map(([b,i])=>cartao(b,i)).join('')
-    : `<div class="vazio">Nada neste filtro. ${d.blocos.length} trechos neste arquivo.</div>`;
-  if ((foco===null || !vis.some(([,i])=>i===foco)) && vis.length) foco = vis[0][1];
-  const campo = $('f-texto') || $('e-texto');
-  if (campo) campo.focus();
-}
-
-function dir(){
-  const d = D.docs[doc], b = d.blocos[foco];
-  const el = $('dir');
-  if (!b) { el.innerHTML = '<div class="vazio">Nenhum trecho em foco.</div>'; return; }
-  el.innerHTML = `<h4>${esc(b.heading)}</h4>
-    <dl class="dl">
-      <dt>estado</dt><dd><span class="chip ${classe(b.estado)}">${esc(b.estado)}</span></dd>
-      <dt>chancela</dt><dd>${d.em?'última em '+esc(d.em):'nunca'}</dd>
-      <dt>arquivo</dt><dd>${esc(d.file)}</dd>
-      <dt>tamanho</dt><dd>${b.lines} linhas · linha ${b.line}</dd>
-    </dl>
-    <h4>ressalvas, no próprio texto</h4>
-    ${(b.ressalvas||[]).length?b.ressalvas.map(r=>`<div class="nota">${esc(r.mark)} ${neg(r.text)}
-      <div class="q">${r.vencida?'prazo vencido':'vive no arquivo, não aqui'}</div></div>`).join('')
-      :'<div class="vazio" style="padding:0 0 10px">Nenhuma ressalva neste trecho.</div>'}
-    <h4>teclas</h4>
-    <div class="q">j k andar · a aprovar · v a validar · r reverter · e editar · Esc fecha</div>`;
+    <button onclick="abrirForm(${i},'reverter')">Reverter…</button>
+    ${marcas}<div class="q">linha ${t.line} · ${t.lines}l</div>`;
 }
 
 function desenhar(){
   if (!D) return;
   $('repo').textContent = D.repo;
-  const tot = D.docs.reduce((a,d)=>a+d.blocos.length,0);
-  const c = D.docs.reduce((a,d)=>{const x=contar(d);return {pe:a.pe+x.pe,mex:a.mex+x.mex,pend:a.pend+x.pend};},{pe:0,mex:0,pend:0});
-  $('resumo').textContent = `${D.docs.length} arquivos · ${tot} trechos · ${c.pe} de pé · ${c.mex} mexidos · ${c.pend} sem chancela`;
-  const r = $('recado');
-  r.hidden = !recado; r.textContent = recado;
+  const c = D.docs.reduce((a,d)=>{const x=contar(d);
+    return {pe:a.pe+x.pe, mex:a.mex+x.mex, pend:a.pend+x.pend};},{pe:0,mex:0,pend:0});
+  $('resumo').textContent = `${D.docs.length} arquivos · ${c.pe} de pé · ${c.mex} mexidos · ${c.pend} sem chancela`;
+  const r = $('recado'); r.hidden = !recado; r.textContent = recado;
   r.className = 'recado' + (recado.startsWith('✕') ? ' ruim' : '');
-  lado(); meio(); dir();
+  $('base').innerHTML = D.revisoes.map(v =>
+    `<option value="${esc(v.rev)}" ${v.rev===D.base?'selected':''}>${esc(v.label)}</option>`).join('');
+  $('v-tudo').setAttribute('aria-pressed', ver==='tudo');
+  $('v-mudou').setAttribute('aria-pressed', ver==='mudou');
+  lado();
+
+  const d = D.docs[doc];
+  const vis = visiveis();
+  const cabecalho = `<div class="cabgrade rot">${D.base === 'refs/km/chancela' ? 'a chancela' : esc(D.base)}</div>
+    <div class="cabgrade rot">${esc(d.file)} — agora${D.base === 'refs/km/chancela' ? '' : ' (os botões continuam escrevendo na chancela)'}</div>
+    <div class="cabgrade rot">o que fazer</div>`;
+  $('doc').innerHTML = cabecalho + (vis.length ? vis.map(([t,i]) => {
+    // Trecho de pé tem as duas colunas iguais. Em vez de repetir o texto, ele ocupa a
+    // largura inteira: o que se lê a maior parte do tempo é o documento, não o diff.
+    const igual = t.estado === 'com chancela' && !t.bloqueado && !(t.sumidas||[]).length
+      && !(editor && editor.i === i);
+    const meio = `<div class="col agora ${igual?'inteiro':''}">${avisos(t)}${editor && editor.i === i
+        ? caixa(t, i) : linhas(t.marcado)}</div>`;
+    return `<div class="tr ${foco===i?'foco':''}" id="t${i}" onclick="focar(${i})">
+      ${igual ? '' : `<div class="col base">${linhas(t.base)}</div>`}
+      ${meio}
+      <div class="col acoes">${acoes(t, i)}</div>
+    </div>`; }).join('') : '<div class="vazio">Nada mudou neste arquivo.</div>');
+  const campo = $('f-texto') || $('e-texto');
+  if (campo) campo.focus();
 }
 
-function focar(i){ foco = i; document.querySelectorAll('.bloco').forEach(e=>e.classList.remove('foco'));
-  $('b'+i)?.classList.add('foco'); dir(); }
-function abrir(i){ doc = i; foco = null; form = null; editor = null; desenhar(); scrollTo(0,0); }
+function caixa(t, i){
+  if (editor.conflito !== undefined) {
+    return `<div class="nota"><b>o arquivo mudou enquanto você editava</b>
+      <div class="q">outro agente ou o editor chegaram primeiro. Nada foi sobrescrito.</div></div>
+      <div class="rot">no arquivo agora</div>
+      <div class="txt" style="opacity:.8">${esc(editor.conflito)}</div>
+      <div class="rot" style="margin-top:8px">o seu texto</div>
+      <textarea id="e-texto">${esc(meuTexto)}</textarea>
+      <div class="q">“Salvar” grava o seu por cima</div>`;
+  }
+  return `<textarea id="e-texto" onkeydown="if(event.key==='Escape')fechar()">${esc(t.texto)}</textarea>`;
+}
+
+function abrir(i){ foco = 0; form = null; editor = null; scrollTo(0,0); carregar(D.docs[i].file); }
+function focar(i){ if (foco === i) return; foco = i; desenhar(); }
 function fechar(){ form = null; editor = null; desenhar(); }
-function abrirForm(i, tipo){ editor = null; form = {i, tipo}; focar(i); desenhar(); }
-function editarBloco(i){ form = null; editor = {i}; meuTexto = bloco(i).texto; focar(i); desenhar(); }
-function aprovar(i){ agir({...base(i), acao:'aprovar'}); }
-function enviarForm(i){
+function abrirForm(i, tipo){ editor = null; form = {i, tipo}; foco = i; desenhar(); }
+function editar(i){ form = null; editor = {i}; foco = i; meuTexto = trecho(i).texto; desenhar(); }
+function enviar(i){
   const texto = ($('f-texto')||{}).value || '';
   const prazo = ($('f-prazo')||{}).value || '';
-  if (form.tipo === 'validar') return agir({...base(i), acao:'validar', texto, prazo});
-  if (form.tipo === 'reverter') return agir({...base(i), acao:'reverter', motivo: texto});
-  if (form.tipo === 'aprovar') return agir({...base(i), acao:'aprovar', motivo: texto});
-  return agir({...base(i), acao:'marca', marca: form.tipo, texto});
+  if (form.tipo === 'validar') return agir({...alvo(i), acao:'validar', texto, prazo});
+  if (form.tipo === 'reverter') return agir({...alvo(i), acao:'reverter', motivo: texto});
+  return agir({...alvo(i), acao:'marca', marca: form.tipo, texto});
 }
-function salvar(i, porCima){
+function salvar(i){
   const t = ($('e-texto')||{}).value || '';
   meuTexto = t;
-  agir({...base(i), acao:'salvar', texto: t, sha: porCima ? '' : bloco(i).sha});
+  agir({...alvo(i), acao:'salvar', texto: t,
+        sha: (editor && editor.conflito !== undefined) ? '' : trecho(i).sha});
 }
-
-$('estilos').innerHTML = 'vista: ' + VISTAS.map(([c,n])=>
-  `<button aria-pressed="${c===vista}" onclick="mudarVista('${c}')">${n}</button>`).join('')
-  + '<span style="width:12px"></span>marcas: ' + ESTILOS.map(([c,n])=>
-  `<button aria-pressed="${c===estilo}" onclick="mudarEstilo('${c}')">${n}</button>`).join('');
-function mudarVista(v){ vista = v;
-  document.querySelectorAll('.estilos button').forEach(b=>{
-    const alvo = b.getAttribute('onclick');
-    if (alvo.includes('mudarVista')) b.setAttribute('aria-pressed', alvo.includes("'"+v+"'"));
-  });
-  meio(); }
-function mudarEstilo(c){ estilo = c; document.body.className = c;
-  document.querySelectorAll('.estilos button').forEach(b=>
-    b.setAttribute('aria-pressed', b.getAttribute('onclick').includes(c))); }
-document.body.className = estilo;
-$('filtros').innerHTML = FILTROS.map(f=>
-  `<button aria-pressed="${f===filtro}" onclick="filtrar('${f}')">${f}</button>`).join('');
-function filtrar(f){ filtro = f; foco = null;
-  document.querySelectorAll('.filtros button').forEach(b=>b.setAttribute('aria-pressed', b.textContent===f));
-  meio(); dir(); }
+function setVer(v){ ver = v; foco = 0; desenhar(); }
+function trocarBase(){ base = $('base').value; carregar(); }
 
 document.addEventListener('keydown', (e)=>{
-  if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') {
+  if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT') {
     if (e.key === 'Escape') fechar();
     return;
   }
-  const d = D && D.docs[doc]; if (!d) return;
-  const vis = d.blocos.map((b,i)=>[b,i]).filter(([b])=>passa(b)).map(([,i])=>i);
+  const vis = visiveis().map(([,i])=>i);
   const pos = vis.indexOf(foco);
-  if (e.key === 'j' && pos < vis.length-1) { focar(vis[pos+1]); $('b'+foco)?.scrollIntoView({block:'nearest'}); }
-  else if (e.key === 'k' && pos > 0) { focar(vis[pos-1]); $('b'+foco)?.scrollIntoView({block:'nearest'}); }
-  else if (e.key === 'a' && foco!==null) aprovar(foco);
-  else if (e.key === 'v' && foco!==null) abrirForm(foco,'validar');
-  else if (e.key === 'r' && foco!==null) abrirForm(foco,'reverter');
-  else if (e.key === 'e' && foco!==null) editarBloco(foco);
+  if (e.key === 'j' && pos < vis.length-1) { focar(vis[pos+1]); $('t'+foco)?.scrollIntoView({block:'center'}); }
+  else if (e.key === 'k' && pos > 0) { focar(vis[pos-1]); $('t'+foco)?.scrollIntoView({block:'center'}); }
+  else if (e.key === 'a') agir({...alvo(foco), acao:'aprovar'});
+  else if (e.key === 'v') abrirForm(foco,'validar');
+  else if (e.key === 'r') abrirForm(foco,'reverter');
+  else if (e.key === 'e') editar(foco);
   else if (e.key === 'Escape') fechar();
 });
 

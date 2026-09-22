@@ -22,22 +22,41 @@ outside it never appears.
 km serve          # binds 127.0.0.1:8431 — Ctrl-C ends it
 ```
 
-Three columns: the files, the passages that need you, the passage in focus. The diff is
-**word-level**, inside the text, and falls back to two columns above 40% of words moved —
-past that, inline marks turn into soup. Every passage carries the three verdicts:
+The document, whole, from top to bottom — not a stack of cards. Three columns, one row per
+passage:
+
+| | |
+|---|---|
+| **the chancel** | the passage as you endorsed it. A selector swaps it for any branch or commit |
+| **now** | the file today, with what is new, gone or edited marked in place, and editable |
+| **what to do** | the verdicts for that passage |
+
+The middle column is Markdown **source**, highlighted — headings, emphasis, code, links,
+quotes — with the change marked inside the text the way a tracked-changes document does it:
+a rewritten line shows word by word, a line that left stays visible and struck through, a new
+one arrives green. The idea is [pandiff](https://github.com/davidar/pandiff)'s: you read the
+text, not a report about the text. It is source and not rendered prose on purpose — the
+column is editable, and editing rendered Markdown means a serialiser rewrites the whole file
+on save.
+
+Where nothing changed, the text spans both columns and reads at full width; the two columns
+appear exactly where there is something to compare.
 
 | | |
 |---|---|
 | **Aprovar** | the passage goes into the chancel |
 | **A validar…** | writes `> ❓ **a confirmar até …**` into the text and chancels it: the half-chancel is a visible line, not a hidden state |
 | **Reverter…** | puts the text back to what you had chancelled |
-| **⚠️ · 🚫** | write the reservation into the file, in the agreed form |
-| **Editar** | edit the passage in place and save it to the file |
+| **⚠️ · 🚫 · ❓** | write the reservation into the file, in the agreed form |
+| **✎** | edit the passage in place and save it to the file |
 
 Saving is optimistically concurrent: if the file moved while the box was open — another
-agent, the editor — the page shows both texts and overwrites nothing until you say so.
+agent, the editor — the page shows both texts and overwrites nothing until you say so. What
+the box holds is the file's own text: the canonical form that lets a re-aligned table count
+as unchanged is used to decide what moved, never to display or to save.
+
 Keyboard: `j` `k` move, `a` approve, `v` defer with a date, `r` revert, `e` edit, `Esc`
-closes.
+closes. Only the document you are reading is built in full; the rail on the left is counts.
 
 The server does not stay up: you start it when you sit down to review. Inside VS Code, the
 command **km: abrir o painel da chancela** (`Ctrl+Alt+P`) starts it and opens it in the same

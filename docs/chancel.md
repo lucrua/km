@@ -107,9 +107,13 @@ listing. The `🚫` refusal is enforced here — the passage is left out and nam
 `--force` overrides it.
 
 `km serve` is where reviewing happens: a local page, started when you sit down and stopped
-with Ctrl-C, with the word-level diff, the three verdicts, the marks and an editable passage
-saved back to the file under optimistic concurrency. Inside VS Code, one command starts it
-and opens it in the same window, bound to the window's lifetime.
+with Ctrl-C. It shows the document whole, in three columns — the chancel (or any branch or
+commit), the file today, the verdicts — with the change marked inside the text as a
+tracked-changes document does it, in the spirit of pandiff. The middle column is Markdown
+source, highlighted and editable, saved back per passage under optimistic concurrency; the
+canonical form that lets a re-aligned table count as unchanged decides what moved and never
+touches what is shown or written. Inside VS Code, one command starts it and opens it in the
+same window, bound to the window's lifetime.
 
 Both surfaces read the ref, not a ledger, and both **write the marks**: approving, deferring
 with a date or disagreeing insert the agreed blockquote into the document, so the convention

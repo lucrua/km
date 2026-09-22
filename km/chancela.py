@@ -89,6 +89,28 @@ def chancelado(root: Path, rel: str) -> str | None:
     return r.stdout if r.returncode == 0 else None
 
 
+def conteudo_em(root: Path, rev: str, rel: str) -> str | None:
+    """The file as it was in any revision — a branch, a tag, a commit, or the chancel."""
+    r = _git(root, "show", f"{rev}:{rel}")
+    return r.stdout if r.returncode == 0 else None
+
+
+def revisoes(root: Path, limite: int = 15) -> list[dict]:
+    """What you can compare against: the chancel, the branches, the last commits."""
+    out = [{"rev": REF, "label": "a chancela", "tipo": "chancela"}] if existe(root) else []
+    for linha in _ok(root, "for-each-ref", "--sort=-committerdate",
+                     "--format=%(refname:short)", "refs/heads").splitlines():
+        if linha.strip():
+            out.append({"rev": linha.strip(), "label": linha.strip(), "tipo": "branch"})
+    for linha in _ok(root, "log", f"-{limite}", "--format=%h\t%ad\t%s",
+                     "--date=short", "HEAD").splitlines():
+        if not linha.strip():
+            continue
+        sha, data, assunto = linha.split("\t", 2)
+        out.append({"rev": sha, "label": f"{sha} · {data} · {assunto[:48]}", "tipo": "commit"})
+    return out
+
+
 def atual(root: Path, rel: str) -> str | None:
     p = root / rel
     if not p.exists():
@@ -318,9 +340,14 @@ def sumidas(antes: list[str], depois: list[str]) -> list[str]:
     would see a fully endorsed passage — so this specific change gets its own mark instead
     of travelling with ordinary edits.
     """
-    tinha = [l.strip() for l in antes if RESSALVA.match(l)]
-    ficou = {l.strip() for l in depois if RESSALVA.match(l)}
-    return [l for l in tinha if l not in ficou]
+    def marca(linha: str) -> str:
+        m = RESSALVA.match(linha)
+        return m.group(1) if m else ""
+
+    # Reescrever a ressalva — trocar a data, afinar a dúvida — não é removê-la, e a
+    # mudança já aparece no diff. O que precisa de marca própria é a marca que sumiu.
+    ficaram = {marca(l) for l in depois if RESSALVA.match(l)}
+    return [l.strip() for l in antes if RESSALVA.match(l) and marca(l) not in ficaram]
 
 
 def bloqueio_de(texto: str) -> str:
@@ -361,8 +388,13 @@ class Situacao:
         return self.tem_chancela and not self.hunks
 
 
-def situacao(root: Path, rel: str, hoje: str | None = None) -> Situacao:
-    antes = chancelado(root, rel)
+def situacao(root: Path, rel: str, hoje: str | None = None,
+             base: str | None = None) -> Situacao:
+    """The file against its chancel — or against any other revision, to read it side by side.
+
+    The verdicts always act on the chancel; `base` only changes what you are comparing with.
+    """
+    antes = chancelado(root, rel) if base in (None, REF) else conteudo_em(root, base, rel)
     depois = atual(root, rel) or ""
     base = normalise_md(antes) if antes is not None else ""
     agora = normalise_md(depois)

@@ -149,6 +149,12 @@ class RessalvaTest(unittest.TestCase):
         self.assertTrue(h.sumidas)
         self.assertIn("sem certeza", h.sumidas[0])
 
+    def test_rewriting_a_caveat_is_not_removing_it(self):
+        antes = ["> ❓ **a confirmar até 2026-09-15** — com quem assina"]
+        depois = ["> ❓ **a confirmar até 2026-10-10** — com quem assina"]
+        self.assertEqual(ch.sumidas(antes, depois), [])
+        self.assertEqual(ch.sumidas(antes, []), [antes[0]])
+
     def test_an_ordinary_edit_flags_nothing(self):
         h = ch.hunks(DOC, DOC.replace("horas úteis", "horas corridas"))[0]
         self.assertEqual(h.sumidas, [])
@@ -265,16 +271,51 @@ class PainelTest(RepoTest):
         pedido.setdefault("file", "regras.md")
         return self.serve.agir(self.dir, pedido, by="teste")
 
-    def test_state_carries_the_word_diff_and_the_caveats(self):
+    def trecho(self, d, titulo):
+        return next(t for t in d["trechos"] if t["heading"].startswith(titulo))
+
+    def test_state_carries_the_marked_text_and_the_caveats(self):
         self.serve.agir(self.dir, {"acao": "aprovar", "file": "regras.md",
                                    "path": self.caminho("Regras")}, by="t")
         self.escrever(DOC.replace("horas úteis", "horas corridas"))
-        d = self.serve.estado(self.dir)["docs"][0]
-        prazo = [b for b in d["blocos"] if b["heading"] == "Prazo"][0]
+        d = self.serve.estado(self.dir, arquivo="regras.md")["docs"][0]
+        prazo = self.trecho(d, "Prazo")
         self.assertEqual(prazo["estado"], "mexido")
-        self.assertIn("<del>", prazo["inline"])
-        lista = [b for b in d["blocos"] if b["heading"].startswith("A lista")][0]
-        self.assertEqual(lista["ressalvas"][0]["mark"], "⚠")
+        # a linha mexida vem marcada palavra a palavra, no meio do texto corrido
+        mexidas = [l for l in prazo["marcado"] if l["tipo"] == "mexido"]
+        self.assertTrue(mexidas)
+        self.assertIn("<del>", mexidas[0]["html"])
+        self.assertTrue(any(l["tipo"] == "igual" and "Prazo" in l["html"]
+                            for l in prazo["marcado"]))
+        self.assertEqual(self.trecho(d, "A lista")["ressalvas"][0]["mark"], "⚠")
+
+    def test_the_ruler_is_light_and_the_open_document_is_not(self):
+        """A régua lateral não carrega o texto: era 4,7 MB por requisição, de 8 em 8s."""
+        self.agir(acao="aprovar", path=self.caminho("Regras"))
+        leve = self.serve.estado(self.dir)["docs"][0]
+        self.assertFalse(leve["cheio"])
+        self.assertNotIn("marcado", leve["trechos"][0])
+        cheio = self.serve.estado(self.dir, arquivo="regras.md")["docs"][0]
+        self.assertTrue(cheio["cheio"])
+        self.assertIn("marcado", cheio["trechos"][0])
+
+    def test_a_deleted_passage_still_shows_up(self):
+        self.serve.agir(self.dir, {"acao": "aprovar", "file": "regras.md",
+                                   "path": self.caminho("Regras")}, by="t")
+        self.escrever(DOC.split("## Prazo")[0])          # a seção Prazo sai do arquivo
+        d = self.serve.estado(self.dir, arquivo="regras.md")["docs"][0]
+        sumido = self.trecho(d, "Prazo")
+        self.assertEqual(sumido["estado"], "apagado")
+        self.assertTrue(sumido["base"])                  # o texto de antes continua à vista
+        self.assertEqual(sumido["marcado"], [])
+
+    def test_comparing_against_another_revision(self):
+        import subprocess
+        sha = subprocess.run(["git", "rev-parse", "HEAD"], cwd=self.dir,
+                             capture_output=True, text=True).stdout.strip()
+        self.escrever(DOC.replace("horas úteis", "horas corridas"))
+        d = self.serve.estado(self.dir, base=sha, arquivo="regras.md")["docs"][0]
+        self.assertTrue(any(l["tipo"] == "mexido" for l in self.trecho(d, "Prazo")["marcado"]))
 
     def test_aprovar_advances_the_ref(self):
         r = self.agir(acao="aprovar", path=self.caminho("Regras"))
@@ -315,8 +356,8 @@ class PainelTest(RepoTest):
                       (self.dir / "regras.md").read_text(encoding="utf-8"))
 
     def test_editing_a_passage_saves_only_that_passage(self):
-        d = self.serve.estado(self.dir)["docs"][0]
-        prazo = [b for b in d["blocos"] if b["heading"] == "Prazo"][0]
+        d = self.serve.estado(self.dir, arquivo="regras.md")["docs"][0]
+        prazo = self.trecho(d, "Prazo")
         r = self.agir(acao="salvar", path=prazo["path"], sha=prazo["sha"],
                       texto="## Prazo\n\nO prazo conta em horas úteis, sempre.")
         self.assertTrue(r["ok"], r)
@@ -325,14 +366,28 @@ class PainelTest(RepoTest):
         self.assertIn("Onze colunas", texto)             # o resto do arquivo ficou
 
     def test_saving_over_someone_else_is_refused_and_shows_both(self):
-        d = self.serve.estado(self.dir)["docs"][0]
-        prazo = [b for b in d["blocos"] if b["heading"] == "Prazo"][0]
+        d = self.serve.estado(self.dir, arquivo="regras.md")["docs"][0]
+        prazo = self.trecho(d, "Prazo")
         self.escrever(DOC.replace("horas úteis", "horas corridas"))   # outro agente escreveu
         r = self.agir(acao="salvar", path=prazo["path"], sha=prazo["sha"],
                       texto="## Prazo\n\nminha versão")
         self.assertFalse(r["ok"])
         self.assertIn("horas corridas", r["conflito"]["atual"])
         self.assertNotIn("minha versão", (self.dir / "regras.md").read_text(encoding="utf-8"))
+
+    def test_the_editable_column_is_the_file_itself(self):
+        """Uma tabela re-alinhada não conta como mudança, mas o que a tela mostra e salva
+        é o texto do arquivo — normalizar na tela reescreveria o arquivo do autor."""
+        tabela = DOC + "\n## Tabela\n\n| coluna | origem |\n| ------ | ------ |\n| Delta  | Tasks  |\n"
+        self.escrever(tabela)
+        self.agir(acao="aprovar", path=self.caminho("Regras"))
+        d = self.serve.estado(self.dir, arquivo="regras.md")["docs"][0]
+        tr = self.trecho(d, "Tabela")
+        self.assertIn("| coluna | origem |", tr["texto"])
+        self.assertEqual(tr["sha"], ch.sha_do(tr["texto"]))
+        r = self.agir(acao="salvar", path=tr["path"], sha=tr["sha"], texto=tr["texto"])
+        self.assertTrue(r["ok"], r)          # salvar o que a tela mostrou não é conflito
+        self.assertIn("| coluna | origem |", (self.dir / "regras.md").read_text(encoding="utf-8"))
 
 
 if __name__ == "__main__":
