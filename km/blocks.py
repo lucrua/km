@@ -135,10 +135,26 @@ class Ledger(core.KeyedLog):
         }
         if state == "aceite":
             rec["expires"] = (date.today() + timedelta(days=ACCEPT_EXPIRES_DAYS)).isoformat()
-        for k, v in (("note", note), ("validate", validate), ("due", due), ("from", source)):
+        anterior = self.records.get(block.key, {})
+        rec["notes"] = list(anterior.get("notes", []))
+        if note:
+            rec["notes"].append({"at": rec["at"], "text": note, "by": by})
+        for k, v in (("validate", validate), ("due", due), ("from", source)):
             if v:
                 rec[k] = v
         self.records[block.key] = rec
+        return rec
+
+    def note(self, block: Block, text: str, by: str) -> dict:
+        """A note accumulates: a thread is a conversation, not a field that gets overwritten."""
+        rec = self.records.get(block.key)
+        if not rec:
+            rec = {"key": block.key, "file": block.file, "path": block.path,
+                   "hash": block.hash, "state": "a-validar", "at": date.today().isoformat(),
+                   "by": by, "body": block.body, "notes": []}
+            self.records[block.key] = rec
+        rec.setdefault("notes", []).append(
+            {"at": date.today().isoformat(), "text": text, "by": by})
         return rec
 
     def status_of(self, block: Block, today: str | None = None) -> str:

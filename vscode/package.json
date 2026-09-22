@@ -4,14 +4,45 @@
   "description": "What changed since you vouched for it, block by block.",
   "version": "0.1.0",
   "publisher": "local",
-  "engines": { "vscode": "^1.90.0" },
-  "categories": ["Other"],
-  "activationEvents": ["onLanguage:markdown"],
+  "engines": {
+    "vscode": "^1.90.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onLanguage:markdown"
+  ],
   "main": "./extension.js",
   "contributes": {
     "commands": [
-      { "command": "km.review", "title": "km: revisar este arquivo contra a minha chancela" },
-      { "command": "km.vouch", "title": "km: dar status ao bloco sob o cursor" }
+      {
+        "command": "km.review",
+        "title": "km: revisar este arquivo contra a minha chancela"
+      },
+      {
+        "command": "km.vouch",
+        "title": "km: dar status ao bloco sob o cursor"
+      },
+      {
+        "command": "km.reply",
+        "title": "km: comentar"
+      },
+      {
+        "command": "km.aprovarThread",
+        "title": "Aprovar",
+        "icon": "$(check)"
+      },
+      {
+        "command": "km.reprovarThread",
+        "title": "Reprovar",
+        "icon": "$(x)"
+      },
+      {
+        "command": "km.validarThread",
+        "title": "A validar",
+        "icon": "$(clock)"
+      }
     ],
     "configuration": {
       "title": "km",
@@ -24,7 +55,37 @@
       }
     },
     "keybindings": [
-      { "command": "km.vouch", "key": "ctrl+alt+k", "when": "editorTextFocus && editorLangId == markdown" }
-    ]
+      {
+        "command": "km.vouch",
+        "key": "ctrl+alt+k",
+        "when": "editorTextFocus && editorLangId == markdown"
+      }
+    ],
+    "menus": {
+      "comments/commentThread/context": [
+        {
+          "command": "km.reply",
+          "group": "inline@1",
+          "when": "commentController == km"
+        }
+      ],
+      "comments/commentThread/title": [
+        {
+          "command": "km.aprovarThread",
+          "group": "navigation@1",
+          "when": "commentController == km"
+        },
+        {
+          "command": "km.validarThread",
+          "group": "navigation@2",
+          "when": "commentController == km"
+        },
+        {
+          "command": "km.reprovarThread",
+          "group": "navigation@3",
+          "when": "commentController == km"
+        }
+      ]
+    }
   }
 }

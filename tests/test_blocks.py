@@ -156,3 +156,33 @@ class VouchedBodyTest(unittest.TestCase):
         base = blk.Ledger(self.tmp).vouched_file(self.tmp, "regras.md")
         self.assertIn("8 às 17", base)        # o bloco chancelado, como você aprovou
         self.assertIn("denominador", base)    # o que nunca foi chancelado, como está hoje
+
+
+class NotesTest(unittest.TestCase):
+    """A thread is a conversation: notes accumulate, they do not overwrite."""
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp())
+        self.bs = blk.split(DOC, "regras.md")
+        self.ledger = blk.Ledger(self.tmp)
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp)
+
+    def test_notes_accumulate_across_vouches(self):
+        self.ledger.vouch(self.bs[1], "reprovado", by="human:test", note="falta a fonte")
+        self.ledger.vouch(self.bs[1], "a-validar", by="human:test", note="perguntei ao gestor")
+        rec = self.ledger.records[self.bs[1].key]
+        self.assertEqual([n["text"] for n in rec["notes"]],
+                         ["falta a fonte", "perguntei ao gestor"])
+        self.assertEqual(rec["state"], "a-validar")
+
+    def test_a_note_alone_does_not_change_the_state(self):
+        self.ledger.vouch(self.bs[1], "aprovado", by="human:test")
+        self.ledger.note(self.bs[1], "conferir na próxima reunião", by="human:test")
+        self.assertEqual(self.ledger.records[self.bs[1].key]["state"], "aprovado")
+        self.assertEqual(self.ledger.status_of(self.bs[1]), "aprovado")
+
+    def test_a_note_on_an_unvouched_block_opens_it_as_to_validate(self):
+        self.ledger.note(self.bs[2], "isto tem prova?", by="human:test")
+        self.assertEqual(self.ledger.status_of(self.bs[2]), "a-validar")

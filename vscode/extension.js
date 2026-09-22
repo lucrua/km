@@ -111,6 +111,88 @@ function pintar(editor) {
   }
 }
 
+// ---- as conversas -------------------------------------------------------------
+// Uma thread so aparece onde ha algo a dizer: nota escrita, reprovacao ou pergunta
+// em aberto. Bloco apenas mexido ja tem a marca na margem; virar thread seria ruido.
+let conversas = null;
+const abertas = new Map();
+
+function precisaDeThread(b) {
+  const notas = b.notes || [];
+  return notas.length > 0 || b.state === 'reprovado' || b.state === 'a-validar';
+}
+
+function rotulo(b) {
+  if (b.state === 'a-validar') {
+    return 'a validar' + (b.due ? ' ate ' + b.due : '') + (b.at ? ' · desde ' + b.at : '');
+  }
+  if (mexido(b.state)) return b.state + (b.at ? ' em ' + b.at : '');
+  return b.state + (b.at ? ' · ' + b.at : '');
+}
+
+function montarThreads(doc) {
+  if (!conversas || doc.languageId !== 'markdown') return;
+  const chaveDoc = doc.uri.toString();
+  (abertas.get(chaveDoc) || []).forEach(t => t.dispose());
+  abertas.set(chaveDoc, []);
+
+  for (const b of blocos(doc)) {
+    if (!precisaDeThread(b)) continue;
+    const l = Math.max(0, b.line - 1);
+    const comentarios = [];
+    if (b.state === 'a-validar' && b.validate) {
+      comentarios.push({
+        author: { name: 'a validar' },
+        body: new vscode.MarkdownString('**' + b.validate + '**'
+          + (b.due ? '\n\nate ' + b.due : '')),
+        mode: vscode.CommentMode.Preview,
+      });
+    }
+    for (const n of (b.notes || [])) {
+      comentarios.push({
+        author: { name: n.by ? n.by.replace('human:', '') : 'voce' },
+        body: new vscode.MarkdownString(n.text),
+        mode: vscode.CommentMode.Preview,
+        label: n.at,
+      });
+    }
+    const t = conversas.createCommentThread(doc.uri, new vscode.Range(l, 0, l, 0), comentarios);
+    t.label = b.heading + '  ·  ' + rotulo(b);
+    t.contextValue = b.state;
+    const resolvida = b.state === 'aprovado' || b.state === 'aceite';
+    t.state = resolvida ? vscode.CommentThreadState.Resolved : vscode.CommentThreadState.Unresolved;
+    t.collapsibleState = (b.state === 'reprovado' || b.state === 'a-validar')
+      ? vscode.CommentThreadCollapsibleState.Expanded
+      : vscode.CommentThreadCollapsibleState.Collapsed;
+    abertas.get(chaveDoc).push(t);
+  }
+}
+
+function blocoDaThread(thread) {
+  const doc = vscode.workspace.textDocuments.find(d => d.uri.toString() === thread.uri.toString());
+  if (!doc) return null;
+  const linha = thread.range.start.line + 1;
+  return blocos(doc).slice().reverse().find(b => b.line <= linha) || null;
+}
+
+function rodarNoBloco(thread, args, msg) {
+  const b = blocoDaThread(thread);
+  if (!b) { vscode.window.showWarningMessage('km: bloco nao encontrado'); return; }
+  const doc = vscode.workspace.textDocuments.find(d => d.uri.toString() === thread.uri.toString());
+  try {
+    km(['vouch', b.file, '--block', b.heading].concat(args), raiz(doc));
+    if (msg) vscode.window.showInformationMessage('km: ' + b.heading + ' → ' + msg);
+    atualizar(doc);
+  } catch (err) { vscode.window.showErrorMessage('km: ' + err.message); }
+}
+
+function atualizar(doc) {
+  const ed = vscode.window.visibleTextEditors.find(x => x.document === doc);
+  if (ed) pintar(ed);
+  montarThreads(doc);
+  avisos.mudou.fire();
+}
+
 // ---- dar status ao bloco sob o cursor -----------------------------------------
 const avisos = new Aviso();
 
@@ -143,7 +225,43 @@ async function vouch() {
 }
 
 function activate(ctx) {
+  conversas = vscode.comments.createCommentController('km', 'km · chancela');
+  conversas.commentingRangeProvider = {
+    provideCommentingRanges(doc) {
+      return doc.languageId === 'markdown' && raiz(doc)
+        ? [new vscode.Range(0, 0, Math.max(0, doc.lineCount - 1), 0)] : [];
+    },
+  };
+
   ctx.subscriptions.push(
+    conversas,
+    vscode.commands.registerCommand('km.reply', (reply) => {
+      const b = blocoDaThread(reply.thread);
+      const doc = vscode.workspace.textDocuments.find(
+        d => d.uri.toString() === reply.thread.uri.toString());
+      if (!b || !reply.text) return;
+      try {
+        km(['note', b.file, '--block', b.heading, reply.text], raiz(doc));
+        atualizar(doc);
+      } catch (err) { vscode.window.showErrorMessage('km: ' + err.message); }
+    }),
+    vscode.commands.registerCommand('km.aprovarThread',
+      (t) => rodarNoBloco(t, ['--state', 'aprovado'], 'aprovado')),
+    vscode.commands.registerCommand('km.reprovarThread', async (t) => {
+      const nota = await vscode.window.showInputBox({ title: 'O que esta errado?' });
+      if (nota !== undefined) {
+        rodarNoBloco(t, ['--state', 'reprovado'].concat(nota ? ['--note', nota] : []), 'reprovado');
+      }
+    }),
+    vscode.commands.registerCommand('km.validarThread', async (t) => {
+      const q = await vscode.window.showInputBox({ title: 'O que confirmaria isso?' });
+      if (q === undefined) return;
+      const prazo = await vscode.window.showInputBox({
+        title: 'Ate quando? (AAAA-MM-DD, vazio = sem prazo)' });
+      const extra = ['--state', 'a-validar'].concat(q ? ['--validate', q] : [])
+        .concat(prazo ? ['--due', prazo] : []);
+      rodarNoBloco(t, extra, 'a validar');
+    }),
     vscode.workspace.registerTextDocumentContentProvider(SCHEME, new Baseline()),
     vscode.languages.registerCodeLensProvider({ language: 'markdown' }, avisos),
     vscode.commands.registerCommand('km.vouch', vouch),
@@ -155,13 +273,14 @@ function activate(ctx) {
       await vscode.commands.executeCommand('vscode.diff', esq, ed.document.uri,
         path.basename(arquivo) + ' · chancela ↔ agora');
     }),
-    vscode.window.onDidChangeActiveTextEditor(pintar),
-    vscode.workspace.onDidSaveTextDocument(function () {
-      pintar(vscode.window.activeTextEditor);
-      avisos.mudou.fire();
-    })
+    vscode.window.onDidChangeActiveTextEditor(function (ed) {
+      if (ed) { pintar(ed); montarThreads(ed.document); }
+    }),
+    vscode.workspace.onDidSaveTextDocument(atualizar),
+    vscode.workspace.onDidOpenTextDocument(montarThreads)
   );
-  pintar(vscode.window.activeTextEditor);
+  const ativo = vscode.window.activeTextEditor;
+  if (ativo) { pintar(ativo); montarThreads(ativo.document); }
 }
 
 module.exports = { activate: activate, deactivate: function () {} };

@@ -492,7 +492,7 @@ def cmd_blocks(args) -> int:
                 saida.append({"file": b.file, "heading": b.heading, "path": b.path,
                               "line": b.line, "lines": b.lines,
                               "state": ledger.status_of(b), "at": rec.get("at"),
-                              "note": rec.get("note"), "validate": rec.get("validate"),
+                              "notes": rec.get("notes", []), "validate": rec.get("validate"),
                               "due": rec.get("due"), "vouched": rec.get("body")})
         print(json.dumps(saida, ensure_ascii=False))
         return 0
@@ -523,6 +523,17 @@ def cmd_blocks(args) -> int:
         print(f"{len(orfas)} com chancela e sem bloco correspondente (órfãs):")
         for r in orfas[:5]:
             print(f"  {r['file']} › {r['path'][:60]}")
+    return 0
+
+
+def cmd_note(args) -> int:
+    """Add to the conversation on a block without changing its state."""
+    root = _root(args)
+    ledger = blk.Ledger(root)
+    b = _block_by_ref(root, args.file, args.block)
+    rec = ledger.note(b, args.text, by=args.by)
+    ledger.save()
+    print(f"{b.heading}  ·  {len(rec['notes'])} nota(s)  ·  estado: {rec['state']}")
     return 0
 
 
@@ -644,6 +655,13 @@ def main(argv: list[str]) -> int:
     s.add_argument("--changed", action="store_true", help="hide what still stands")
     s.add_argument("--json", action="store_true", help="for the editor extension")
     s.set_defaults(func=cmd_blocks)
+
+    s = sub.add_parser("note", help="add a note to a block, leaving its state alone")
+    s.add_argument("file")
+    s.add_argument("--block", required=True, help="número do `km blocks`, ou parte do título")
+    s.add_argument("text")
+    s.add_argument("--by", default="human:" + os.environ.get("USER", "unknown"))
+    s.set_defaults(func=cmd_note)
 
     s = sub.add_parser("baseline", help="the document as you last vouched it (for the left pane)")
     s.add_argument("file")
