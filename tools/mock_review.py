@@ -141,8 +141,23 @@ word-break:break-word;overflow-wrap:anywhere}
 .par>div:first-child{border-right:1px solid var(--rule);background:color-mix(in srgb,var(--bg) 60%,transparent)}
 .rot{font-family:system-ui,sans-serif;font-size:10.5px;text-transform:uppercase;letter-spacing:.07em;
 color:var(--mut);margin-bottom:6px}
-del{background:var(--neg-bg);color:var(--neg);text-decoration:line-through}
-ins{background:var(--ok-bg);color:var(--ok);text-decoration:none}
+/* fundo preenchido funciona em codigo, onde a linha e curta; em prosa vira mancha */
+body.st-sublinhado del{color:var(--neg);text-decoration:line-through;text-decoration-thickness:1px;
+  opacity:.75;background:none}
+body.st-sublinhado ins{color:var(--ink);text-decoration:none;background:none;
+  border-bottom:2px solid var(--ok);padding-bottom:1px}
+body.st-margem del{display:none}
+body.st-margem ins{color:var(--ink);background:none;text-decoration:none;font-weight:600}
+body.st-margem .par>div:last-child{box-shadow:inset 3px 0 0 var(--ok)}
+body.st-margem .par>div:first-child{box-shadow:inset 3px 0 0 var(--neg)}
+body.st-fundo del{background:color-mix(in srgb,var(--neg) 12%,transparent);color:inherit;
+  text-decoration:line-through;text-decoration-color:var(--neg)}
+body.st-fundo ins{background:color-mix(in srgb,var(--ok) 14%,transparent);color:inherit;
+  text-decoration:none}
+.estilos{display:flex;gap:4px;align-items:center;font-size:12px;color:var(--mut)}
+.estilos button{font:inherit;font-size:12px;padding:2px 9px;border-radius:5px;cursor:pointer;
+  border:1px solid var(--rule);background:transparent;color:var(--mut)}
+.estilos button[aria-pressed=true]{background:var(--ink);color:var(--bg);border-color:var(--ink)}
 .corpo{padding:11px 14px;font:12.5px/1.5 ui-monospace,Menlo,monospace;white-space:pre-wrap;
 border-top:1px solid var(--rule);color:var(--mut)}
 .motivo{padding:9px 14px;border-top:1px solid var(--rule);border-left:3px solid var(--neg);
@@ -168,6 +183,7 @@ border:1px solid var(--rule);background:var(--bg);color:var(--ink)}
 .par{grid-template-columns:1fr}.par>div:first-child{border-right:0;border-bottom:1px solid var(--rule)}}
 </style></head><body>
 <div class="topo"><b id="repo"></b><span class="n" id="resumo"></span>
+<div class="estilos" id="estilos"></div>
 <div class="filtros" id="filtros"></div></div>
 <div class="grade"><nav class="lado" id="lado"></nav>
 <section class="meio" id="meio"></section><aside class="dir" id="dir"></aside></div>
@@ -176,6 +192,8 @@ const D = __DATA__;
 const CH = {'aprovado':'e-aprovado','aceite':'e-aceite','reprovado':'e-reprovado',
   'a-validar':'e-avalidar','não revisado':'e-pendente','suposição':'e-aceite'};
 const FILTROS = ['tudo','pede você','mexidos','negados','a validar','pendentes','de pé'];
+const ESTILOS = [['st-sublinhado','sublinhado'],['st-margem','margem'],['st-fundo','fundo']];
+let estilo = 'st-sublinhado';
 let doc = 0, filtro = 'pede você', foco = null;
 const esc = s => (s==null?'':String(s)).replace(/[&<>]/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[m]));
 const mexido = e => e.startsWith('mexido');
@@ -233,10 +251,10 @@ function cartao(b, i){
       <div><div class="rot">agora</div>${b.dir}</div></div>`
       :`<div class="corpo">${esc(b.texto.slice(0,600))}${b.texto.length>600?'…':''}</div>`}
     <div class="acoes">
-      <button class="pri">Aprovar</button><button>Aceitar</button>
-      <button>A validar</button><button>Reprovar</button>
-      ${dif?'<button>Devolver o meu texto</button>':''}
-      <button>Comentar</button></div></div>`;
+      <button class="pri">Aprovar</button><button>Adiar</button><button>Recusar</button>
+      <span style="width:10px"></span>
+      <button title="mock">+ comentário</button>
+      ${dif?'<button>Devolver o meu texto</button>':''}</div></div>`;
 }
 function meio(){
   const d = D.docs[doc];
@@ -268,6 +286,12 @@ function dir(){
 function focar(i){ foco = i; document.querySelectorAll('.bloco').forEach(e=>e.classList.remove('foco'));
   document.getElementById('b'+i)?.classList.add('foco'); dir(); }
 function abrir(i){ doc = i; foco = null; lado(); meio(); scrollTo(0,0); }
+document.getElementById('estilos').innerHTML = 'diff: ' + ESTILOS.map(([c,n])=>
+  `<button aria-pressed="${c===estilo}" onclick="mudarEstilo('${c}')">${n}</button>`).join('');
+function mudarEstilo(c){ estilo = c; document.body.className = c;
+  document.querySelectorAll('.estilos button').forEach(b=>
+    b.setAttribute('aria-pressed', b.getAttribute('onclick').includes(c))); }
+document.body.className = estilo;
 document.getElementById('filtros').innerHTML = FILTROS.map(f=>
   `<button aria-pressed="${f===filtro}" onclick="filtrar('${f}')">${f}</button>`).join('');
 function filtrar(f){ filtro = f; foco = null;
