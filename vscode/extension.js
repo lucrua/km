@@ -36,6 +36,13 @@ function blocos(doc) {
 
 // ---- a coluna da esquerda: o documento como voce o chancelou -------------------
 class Baseline {
+  constructor() {
+    this.emissor = new vscode.EventEmitter();
+    this.onDidChange = this.emissor.event;   // sem isto o diff nunca redesenha
+  }
+  invalidar(arquivo) {
+    this.emissor.fire(vscode.Uri.parse(SCHEME + ':' + arquivo).with({ query: arquivo }));
+  }
   provideTextDocumentContent(uri) {
     const arquivo = uri.query;
     const dir = raizDe(arquivo);
@@ -187,14 +194,17 @@ function rodarNoBloco(thread, args, msg) {
 }
 
 function atualizar(doc) {
+  if (!doc || doc.languageId !== 'markdown') return;
   const ed = vscode.window.visibleTextEditors.find(x => x.document === doc);
   if (ed) pintar(ed);
   montarThreads(doc);
   avisos.mudou.fire();
+  if (raiz(doc)) baseline.invalidar(rel(doc));
 }
 
 // ---- dar status ao bloco sob o cursor -----------------------------------------
 const avisos = new Aviso();
+const baseline = new Baseline();
 
 async function vouch() {
   const ed = vscode.window.activeTextEditor;
@@ -219,8 +229,7 @@ async function vouch() {
   try {
     km(args, raiz(ed.document));
     vscode.window.showInformationMessage('km: ' + alvo.heading + ' → ' + escolha.label);
-    pintar(ed);
-    avisos.mudou.fire();
+    atualizar(ed.document);
   } catch (e) { vscode.window.showErrorMessage('km: ' + e.message); }
 }
 
@@ -232,8 +241,9 @@ function activate(ctx) {
     provideCommentingRanges(doc) {
       if (doc.languageId !== 'markdown' || !raiz(doc)) return [];
       return blocos(doc).map(function (b) {
-        const l = Math.max(0, b.line - 1);
-        return new vscode.Range(l, 0, l, 0);
+        const ini = Math.max(0, b.line - 1);
+        const fim = Math.max(ini, ini + b.lines - 1);
+        return new vscode.Range(ini, 0, fim, 0);   // hover em qualquer linha do bloco
       });
     },
   };
