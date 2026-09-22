@@ -189,6 +189,7 @@ function rodarNoBloco(thread, args, msg) {
   try {
     km(['vouch', b.file, '--block', b.heading].concat(args), raiz(doc));
     if (msg) vscode.window.showInformationMessage('km: ' + b.heading + ' → ' + msg);
+    thread.dispose();
     atualizar(doc);
   } catch (err) { vscode.window.showErrorMessage('km: ' + err.message); }
 }
@@ -198,6 +199,7 @@ function atualizar(doc) {
   const ed = vscode.window.visibleTextEditors.find(x => x.document === doc);
   if (ed) pintar(ed);
   montarThreads(doc);
+  marcarProblemas(doc);
   avisos.mudou.fire();
   if (raiz(doc)) baseline.invalidar(rel(doc));
 }
@@ -205,6 +207,45 @@ function atualizar(doc) {
 // ---- dar status ao bloco sob o cursor -----------------------------------------
 const avisos = new Aviso();
 const baseline = new Baseline();
+const problemas = vscode.languages.createDiagnosticCollection('km');
+const barra = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
+barra.command = 'km.review';
+
+const GRAVIDADE = {
+  'reprovado': vscode.DiagnosticSeverity.Warning,
+  'a-validar': vscode.DiagnosticSeverity.Information,
+  'nao revisado': vscode.DiagnosticSeverity.Information,
+};
+
+function marcarProblemas(doc) {
+  if (!doc || doc.languageId !== 'markdown' || !raiz(doc)) return;
+  const bs = blocos(doc);
+  const achados = [];
+  let mexidos = 0, pendentes = 0;
+  for (const b of bs) {
+    const l = Math.max(0, b.line - 1);
+    const faixa = new vscode.Range(l, 0, l, Math.max(1, b.heading.length + 2));
+    if (mexido(b.state)) {
+      mexidos += 1;
+      achados.push(new vscode.Diagnostic(faixa,
+        b.heading + ' — ' + b.state, vscode.DiagnosticSeverity.Warning));
+    } else if (GRAVIDADE[chave(b.state)] !== undefined) {
+      pendentes += 1;
+      const extra = b.validate ? ' — ' + b.validate + (b.due ? ' (ate ' + b.due + ')' : '') : '';
+      achados.push(new vscode.Diagnostic(faixa,
+        b.heading + ' — ' + b.state + extra, GRAVIDADE[chave(b.state)]));
+    }
+  }
+  for (const d of achados) d.source = 'km';
+  problemas.set(doc.uri, achados);
+
+  const comChancela = bs.length - mexidos - pendentes;
+  barra.text = mexidos || pendentes
+    ? '$(alert) km ' + comChancela + '/' + bs.length
+    : '$(check) km ' + bs.length;
+  barra.tooltip = mexidos + ' mexidos desde a sua chancela, ' + pendentes + ' pendentes';
+  barra.show();
+}
 
 async function vouch() {
   const ed = vscode.window.activeTextEditor;
@@ -257,6 +298,7 @@ function activate(ctx) {
       if (!b || !reply.text) return;
       try {
         km(['note', b.file, '--block', b.heading, reply.text], raiz(doc));
+        reply.thread.dispose();   // a interface criou esta; quem redesenha somos nos
         atualizar(doc);
       } catch (err) { vscode.window.showErrorMessage('km: ' + err.message); }
     }),
@@ -288,14 +330,17 @@ function activate(ctx) {
       await vscode.commands.executeCommand('vscode.diff', esq, ed.document.uri,
         path.basename(arquivo) + ' · chancela ↔ agora');
     }),
+    problemas, barra,
     vscode.window.onDidChangeActiveTextEditor(function (ed) {
-      if (ed) { pintar(ed); montarThreads(ed.document); }
+      if (ed && ed.document.languageId === 'markdown') {
+        pintar(ed); montarThreads(ed.document); marcarProblemas(ed.document);
+      } else { barra.hide(); }
     }),
     vscode.workspace.onDidSaveTextDocument(atualizar),
     vscode.workspace.onDidOpenTextDocument(montarThreads)
   );
   const ativo = vscode.window.activeTextEditor;
-  if (ativo) { pintar(ativo); montarThreads(ativo.document); }
+  if (ativo) { pintar(ativo); montarThreads(ativo.document); marcarProblemas(ativo.document); }
 }
 
 module.exports = { activate: activate, deactivate: function () {} };
