@@ -146,7 +146,7 @@ class VouchedBodyTest(unittest.TestCase):
         self.assertEqual(self.ledger.status_of(depois), "mexido depois de aprovado")
         self.assertIn("8 às 17", blk.Ledger(self.tmp).vouched_body(depois))
 
-    def test_the_baseline_mixes_vouched_text_with_current_text(self):
+    def test_the_baseline_carries_only_what_you_vouched(self):
         bs = blk.of_file(self.tmp, "regras.md")
         self.ledger.vouch(bs[1], "aprovado", by="human:test")
         self.ledger.save()
@@ -154,8 +154,9 @@ class VouchedBodyTest(unittest.TestCase):
             DOC.replace("8 às 17", "8 às 19").replace("numerador", "denominador"),
             encoding="utf-8")
         base = blk.Ledger(self.tmp).vouched_file(self.tmp, "regras.md")
-        self.assertIn("8 às 17", base)        # o bloco chancelado, como você aprovou
-        self.assertIn("denominador", base)    # o que nunca foi chancelado, como está hoje
+        self.assertIn("8 às 17", base)          # o bloco chancelado, como você aprovou
+        self.assertNotIn("denominador", base)   # nunca chancelado: fica de fora, e o
+        self.assertNotIn("numerador", base)     # diff o mostra como acréscimo
 
 
 class NotesTest(unittest.TestCase):
@@ -186,3 +187,33 @@ class NotesTest(unittest.TestCase):
     def test_a_note_on_an_unvouched_block_opens_it_as_to_validate(self):
         self.ledger.note(self.bs[2], "isto tem prova?", by="human:test")
         self.assertEqual(self.ledger.status_of(self.bs[2]), "a-validar")
+
+
+class BaselineOnlyVouchedTest(unittest.TestCase):
+    """The left-hand column is what you vouched — never a copy of what is there now."""
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp())
+        (self.tmp / "regras.md").write_text(DOC, encoding="utf-8")
+        self.ledger = blk.Ledger(self.tmp)
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp)
+
+    def test_a_file_never_vouched_has_an_empty_baseline(self):
+        self.assertEqual(self.ledger.vouched_file(self.tmp, "regras.md"), "")
+
+    def test_only_the_vouched_block_appears(self):
+        bs = blk.of_file(self.tmp, "regras.md")
+        self.ledger.vouch(bs[1], "aprovado", by="human:test")
+        base = self.ledger.vouched_file(self.tmp, "regras.md")
+        self.assertIn("Calendário", base)
+        self.assertNotIn("Tolerância", base)
+
+    def test_orphans_are_scoped_to_the_files_you_asked_about(self):
+        bs = blk.of_file(self.tmp, "regras.md")
+        self.ledger.vouch(bs[1], "aprovado", by="human:test")
+        outro = blk.Block("outro.md", "X", "X", 1, 2, "corpo")
+        self.ledger.vouch(outro, "aprovado", by="human:test")
+        self.assertEqual(self.ledger.orphans(bs, files={"regras.md"}), [])
+        self.assertEqual(len(self.ledger.orphans(bs)), 1)

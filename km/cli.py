@@ -523,7 +523,7 @@ def cmd_blocks(args) -> int:
             print("\n".join(linhas))
     (root / core.KM_DIR / "last-blocks.json").write_text(
         json.dumps(listagem, ensure_ascii=False), encoding="utf-8")
-    orfas = ledger.orphans(todos)
+    orfas = ledger.orphans(todos, files=set(_tracked_files(root, args.file)))
     print("\n" + " · ".join(f"{n} {st}" for st, n in total.most_common()))
     if orfas:
         print(f"{len(orfas)} com chancela e sem bloco correspondente (órfãs):")

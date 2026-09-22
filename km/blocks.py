@@ -172,14 +172,23 @@ class Ledger(core.KeyedLog):
         return rec.get("body") if rec else None
 
     def vouched_file(self, root: Path, rel: str) -> str:
-        """The document as you last vouched it: your text where you vouched, current where not."""
+        """The document as you vouched it — and nothing else.
+
+        A block you never vouched contributes nothing, so it shows up in the diff as an
+        addition. Falling back to the current text would make the two sides identical and
+        the screen would claim nothing is pending while the counter says five blocks are.
+        """
         out = []
         for b in of_file(root, rel):
             body = self.vouched_body(b)
+            if body is None:
+                continue
             head = "#" * (b.path.count(" › ") + 1) + " " + b.heading
-            out.append(head + "\n" + (body if body is not None else b.body))
+            out.append(head + "\n" + body)
         return "\n".join(out)
 
-    def orphans(self, live: list[Block]) -> list[dict]:
+    def orphans(self, live: list[Block], files: set[str] | None = None) -> list[dict]:
+        """Vouched blocks with no counterpart on disk — within the files actually looked at."""
         keys = {b.key for b in live}
-        return [r for k, r in sorted(self.records.items()) if k not in keys]
+        return [r for k, r in sorted(self.records.items())
+                if k not in keys and (files is None or r.get("file") in files)]
