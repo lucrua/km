@@ -41,33 +41,60 @@ function porta() {
   return vscode.workspace.getConfiguration('km').get('port') || 8431;
 }
 
-function respondendo(p) {
+// Responde, e responde sobre ESTE repositorio: um painel de outra pasta na mesma porta
+// mostraria arquivos que nao sao os que voce esta olhando.
+function quemAtende(p) {
   return new Promise((ok) => {
     const req = http.get({ host: '127.0.0.1', port: p, path: '/api/state' }, (res) => {
-      res.resume(); ok(res.statusCode === 200);
+      if (res.statusCode !== 200) { res.resume(); return ok(null); }
+      let corpo = '';
+      res.on('data', (d) => { corpo += d; });
+      res.on('end', () => { try { ok(JSON.parse(corpo).root || ''); } catch (e) { ok(null); } });
     });
-    req.on('error', () => ok(false));
-    req.setTimeout(400, () => { req.destroy(); ok(false); });
+    req.on('error', () => ok(null));
+    req.setTimeout(1500, () => { req.destroy(); ok(null); });
   });
 }
 
 async function abrirPainel() {
-  const pasta = (vscode.workspace.workspaceFolders || [])[0];
+  const doc = vscode.window.activeTextEditor?.document;
+  const pasta = (doc && vscode.workspace.getWorkspaceFolder(doc.uri))
+    || (vscode.workspace.workspaceFolders || [])[0];
   if (!pasta) { vscode.window.showWarningMessage('km: abra uma pasta primeiro'); return; }
-  const p = porta();
-  const url = 'http://127.0.0.1:' + p + '/';
-  if (!(await respondendo(p))) {
+  const dir = pasta.uri.fsPath;
+  const inicial = porta();
+
+  let p = null, jaEsta = false;
+  for (let tentativa = 0; tentativa < 10; tentativa++) {
+    const quem = await quemAtende(inicial + tentativa);
+    if (quem === null || quem === dir) { p = inicial + tentativa; jaEsta = quem === dir; break; }
+  }
+  if (p === null) { vscode.window.showErrorMessage('km: não achei porta livre'); return; }
+
+  if (!jaEsta) {
     const bin = vscode.workspace.getConfiguration('km').get('path')
       || path.join(os.homedir(), 'knowledge-manager', 'bin', 'km');
     // Preso a esta janela de proposito: fechar o VS Code encerra o servidor, e ninguem
     // fica com um processo esquecido escutando numa porta.
-    painel = cp.spawn(bin, ['serve', '--port', String(p)], { cwd: pasta.uri.fsPath });
+    painel = cp.spawn(bin, ['serve', '--port', String(p)], { cwd: dir });
+    let erro = '';
+    painel.stderr?.on('data', (d) => { erro += d; });
     painel.on('error', (e) => vscode.window.showErrorMessage('km: ' + e.message));
-    for (let i = 0; i < 20 && !(await respondendo(p)); i++) {
+    let subiu = false;
+    for (let i = 0; i < 25 && !subiu; i++) {
       await new Promise((r) => setTimeout(r, 150));
+      subiu = (await quemAtende(p)) === dir;
+    }
+    if (!subiu) {
+      vscode.window.showErrorMessage('km: o painel não subiu. ' + (erro.trim() || 'veja o comando `km serve` no terminal'));
+      return;
     }
   }
-  await vscode.commands.executeCommand('simpleBrowser.show', url);
+  // O VS Code aqui roda no WSL e a janela no Windows: sem asExternalUri, o 127.0.0.1 do
+  // webview seria o do Windows, e o painel nao apareceria.
+  const externo = await vscode.env.asExternalUri(
+    vscode.Uri.parse('http://127.0.0.1:' + p + '/'));
+  await vscode.commands.executeCommand('simpleBrowser.show', externo.toString(true));
 }
 
 function raizDe(arquivo) {
@@ -123,9 +150,11 @@ class Aviso {
     if (m) partes.push(m + ' mexidos desde a sua chancela');
     if (nunca) partes.push(nunca + ' sem chancela');
     const titulo = partes.length
-      ? 'km · ' + partes.join(' · ') + ' — revisar'
+      ? 'km · ' + partes.join(' · ') + ' — abrir o painel'
       : 'km · ' + ts.length + ' trechos, todos com a sua chancela';
-    return [new vscode.CodeLens(faixa, { title: titulo, command: 'km.review' })];
+    // O painel e onde se revisa. O diff do editor continua no menu de contexto, para
+    // quando voce quer so olhar as linhas sem sair do arquivo.
+    return [new vscode.CodeLens(faixa, { title: titulo, command: 'km.abrirPainel' })];
   }
 }
 
@@ -314,11 +343,16 @@ const avisos = new Aviso();
 const baseline = new Baseline();
 const problemas = vscode.languages.createDiagnosticCollection('km');
 const barra = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
-barra.command = 'km.review';
+barra.command = 'km.abrirPainel';
 
 function marcarProblemas(doc) {
   if (!doc || doc.languageId !== 'markdown' || !raiz(doc)) return;
   const ts = trechos(doc);
+  if (!ts.length) {   // fora do include do .km/config.json: o km nao tem nada a dizer
+    problemas.set(doc.uri, []);
+    barra.hide();
+    return;
+  }
   const achados = [];
   let mexidos = 0, semChancela = 0;
   for (const t of ts) {

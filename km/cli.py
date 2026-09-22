@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import subprocess
 import unicodedata
 from datetime import date
 from pathlib import Path
@@ -18,7 +19,21 @@ from . import chancela as ch
 
 
 def _root(args) -> Path:
-    return Path(args.repo).expanduser().resolve()
+    """The repository root, from wherever you are standing.
+
+    The chancel is a git ref, so there is no such thing as using `km` outside a repository
+    — and without this check a run from `~` walks the whole home directory looking for
+    Markdown. Climbing to the top also means any subdirectory works.
+    """
+    pedido = Path(args.repo).expanduser().resolve()
+    r = subprocess.run(["git", "rev-parse", "--show-toplevel"], cwd=pedido,
+                       capture_output=True, text=True)
+    if r.returncode != 0:
+        raise SystemExit(
+            f"{pedido} não está num repositório git — a chancela é um ref, então o km só\n"
+            f"funciona dentro de um. Entre no repositório e rode de novo, por exemplo:\n"
+            f"  cd ~/demo-sla-project && km serve")
+    return Path(r.stdout.strip())
 
 
 def _sem_acento(t: str) -> str:
@@ -27,7 +42,15 @@ def _sem_acento(t: str) -> str:
 
 
 def _arquivos(root: Path, arg: str | None) -> list[str]:
-    return [arg] if arg else ch.documentos(root)
+    """The opt-in is the `include` list, and it is the opt-in everywhere.
+
+    Naming a file explicitly does not smuggle it in: otherwise the editor would decorate
+    and nag about documents this repository deliberately left out.
+    """
+    cobertos = ch.documentos(root)
+    if not arg:
+        return cobertos
+    return [arg] if arg in cobertos else []
 
 
 def _hunks_por_ref(rel: str, ref: str, hs: list[ch.Hunk]) -> list[ch.Hunk]:
@@ -84,7 +107,14 @@ def cmd_pendente(args) -> int:
     """The two questions: what changed since the chancel, and what never had one."""
     root = _root(args)
     hoje = date.today().isoformat()
-    situacoes = [ch.situacao(root, rel, hoje) for rel in _arquivos(root, args.file)]
+    alvos = _arquivos(root, args.file)
+    if args.file and not alvos:
+        if args.json:
+            print("[]")
+            return 0
+        print(f"{args.file} está fora do `include` do .km/config.json — o km não olha para ele")
+        return 0
+    situacoes = [ch.situacao(root, rel, hoje) for rel in alvos]
 
     if args.json:
         print(json.dumps([e for s in situacoes for e in ch.estados(s)], ensure_ascii=False))
@@ -135,6 +165,9 @@ def cmd_chancela(args) -> int:
     rel = args.file
     if ch.atual(root, rel) is None:
         raise SystemExit(f"{rel} não existe no disco")
+    if rel not in ch.documentos(root):
+        raise SystemExit(f"{rel} está fora do `include` do .km/config.json — "
+                         f"inclua-o lá antes de chancelar")
     s = ch.situacao(root, rel)
     if not s.hunks:
         print(f"{rel}: nada pendente — a chancela já é o arquivo de hoje")

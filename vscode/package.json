@@ -22,7 +22,7 @@
       },
       {
         "command": "km.review",
-        "title": "km: revisar este arquivo contra a minha chancela"
+        "title": "km: diff contra a chancela, aqui no editor"
       },
       {
         "command": "km.veredicto",

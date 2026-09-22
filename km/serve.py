@@ -125,7 +125,7 @@ def estado(root: Path, by: str = "") -> dict:
         docs.append({"file": rel, "blocos": blocos, "rastreado": s.tem_chancela,
                      "em": _ultima(root, rel), "linhas": len(s.depois.splitlines())})
     docs.sort(key=lambda d: (not d["rastreado"], d["file"]))
-    return {"repo": root.name, "docs": docs, "hoje": hoje, "by": by}
+    return {"repo": root.name, "root": str(root), "docs": docs, "hoje": hoje, "by": by}
 
 
 # ---- the actions ---------------------------------------------------------------------
@@ -238,7 +238,15 @@ class Handler(BaseHTTPRequestHandler):
 def run(root: Path, port: int = 8431, by: str = "", abrir: bool = False) -> int:
     Handler.root = root
     Handler.by = by
-    servidor = ThreadingHTTPServer(("127.0.0.1", port), Handler)
+    try:
+        servidor = ThreadingHTTPServer(("127.0.0.1", port), Handler)
+    except OSError as e:
+        if e.errno != 98:
+            raise
+        raise SystemExit(
+            f"a porta {port} já está ocupada — provavelmente por um painel que ficou aberto.\n"
+            f"abra http://127.0.0.1:{port} para ver de qual repositório ele é,\n"
+            f"ou suba este em outra: km serve --port {port + 1}")
     url = f"http://127.0.0.1:{port}"
     print(f"km · {root.name}  ·  {url}  ·  Ctrl-C encerra")
     if abrir:
