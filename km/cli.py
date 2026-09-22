@@ -412,14 +412,18 @@ def _tracked_files(root: Path, arg: str | None) -> list[str]:
     return sorted(set(vivos) | set(ch.arquivos(root)))
 
 
-def _hunk_por_ref(root: Path, rel: str, ref: str, hs: list[ch.Hunk]) -> ch.Hunk:
-    """`--hunk` takes the number printed by `km pendente`, or part of the heading."""
+def _hunks_por_ref(root: Path, rel: str, ref: str, hs: list[ch.Hunk]) -> list[ch.Hunk]:
+    """`--hunk` takes the number printed by `km pendente`, or part of a heading.
+
+    A heading takes every pending change under it, not the first one: endorsing a passage
+    is endorsing the passage, and picking one of its changes is what the number is for.
+    """
     if ref.isdigit():
         n = int(ref)
-        for h in hs:
-            if h.n == n:
-                return h
-        raise SystemExit(f"{rel}: não há trecho {n} — rode `km pendente {rel}`")
+        achados = [h for h in hs if h.n == n]
+        if not achados:
+            raise SystemExit(f"{rel}: não há trecho {n} — rode `km pendente {rel}`")
+        return achados
 
     import unicodedata
 
@@ -429,9 +433,11 @@ def _hunk_por_ref(root: Path, rel: str, ref: str, hs: list[ch.Hunk]) -> ch.Hunk:
 
     alvo = sem_acento(ref)
     achados = [h for h in hs if alvo in sem_acento(h.titulo)]
+    if not achados:   # o título pode estar acima, se o trecho é filho de outro
+        achados = [h for h in hs if alvo in sem_acento(h.caminho)]
     if not achados:
         raise SystemExit(f"{rel}: nenhuma mudança pendente em um título com {ref!r}")
-    return achados[0]
+    return achados
 
 
 def _resumo_chancela(root: Path) -> str:
@@ -516,7 +522,7 @@ def cmd_chancela(args) -> int:
     if args.all:
         escolhidos = [h for h in s.hunks]
     elif args.hunk:
-        escolhidos = [_hunk_por_ref(root, rel, r, s.hunks) for r in args.hunk]
+        escolhidos = [h for r in args.hunk for h in _hunks_por_ref(root, rel, r, s.hunks)]
     else:
         raise SystemExit("diga o que entra: --hunk <n|título> (um ou mais) ou --all")
 
@@ -540,9 +546,13 @@ def cmd_chancela(args) -> int:
     commit = ch.escrever(root, {rel: novo}, mensagem)
 
     print(f"{rel}  ·  {len(escolhidos)} trecho(s) na chancela  ·  {commit[:8]}")
+    por_titulo: dict[str, list[ch.Hunk]] = {}
     for h in escolhidos:
-        print(f"   ✓ {h.titulo}")
-        for l in h.sumidas:
+        por_titulo.setdefault(h.titulo, []).append(h)
+    for titulo, dela in por_titulo.items():
+        quantos = f"  ({len(dela)} mudanças)" if len(dela) > 1 else ""
+        print(f"   ✓ {titulo}{quantos}")
+        for l in (s for h in dela for s in h.sumidas):
             print(f"     (a ressalva {l[:56]} saiu junto)")
     for h in barrados:
         print(f"   🚫 {h.titulo} — ficou de fora: {h.bloqueio[:60]}")
@@ -597,7 +607,7 @@ def cmd_restore(args) -> int:
         print(f"{rel}: nada mudou desde a chancela")
         return 0
     alvos = ([h for h in s.hunks] if args.all
-             else [_hunk_por_ref(root, rel, r, s.hunks) for r in args.hunk])
+             else [h for r in args.hunk for h in _hunks_por_ref(root, rel, r, s.hunks)])
     if not alvos:
         raise SystemExit("diga o que volta: --hunk <n|título> ou --all")
     manter = {h.n for h in s.hunks} - {h.n for h in alvos}
