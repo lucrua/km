@@ -23,6 +23,31 @@ from km import core  # noqa: E402
 PALAVRA = re.compile(r"\s+|\w+|[^\w\s]")
 
 
+FRASE = re.compile(r"[^.!?\n]+[.!?\n]*")
+
+
+def diff_inline(antes: str, agora: str) -> tuple[str, float, int]:
+    """One stream, in reading order — the Word-like view.
+
+    Prose is read in sequence, and side by side makes the eye jump. But interleaved marks
+    turn a heavily rewritten paragraph into soup, so the caller gets the share of words that
+    moved and can fall back to two columns when the change is wholesale.
+    """
+    a, b = PALAVRA.findall(antes), PALAVRA.findall(agora)
+    saida, mexidas, total = [], 0, max(len(b), 1)
+    for tag, i1, i2, j1, j2 in difflib.SequenceMatcher(None, a, b, autojunk=False).get_opcodes():
+        ta, tb = html.escape("".join(a[i1:i2])), html.escape("".join(b[j1:j2]))
+        if tag == "equal":
+            saida.append(tb)
+        elif tag == "delete":
+            saida.append(f"<del>{ta}</del>"); mexidas += i2 - i1
+        elif tag == "insert":
+            saida.append(f"<ins>{tb}</ins>"); mexidas += j2 - j1
+        else:
+            saida.append(f"<del>{ta}</del><ins>{tb}</ins>"); mexidas += max(i2 - i1, j2 - j1)
+    return "".join(saida), round(mexidas / total, 3), mexidas
+
+
 def diff_palavras(antes: str, agora: str) -> tuple[str, str]:
     """Word-level, because prose changes a word and a line diff paints the paragraph."""
     a, b = PALAVRA.findall(antes), PALAVRA.findall(agora)
@@ -55,8 +80,10 @@ def montar(root: Path, simular: bool = True) -> dict:
             estado = ledger.status_of(b)
             antes = rec.get("body")
             esq = dir_ = None
+            inline, proporcao, mexidas = None, 0.0, 0
             if antes is not None and rec.get("hash") != b.hash:
                 esq, dir_ = diff_palavras(antes, b.body)
+                inline, proporcao, mexidas = diff_inline(antes, b.body)
             blocos.append({
                 "heading": b.heading, "line": b.line, "lines": b.lines,
                 "estado": estado, "base": rec.get("state"), "em": rec.get("at"),
@@ -65,7 +92,8 @@ def montar(root: Path, simular: bool = True) -> dict:
                 "validar": rec.get("validate"), "prazo": rec.get("due"),
                 "notas": rec.get("notes", []),
                 "texto": b.body.strip(), "chancelado": (antes or "").strip(),
-                "esq": esq, "dir": dir_, "simulado": False,
+                "esq": esq, "dir": dir_, "inline": inline, "proporcao": proporcao,
+                "simulado": False,
             })
         docs.append({"file": rel, "blocos": blocos,
                      "rastreado": any(b["base"] for b in blocos),
@@ -90,6 +118,7 @@ def montar(root: Path, simular: bool = True) -> dict:
             if not b["esq"]:
                 velho = b["texto"].replace("chamado", "ticket", 3)
                 b["esq"], b["dir"] = diff_palavras(velho, b["texto"])
+                b["inline"], b["proporcao"], b["mexidas"] = diff_inline(velho, b["texto"])
                 b["chancelado"] = velho
             alvo["blocos"].insert(i + 1, b)
     return {"repo": root.name, "docs": docs, "hoje": date.today().isoformat()}
@@ -133,6 +162,9 @@ overflow:hidden;scroll-margin-top:64px}
 .e-reprovado{color:var(--neg);background:var(--neg-bg)}.e-avalidar{color:var(--val);background:var(--val-bg)}
 .e-pendente{color:var(--pend);background:var(--pend-bg)}.e-mexido{color:var(--ace);background:var(--ace-bg)}
 .sim{color:var(--mut);border:1px dashed var(--rule)}
+.marcacao{padding:12px 15px;border-top:1px solid var(--rule);font:13px/1.7 ui-monospace,Menlo,monospace;
+white-space:pre-wrap;word-break:break-word;overflow-wrap:anywhere}
+.aviso{font-family:system-ui,sans-serif;font-size:11.5px;color:var(--mut);padding:7px 15px 0}
 .par{display:grid;grid-template-columns:1fr 1fr;gap:0;border-top:1px solid var(--rule)}
 .par>div{padding:11px 14px;font:12.5px/1.5 ui-monospace,Menlo,monospace;white-space:pre-wrap;
 word-break:break-word;overflow-wrap:anywhere}
@@ -189,7 +221,10 @@ const CH = {'aprovado':'e-aprovado','a-validar':'e-avalidar','vencido':'e-aceite
   'não revisado':'e-pendente'};
 const FILTROS = ['tudo','pede você','mexidos','negados','a validar','pendentes','de pé'];
 const ESTILOS = [['st-sublinhado','sublinhado'],['st-margem','margem'],['st-fundo','fundo']];
-let estilo = 'st-fundo';
+const VISTAS = [['auto','automática'],['marcacao','marcação'],['lado','lado a lado']];
+let estilo = 'st-fundo', vista = 'auto';
+// Acima de 40% das palavras mexidas, marcacao vira sopa: o bloco cai para duas colunas.
+const usaMarcacao = b => vista === 'marcacao' || (vista === 'auto' && b.proporcao <= 0.4);
 let doc = 0, filtro = 'pede você', foco = null;
 const esc = s => (s==null?'':String(s)).replace(/[&<>]/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[m]));
 const mexido = e => e.startsWith('mexido');
@@ -243,9 +278,13 @@ function cartao(b, i){
       <span class="meta">linha ${b.line} · ${b.lines}l</span></div>
     ${b.estado==='reprovado'&&b.notas.length?`<div class="motivo"><b>motivo:</b> ${esc(b.notas[b.notas.length-1].text)}</div>`:''}
     ${b.validar?`<div class="pergunta"><b>a validar:</b> ${esc(b.validar)}${b.prazo?' · até '+esc(b.prazo):''}</div>`:''}
-    ${dif?`<div class="par"><div><div class="rot">sua chancela${b.em?' · '+esc(b.em):''}</div>${b.esq}</div>
-      <div><div class="rot">agora</div>${b.dir}</div></div>`
-      :`<div class="corpo">${esc(b.texto.slice(0,600))}${b.texto.length>600?'…':''}</div>`}
+    ${dif ? (usaMarcacao(b)
+      ? `<div class="aviso">marcação · ${b.mexidas} palavras mexidas de ${Math.round(b.mexidas/(b.proporcao||1))}${vista==='auto'?'':' · escolha sua'}</div>
+         <div class="marcacao">${b.inline}</div>`
+      : `<div class="aviso">lado a lado · ${Math.round(b.proporcao*100)}% das palavras mexidas — demais para marcação</div>
+         <div class="par"><div><div class="rot">sua chancela${b.em?' · '+esc(b.em):''}</div>${b.esq}</div>
+         <div><div class="rot">agora</div>${b.dir}</div></div>`)
+      : `<div class="corpo">${esc(b.texto.slice(0,600))}${b.texto.length>600?'…':''}</div>`}
     <div class="acoes">
       <button class="pri">Aprovar</button>
       <button>A validar…</button>
@@ -282,8 +321,16 @@ function dir(){
 function focar(i){ foco = i; document.querySelectorAll('.bloco').forEach(e=>e.classList.remove('foco'));
   document.getElementById('b'+i)?.classList.add('foco'); dir(); }
 function abrir(i){ doc = i; foco = null; lado(); meio(); scrollTo(0,0); }
-document.getElementById('estilos').innerHTML = 'diff: ' + ESTILOS.map(([c,n])=>
+document.getElementById('estilos').innerHTML = 'vista: ' + VISTAS.map(([c,n])=>
+  `<button aria-pressed="${c===vista}" onclick="mudarVista('${c}')">${n}</button>`).join('')
+  + '<span style="width:12px"></span>marcas: ' + ESTILOS.map(([c,n])=>
   `<button aria-pressed="${c===estilo}" onclick="mudarEstilo('${c}')">${n}</button>`).join('');
+function mudarVista(v){ vista = v;
+  document.querySelectorAll('.estilos button').forEach(b=>{
+    const alvo = b.getAttribute('onclick');
+    if (alvo.includes('mudarVista')) b.setAttribute('aria-pressed', alvo.includes("'"+v+"'"));
+  });
+  meio(); }
 function mudarEstilo(c){ estilo = c; document.body.className = c;
   document.querySelectorAll('.estilos button').forEach(b=>
     b.setAttribute('aria-pressed', b.getAttribute('onclick').includes(c))); }
