@@ -211,9 +211,8 @@ class CliTest(RepoTest):
 
     def test_chancela_all_then_nothing_is_pending(self):
         self.km("chancela", "regras.md", "--all", "-m", "li inteiro")
-        _, saida = self.km("pendente")
         self.assertIn("1 arquivo(s) em dia", self.km("pendente", "--short")[1])
-        self.assertIn("0 trechos mexidos", saida)
+        self.assertNotIn("trechos mexidos", self.km("pendente")[1])
 
     def test_one_passage_at_a_time(self):
         self.km("chancela", "regras.md", "--all")
@@ -282,11 +281,14 @@ class PainelTest(RepoTest):
         prazo = self.trecho(d, "Prazo")
         self.assertEqual(prazo["estado"], "mexido")
         # a linha mexida vem marcada palavra a palavra, no meio do texto corrido
-        mexidas = [l for l in prazo["marcado"] if l["tipo"] == "mexido"]
+        mexidas = [l for l in prazo["linhas"] if l["tipo"] == "mexido"]
         self.assertTrue(mexidas)
-        self.assertIn("<del>", mexidas[0]["html"])
-        self.assertTrue(any(l["tipo"] == "igual" and "Prazo" in l["html"]
-                            for l in prazo["marcado"]))
+        # o que saiu fica na coluna da esquerda; a da direita é o texto do arquivo
+        self.assertIn("<del>", mexidas[0]["esq"]["html"])
+        self.assertNotIn("<del>", mexidas[0]["dir"]["html"])
+        self.assertIn("<ins>", mexidas[0]["dir"]["html"])
+        self.assertTrue(any(l["tipo"] == "igual" and "Prazo" in l["dir"]["html"]
+                            for l in prazo["linhas"]))
         self.assertEqual(self.trecho(d, "A lista")["ressalvas"][0]["mark"], "⚠")
 
     def test_the_ruler_is_light_and_the_open_document_is_not(self):
@@ -294,10 +296,10 @@ class PainelTest(RepoTest):
         self.agir(acao="aprovar", path=self.caminho("Regras"))
         leve = self.serve.estado(self.dir)["docs"][0]
         self.assertFalse(leve["cheio"])
-        self.assertNotIn("marcado", leve["trechos"][0])
+        self.assertNotIn("linhas", leve["trechos"][0])
         cheio = self.serve.estado(self.dir, arquivo="regras.md")["docs"][0]
         self.assertTrue(cheio["cheio"])
-        self.assertIn("marcado", cheio["trechos"][0])
+        self.assertIn("linhas", cheio["trechos"][0])
 
     def test_a_deleted_passage_still_shows_up(self):
         self.serve.agir(self.dir, {"acao": "aprovar", "file": "regras.md",
@@ -306,8 +308,10 @@ class PainelTest(RepoTest):
         d = self.serve.estado(self.dir, arquivo="regras.md")["docs"][0]
         sumido = self.trecho(d, "Prazo")
         self.assertEqual(sumido["estado"], "apagado")
-        self.assertTrue(sumido["base"])                  # o texto de antes continua à vista
-        self.assertEqual(sumido["marcado"], [])
+        # só tem coluna da esquerda, e aparece onde estava: entre os dois trechos vizinhos
+        self.assertTrue(all(l["esq"] and not l["dir"] for l in sumido["linhas"]))
+        titulos = [x["heading"] for x in d["trechos"]]
+        self.assertEqual(titulos.index("Prazo"), titulos.index("A lista fechada de colunas") + 1)
 
     def test_comparing_against_another_revision(self):
         import subprocess
@@ -315,7 +319,7 @@ class PainelTest(RepoTest):
                              capture_output=True, text=True).stdout.strip()
         self.escrever(DOC.replace("horas úteis", "horas corridas"))
         d = self.serve.estado(self.dir, base=sha, arquivo="regras.md")["docs"][0]
-        self.assertTrue(any(l["tipo"] == "mexido" for l in self.trecho(d, "Prazo")["marcado"]))
+        self.assertTrue(any(l["tipo"] == "mexido" for l in self.trecho(d, "Prazo")["linhas"]))
 
     def test_aprovar_advances_the_ref(self):
         r = self.agir(acao="aprovar", path=self.caminho("Regras"))

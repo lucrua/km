@@ -145,24 +145,32 @@ def realce_linha(linha: str, em_codigo: bool) -> str:
     return realce_inline(linha)
 
 
-def _palavras(a: str, b: str) -> str:
-    """One changed line, word by word — where the eye actually needs the detail."""
+def _palavras(a: str, b: str, lado: str = "dir") -> str:
+    """One changed line, word by word — each side showing only its own words.
+
+    The left keeps what left, the right what arrived: the same line read twice, once as it
+    was and once as it is, instead of both interleaved in one column.
+    """
     pa, pb = PALAVRA.findall(a), PALAVRA.findall(b)
     out = []
     for tag, i1, i2, j1, j2 in difflib.SequenceMatcher(None, pa, pb, autojunk=False).get_opcodes():
         ta, tb = "".join(pa[i1:i2]), "".join(pb[j1:j2])
         if tag == "equal":
-            out.append(realce_inline(tb))
+            out.append(realce_inline(ta if lado == "esq" else tb))
         elif tag == "delete":
-            out.append(f"<del>{realce_inline(ta)}</del>")
+            if lado == "esq":
+                out.append(f"<del>{realce_inline(ta)}</del>")
         elif tag == "insert":
-            out.append(f"<ins>{realce_inline(tb)}</ins>")
+            if lado == "dir":
+                out.append(f"<ins>{realce_inline(tb)}</ins>")
         else:
-            out.append(f"<del>{realce_inline(ta)}</del><ins>{realce_inline(tb)}</ins>")
+            out.append(f"<del>{realce_inline(ta)}</del>" if lado == "esq"
+                       else f"<ins>{realce_inline(tb)}</ins>")
     return "".join(out)
 
 
 def _casar(velhas: list[str], novas: list[str], corte: float = 0.45) -> list[tuple]:
+    # devolve tuplas (tipo, linha de antes, linha de agora) — None do lado que não existe
     """Which old line became which new one, inside one changed block.
 
     Pairing by position turns a rewritten paragraph into soup — two lines with nothing to
@@ -195,10 +203,10 @@ def _casar(velhas: list[str], novas: list[str], corte: float = 0.45) -> list[tup
                 saida.append(("sumiu", velhas[posicao], None))
             posicao += 1
         if alvo is not None:
-            saida.append(("mexido", nova, velhas[alvo]))
+            saida.append(("mexido", velhas[alvo], nova))
             posicao = alvo + 1
         else:
-            saida.append(("novo", nova, None))
+            saida.append(("novo", None, nova))
     while posicao < len(velhas):
         if posicao not in usadas:
             saida.append(("sumiu", velhas[posicao], None))
@@ -207,45 +215,69 @@ def _casar(velhas: list[str], novas: list[str], corte: float = 0.45) -> list[tup
 
 
 def marcar(antes: str, depois: str) -> list[dict]:
-    """The passage as continuous text, with what is new, gone or edited marked in place."""
+    """The passage as two aligned columns of text.
+
+    What was removed is cut on the left, where it was — not copied to the right to be
+    struck there. The right-hand column is then exactly the file's text, which is what
+    makes it editable in place: nothing on it is a ghost of something that no longer
+    exists.
+
+    Each row carries `esq` and `dir`; either can be None, and the page draws an empty line
+    in its place so the two columns stay side by side.
+    """
     a, b = antes.splitlines(), depois.splitlines()
-    saida: list[dict] = []
-    if antes is None or not antes:
-        pares = [("novo", l, None) for l in b]
+    if not antes:
+        pares = [("novo", None, l) for l in b]
     else:
         pares = []
         for tag, i1, i2, j1, j2 in difflib.SequenceMatcher(None, a, b, autojunk=False).get_opcodes():
             if tag == "equal":
-                pares += [("igual", l, None) for l in b[j1:j2]]
+                pares += [("igual", x, y) for x, y in zip(a[i1:i2], b[j1:j2])]
             elif tag == "insert":
-                pares += [("novo", l, None) for l in b[j1:j2]]
+                pares += [("novo", None, l) for l in b[j1:j2]]
             elif tag == "delete":
                 pares += [("sumiu", l, None) for l in a[i1:i2]]
             else:
                 pares += _casar(a[i1:i2], b[j1:j2])
 
-    em_codigo = False
-    for tipo, linha, velha in pares:
-        classe = _classe_da_linha(linha, em_codigo)
-        if CERCA.match(linha):
-            em_codigo = not em_codigo
-        corpo = (_palavras(velha, linha) if tipo == "mexido"
-                 else realce_linha(linha, em_codigo and not CERCA.match(linha)))
-        saida.append({"tipo": tipo, "classe": classe, "html": corpo or "&nbsp;"})
+    esq_codigo = dir_codigo = False
+    saida = []
+    for tipo, velha, nova in pares:
+        linha = {"tipo": tipo, "esq": None, "dir": None}
+        if velha is not None:
+            classe = _classe_da_linha(velha, esq_codigo)
+            if CERCA.match(velha):
+                esq_codigo = not esq_codigo
+            corpo = (_palavras(velha, nova, lado="esq") if tipo == "mexido"
+                     else realce_linha(velha, esq_codigo and not CERCA.match(velha)))
+            linha["esq"] = {"classe": classe, "html": corpo}
+        if nova is not None:
+            classe = _classe_da_linha(nova, dir_codigo)
+            if CERCA.match(nova):
+                dir_codigo = not dir_codigo
+            corpo = (_palavras(velha, nova, lado="dir") if tipo == "mexido"
+                     else realce_linha(nova, dir_codigo and not CERCA.match(nova)))
+            linha["dir"] = {"classe": classe, "html": corpo}
+        saida.append(linha)
     return saida
 
 
 def realcar(texto: str) -> list[dict]:
-    """The same, with nothing to compare: the left-hand column."""
+    """The same shape, with nothing to compare: one column of plain, highlighted text."""
     em_codigo = False
     saida = []
     for linha in texto.splitlines():
         classe = _classe_da_linha(linha, em_codigo)
         if CERCA.match(linha):
             em_codigo = not em_codigo
-        saida.append({"tipo": "igual", "classe": classe,
-                      "html": realce_linha(linha, em_codigo and not CERCA.match(linha)) or "&nbsp;"})
+        corpo = realce_linha(linha, em_codigo and not CERCA.match(linha))
+        saida.append({"tipo": "igual", "esq": None, "dir": {"classe": classe, "html": corpo}})
     return saida
+
+
+def so_esquerda(texto: str) -> list[dict]:
+    """A passage that left the file: it only has a left-hand column now."""
+    return [{"tipo": "sumiu", "dir": None, "esq": l["dir"]} for l in realcar(texto)]
 
 
 def _corpo(trecho) -> str:
@@ -268,6 +300,25 @@ def _ultima(root: Path, rel: str) -> str:
     linhas = ch.historico(root, rel, None, limite=1).strip().splitlines()
     partes = linhas[0].split(" ") if linhas else []
     return partes[1] if len(partes) > 1 else ""
+
+
+def _ordem(base: list[str], atual: list[str]) -> list[tuple[str, bool]]:
+    """The passages of a file in reading order, including the ones that left.
+
+    Both sides are lists of heading paths; the same matching that produces a diff puts a
+    removed passage back between the two it used to live between.
+    """
+    fora = set(base) - set(atual)
+    if not fora:
+        return [(c, True) for c in atual]
+    saida: list[tuple[str, bool]] = []
+    for tag, i1, i2, j1, j2 in difflib.SequenceMatcher(None, base, atual,
+                                                       autojunk=False).get_opcodes():
+        if tag in ("delete", "replace"):
+            saida += [(c, False) for c in base[i1:i2] if c in fora]
+        if tag != "delete":
+            saida += [(c, True) for c in atual[j1:j2]]
+    return saida
 
 
 def estado(root: Path, by: str = "", base: str | None = None,
@@ -298,9 +349,25 @@ def estado(root: Path, by: str = "", base: str | None = None,
             antes = {x.caminho: x for x in ch.trechos(base_cru)}
             agora = {x.caminho: x for x in ch.trechos(ch.atual(root, rel) or "")}
 
+        vivos = {e["path"]: e for e in ch.estados(s)}
+        ordem = (_ordem(list(antes), list(vivos)) if cheio
+                 else [(c, True) for c in vivos])
+
         trechos = []
-        for e in ch.estados(s):
-            t = {
+        for caminho, vivo in ordem:
+            if not vivo:
+                # Um trecho que saiu do arquivo aparece onde ele estava, não empurrado
+                # para o fim: é lá que você lembra dele, e é lá que a decisão faz sentido.
+                velho_tr = antes[caminho]
+                trechos.append({
+                    "heading": velho_tr.titulo, "path": caminho, "line": velho_tr.linha,
+                    "lines": velho_tr.linhas, "estado": "apagado", "bloqueado": "",
+                    "ressalvas": [], "sumidas": [], "texto": "", "sha": "",
+                    "linhas": so_esquerda(velho_tr.texto),
+                })
+                continue
+            e = vivos[caminho]
+            tr = {
                 "heading": e["heading"], "path": e["path"], "line": e["line"],
                 "lines": e["lines"], "estado": e["state"], "bloqueado": e["blocked"],
                 "ressalvas": [{"mark": c["mark"], "text": c["text"].lstrip("> ").strip(),
@@ -310,34 +377,21 @@ def estado(root: Path, by: str = "", base: str | None = None,
             if cheio:
                 atual_txt = agora[e["path"]].texto if e["path"] in agora else ""
                 base_txt = antes[e["path"]].texto if e["path"] in antes else ""
-                t.update({
+                tr.update({
                     "texto": atual_txt,
                     # The sha of what the page is showing: saving sends it back, and the
                     # server refuses if the passage moved meanwhile.
                     "sha": ch.sha_do(atual_txt),
                     "sumidas": ch.sumidas(base_txt.splitlines(), atual_txt.splitlines()),
-                    "base": realcar(base_txt) if base_txt else [],
                     # De pé é de pé: se a única diferença for cosmética — uma tabela
                     # re-alinhada —, o texto aparece limpo, sem marcas que não pedem nada.
-                    "marcado": (realcar(atual_txt) if e["state"] == "com chancela"
-                                else marcar(base_txt, atual_txt)),
+                    "linhas": (realcar(atual_txt) if e["state"] == "com chancela"
+                               else marcar(base_txt, atual_txt)),
                 })
             else:
-                t["sumidas"] = e["dropped"]
-            trechos.append(t)
+                tr["sumidas"] = e["dropped"]
+            trechos.append(tr)
 
-        # Passages that exist in the chancel and no longer in the file: the deletion is a
-        # change like any other, and nothing else on screen would show it.
-        if cheio:
-            for caminho, velho in antes.items():
-                if caminho in agora:
-                    continue
-                trechos.append({
-                    "heading": velho.titulo, "path": caminho, "line": velho.linha,
-                    "lines": velho.linhas, "estado": "apagado", "bloqueado": "",
-                    "ressalvas": [], "sumidas": [], "texto": "", "sha": "",
-                    "base": realcar(velho.texto), "marcado": [],
-                })
         docs.append({"file": rel, "trechos": trechos, "rastreado": s.tem_chancela,
                      "cheio": cheio, "em": _ultima(root, rel) if cheio else "",
                      "linhas": len(s.depois.splitlines())})
@@ -532,7 +586,7 @@ padding:6px 14px;z-index:4}
 .tr.foco .col.agora{box-shadow:inset 2px 0 0 var(--acc)}
 .txt{font:12.9px/1.62 ui-monospace,SFMono-Regular,Menlo,monospace;white-space:pre-wrap;
 word-break:break-word;overflow-wrap:anywhere}
-.ln{display:block;padding:0 2px;border-radius:2px}
+.ln{display:block;padding:0 2px;border-radius:2px;min-height:1.62em}
 .ln.novo{background:var(--ok-bg)}
 .ln.sumiu{background:var(--neg-bg);color:var(--neg);text-decoration:line-through;
 text-decoration-color:color-mix(in srgb,var(--neg) 60%,transparent)}
@@ -563,8 +617,14 @@ border:1px solid var(--rule);background:var(--bg);color:var(--ink);text-align:le
 .nota{font-size:12px;border-left:3px solid var(--neg);background:var(--neg-bg);
 padding:6px 9px;margin-bottom:8px;border-radius:0 4px 4px 0}
 .nota.aviso{border-color:var(--ace);background:var(--ace-bg)}
-textarea{width:100%;min-height:200px;font:12.9px/1.62 ui-monospace,Menlo,monospace;padding:8px;
-border-radius:6px;border:1px solid var(--acc);background:var(--bg);color:var(--ink);resize:vertical}
+/* A coluna 2 é sempre a interface de edição: mesmo texto, mesma medida, sem troca de
+   modo. O que muda quando você escreve é só a moldura. */
+.txt.edit{outline:0;border-radius:4px;padding:0 4px;margin:0 -4px;
+caret-color:var(--acc);min-height:1.6em}
+.txt.edit:focus{box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--acc) 45%,transparent)}
+.ln.g{color:transparent;background:repeating-linear-gradient(135deg,
+color-mix(in srgb,var(--rule) 55%,transparent) 0 6px,transparent 6px 12px);opacity:.45}
+.col.agora.sumida{background:color-mix(in srgb,var(--neg-bg) 25%,transparent)}
 .form{display:flex;flex-direction:column;gap:5px}
 .form input{font:inherit;font-size:12.5px;padding:4px 8px;border-radius:6px;
 border:1px solid var(--rule);background:var(--bg);color:var(--ink)}
@@ -591,7 +651,11 @@ const pedeVoce = t => t.estado !== 'com chancela' || !!t.bloqueado
   || (t.sumidas||[]).length > 0 || (t.ressalvas||[]).some(r => r.vencida);
 
 let D = null, doc = 0, foco = 0, ver = 'tudo', base = null;
-let form = null, editor = null, recado = '', meuTexto = '';
+let form = null, recado = '', conflito = null;
+// O texto que você escreveu e ainda não salvou, por trecho. Enquanto houver algo aqui a
+// tela não se recarrega sozinha: recarregar apagaria o que você digitou.
+let sujos = {};
+const temSujo = () => Object.keys(sujos).length > 0;
 
 async function carregar(arquivo){
   // Só o documento aberto vem com o texto inteiro marcado; o resto é a régua lateral.
@@ -615,10 +679,15 @@ async function agir(corpo){
   const j = await r.json();
   if (j.estado) { D = j.estado; }
   recado = j.ok ? '✓ ' + (j.msg || 'feito') : '✕ ' + (j.erro || 'não deu');
-  if (j.conflito) { editor = {i: editor ? editor.i : foco, conflito: j.conflito.atual}; }
-  else { form = null; if (j.ok) editor = null; }
+  if (j.conflito) {
+    conflito = {path: corpo.path, atual: j.conflito.atual};
+  } else {
+    conflito = null;
+    form = null;
+    if (j.ok && corpo.acao === 'salvar') delete sujos[corpo.path];
+  }
   desenhar();
-  if (j.ok) setTimeout(() => { if (!form && !editor) carregar(); }, 50);
+  if (j.ok && !temSujo()) setTimeout(() => carregar(), 50);
 }
 
 const trechos = () => (D && D.docs[doc] ? D.docs[doc].trechos : []);
@@ -652,10 +721,27 @@ function lado(){
       <div class="barra">${seg}</div></button>`;}).join('');
 }
 
-function linhas(ls){
+// Uma linha de cada lado, sempre no mesmo número: onde um lado não tem nada, entra uma
+// linha fantasma, que não é texto — ela é pulada na hora de ler o que você escreveu.
+function fantasma(){ return '<span class="ln g" data-g contenteditable="false">&nbsp;</span>'; }
+
+function coluna(ls, lado, marcaTipo){
   if (!ls || !ls.length) return '<div class="vaziocol">— nada aqui —</div>';
-  return '<div class="txt">' + ls.map(l =>
-    `<span class="ln ${l.tipo === 'igual' ? '' : l.tipo} ${l.classe}">${l.html}</span>`).join('') + '</div>';
+  return ls.map(l => {
+    const c = l[lado];
+    if (!c) return fantasma();
+    const tipo = marcaTipo ? (l.tipo === 'igual' ? '' : l.tipo) : '';
+    return `<span class="ln ${tipo} ${c.classe}">${c.html}</span>`;
+  }).join('');
+}
+
+function textoDaColuna(el){
+  const partes = [];
+  for (const n of el.childNodes){
+    if (n.nodeType === 1 && n.hasAttribute && n.hasAttribute('data-g')) continue;
+    partes.push(n.nodeType === 1 ? n.innerText : n.textContent);
+  }
+  return partes.join('\\n').replace(/ /g, '');
 }
 
 function avisos(t){
@@ -672,10 +758,16 @@ function avisos(t){
 }
 
 function acoes(t, i){
-  if (editor && editor.i === i) {
-    return `<button class="pri" onclick="salvar(${i})">Salvar</button>
-      <button onclick="fechar()">cancelar</button>
-      <div class="q">salva só este trecho</div>`;
+  const sujo = sujos[t.path] !== undefined;
+  if (sujo) {
+    return `<span class="chip e-mexido">editado aqui</span>
+      <button class="pri" onclick="salvar(${i})">Salvar no arquivo</button>
+      <button onclick="descartar(${i})">Descartar</button>
+      <div class="q">⌘S / Ctrl+S salva · Esc descarta</div>
+      ${conflito && conflito.path === t.path ? `<div class="nota">
+        <b>o arquivo mudou enquanto você escrevia</b>
+        <div class="q">nada foi sobrescrito. “Salvar por cima” grava o seu texto.</div></div>
+        <button onclick="salvar(${i}, true)">Salvar por cima</button>` : ''}`;
   }
   if (form && form.i === i) {
     const rot = {validar:['o que falta confirmar','prazo'], reverter:['por que não serve',''],
@@ -733,37 +825,51 @@ function desenhar(){
   $('doc').innerHTML = cabecalho + (vis.length ? vis.map(([t,i]) => {
     // Trecho de pé tem as duas colunas iguais. Em vez de repetir o texto, ele ocupa a
     // largura inteira: o que se lê a maior parte do tempo é o documento, não o diff.
-    const igual = t.estado === 'com chancela' && !t.bloqueado && !(t.sumidas||[]).length
-      && !(editor && editor.i === i);
-    const meio = `<div class="col agora ${igual?'inteiro':''}">${avisos(t)}${editor && editor.i === i
-        ? caixa(t, i) : linhas(t.marcado)}</div>`;
-    return `<div class="tr ${foco===i?'foco':''}" id="t${i}" onclick="focar(${i})">
-      ${igual ? '' : `<div class="col base">${linhas(t.base)}</div>`}
+    const igual = t.estado === 'com chancela' && !t.bloqueado && !(t.sumidas||[]).length;
+    const sujo = sujos[t.path];
+    const corpo = sujo !== undefined
+      ? esc(sujo).split('\\n').map(l => `<span class="ln">${l || '&nbsp;'}</span>`).join('')
+      : coluna(t.linhas, 'dir', true);
+    const meio = t.estado === 'apagado'
+      ? `<div class="col agora sumida"><div class="vaziocol">— saiu do arquivo —</div></div>`
+      : `<div class="col agora ${igual?'inteiro':''}">${avisos(t)}
+          <div class="txt edit" contenteditable="plaintext-only" spellcheck="false"
+            data-path="${esc(t.path)}" data-i="${i}"
+            oninput="mexeu(${i}, this)" onfocus="focar(${i})">${corpo}</div></div>`;
+    return `<div class="tr ${foco===i?'foco':''}" id="t${i}">
+      ${igual ? '' : `<div class="col base"><div class="txt">${coluna(t.linhas, 'esq', true)}</div></div>`}
       ${meio}
       <div class="col acoes">${acoes(t, i)}</div>
     </div>`; }).join('') : '<div class="vazio">Nada mudou neste arquivo.</div>');
-  const campo = $('f-texto') || $('e-texto');
+  const campo = $('f-texto');
   if (campo) campo.focus();
 }
 
-function caixa(t, i){
-  if (editor.conflito !== undefined) {
-    return `<div class="nota"><b>o arquivo mudou enquanto você editava</b>
-      <div class="q">outro agente ou o editor chegaram primeiro. Nada foi sobrescrito.</div></div>
-      <div class="rot">no arquivo agora</div>
-      <div class="txt" style="opacity:.8">${esc(editor.conflito)}</div>
-      <div class="rot" style="margin-top:8px">o seu texto</div>
-      <textarea id="e-texto">${esc(meuTexto)}</textarea>
-      <div class="q">“Salvar” grava o seu por cima</div>`;
-  }
-  return `<textarea id="e-texto" onkeydown="if(event.key==='Escape')fechar()">${esc(t.texto)}</textarea>`;
+function abrir(i){
+  if (temSujo() && !confirm('Há texto editado e não salvo. Sair mesmo assim?')) return;
+  sujos = {}; foco = 0; form = null; scrollTo(0,0); carregar(D.docs[i].file);
 }
+function focar(i){ if (foco === i) return; foco = i; pintarFoco(); }
+// Mudar o foco não redesenha: redesenhar no meio da digitação tiraria o cursor do lugar.
+function pintarFoco(){
+  document.querySelectorAll('.tr').forEach(e => e.classList.remove('foco'));
+  $('t'+foco)?.classList.add('foco');
+}
+function fechar(){ form = null; desenhar(); }
+function abrirForm(i, tipo){ form = {i, tipo}; foco = i; desenhar(); }
+// O texto do arquivo termina em quebra de linha e o da tela não; comparar sem isso evita
+// marcar como editado um trecho em que você só clicou.
+const mesmo = (a, b) => (a||'').replace(/\\s+$/, '') === (b||'').replace(/\\s+$/, '');
 
-function abrir(i){ foco = 0; form = null; editor = null; scrollTo(0,0); carregar(D.docs[i].file); }
-function focar(i){ if (foco === i) return; foco = i; desenhar(); }
-function fechar(){ form = null; editor = null; desenhar(); }
-function abrirForm(i, tipo){ editor = null; form = {i, tipo}; foco = i; desenhar(); }
-function editar(i){ form = null; editor = {i}; foco = i; meuTexto = trecho(i).texto; desenhar(); }
+function mexeu(i, el){
+  const t = trecho(i);
+  const texto = textoDaColuna(el);
+  if (mesmo(texto, t.texto)) { delete sujos[t.path]; } else { sujos[t.path] = texto; }
+  // Só a coluna das ações muda; o texto que você está digitando fica onde está.
+  const cel = $('t'+i)?.querySelector('.col.acoes');
+  if (cel) cel.innerHTML = acoes(t, i);
+}
+function descartar(i){ delete sujos[trecho(i).path]; conflito = null; desenhar(); }
 function enviar(i){
   const texto = ($('f-texto')||{}).value || '';
   const prazo = ($('f-prazo')||{}).value || '';
@@ -771,17 +877,35 @@ function enviar(i){
   if (form.tipo === 'reverter') return agir({...alvo(i), acao:'reverter', motivo: texto});
   return agir({...alvo(i), acao:'marca', marca: form.tipo, texto});
 }
-function salvar(i){
-  const t = ($('e-texto')||{}).value || '';
-  meuTexto = t;
-  agir({...alvo(i), acao:'salvar', texto: t,
-        sha: (editor && editor.conflito !== undefined) ? '' : trecho(i).sha});
+function salvar(i, porCima){
+  const t = trecho(i);
+  const texto = t && sujos[t.path];
+  if (texto === undefined) {
+    // Acontece quando o título do trecho muda no arquivo enquanto você escreve: o
+    // endereço do que você editou deixou de existir. Falhar calado seria pior.
+    const perdido = Object.keys(sujos)[0];
+    recado = perdido
+      ? '✕ o trecho que você editava mudou de título no arquivo — copie o seu texto antes de recarregar'
+      : '✕ nada editado aqui';
+    return desenhar();
+  }
+  agir({...alvo(i), acao:'salvar', texto, sha: porCima ? '' : t.sha});
 }
 function setVer(v){ ver = v; foco = 0; desenhar(); }
 function trocarBase(){ base = $('base').value; carregar(); }
 
 document.addEventListener('keydown', (e)=>{
-  if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA' || e.target.tagName === 'SELECT') {
+  const escrevendo = e.target.isContentEditable;
+  if ((e.ctrlKey || e.metaKey) && e.key === 's') {
+    e.preventDefault();
+    const i = escrevendo ? Number(e.target.dataset.i) : foco;
+    return salvar(i);
+  }
+  if (escrevendo) {
+    if (e.key === 'Escape') { e.target.blur(); descartar(Number(e.target.dataset.i)); }
+    return;   // dentro do texto, letra é letra
+  }
+  if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') {
     if (e.key === 'Escape') fechar();
     return;
   }
@@ -792,12 +916,11 @@ document.addEventListener('keydown', (e)=>{
   else if (e.key === 'a') agir({...alvo(foco), acao:'aprovar'});
   else if (e.key === 'v') abrirForm(foco,'validar');
   else if (e.key === 'r') abrirForm(foco,'reverter');
-  else if (e.key === 'e') editar(foco);
   else if (e.key === 'Escape') fechar();
 });
 
 // O arquivo muda por fora: um agente escreve, o editor salva. A tela se atualiza sozinha
 // quando voce nao esta no meio de escrever nada.
-setInterval(()=>{ if (!form && !editor) carregar(); }, 8000);
+setInterval(()=>{ if (!form && !temSujo()) carregar(); }, 8000);
 carregar();
 </script></body></html>"""
