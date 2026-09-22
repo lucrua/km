@@ -124,3 +124,35 @@ class TableNormalisationTest(unittest.TestCase):
                                       "| Cliente | `CustomerID` | novo |")
         self.assertNotEqual(blk.split(self.APERTADA, "x.md")[0].hash,
                             blk.split(outra, "x.md")[0].hash)
+
+
+class VouchedBodyTest(unittest.TestCase):
+    """The left-hand column needs the text, and git cannot always recover it."""
+
+    def setUp(self):
+        self.tmp = Path(tempfile.mkdtemp())
+        (self.tmp / "regras.md").write_text(DOC, encoding="utf-8")
+        self.ledger = blk.Ledger(self.tmp)
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp)
+
+    def test_the_vouched_text_survives_an_edit_to_the_file(self):
+        antes = blk.of_file(self.tmp, "regras.md")[1]
+        self.ledger.vouch(antes, "aprovado", by="human:test")
+        self.ledger.save()
+        (self.tmp / "regras.md").write_text(DOC.replace("8 às 17", "8 às 19"), encoding="utf-8")
+        depois = blk.of_file(self.tmp, "regras.md")[1]
+        self.assertEqual(self.ledger.status_of(depois), "mexido depois de aprovado")
+        self.assertIn("8 às 17", blk.Ledger(self.tmp).vouched_body(depois))
+
+    def test_the_baseline_mixes_vouched_text_with_current_text(self):
+        bs = blk.of_file(self.tmp, "regras.md")
+        self.ledger.vouch(bs[1], "aprovado", by="human:test")
+        self.ledger.save()
+        (self.tmp / "regras.md").write_text(
+            DOC.replace("8 às 17", "8 às 19").replace("numerador", "denominador"),
+            encoding="utf-8")
+        base = blk.Ledger(self.tmp).vouched_file(self.tmp, "regras.md")
+        self.assertIn("8 às 17", base)        # o bloco chancelado, como você aprovou
+        self.assertIn("denominador", base)    # o que nunca foi chancelado, como está hoje

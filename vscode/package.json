@@ -1,0 +1,30 @@
+{
+  "name": "km-review",
+  "displayName": "km · revisão por bloco",
+  "description": "What changed since you vouched for it, block by block.",
+  "version": "0.1.0",
+  "publisher": "local",
+  "engines": { "vscode": "^1.90.0" },
+  "categories": ["Other"],
+  "activationEvents": ["onLanguage:markdown"],
+  "main": "./extension.js",
+  "contributes": {
+    "commands": [
+      { "command": "km.review", "title": "km: revisar este arquivo contra a minha chancela" },
+      { "command": "km.vouch", "title": "km: dar status ao bloco sob o cursor" }
+    ],
+    "configuration": {
+      "title": "km",
+      "properties": {
+        "km.path": {
+          "type": "string",
+          "default": "",
+          "description": "Caminho do executável km. Vazio = ~/knowledge-manager/bin/km"
+        }
+      }
+    },
+    "keybindings": [
+      { "command": "km.vouch", "key": "ctrl+alt+k", "when": "editorTextFocus && editorLangId == markdown" }
+    ]
+  }
+}

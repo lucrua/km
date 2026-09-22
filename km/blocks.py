@@ -128,6 +128,10 @@ class Ledger(core.KeyedLog):
         rec = {
             "key": block.key, "file": block.file, "path": block.path,
             "hash": block.hash, "state": state, "at": date.today().isoformat(), "by": by,
+            # The vouched text itself, not just its hash: the left-hand column of a review
+            # has to show what you approved, and git cannot always recover it — a block
+            # vouched against a dirty working tree exists in no commit.
+            "body": block.body,
         }
         if state == "aceite":
             rec["expires"] = (date.today() + timedelta(days=ACCEPT_EXPIRES_DAYS)).isoformat()
@@ -146,6 +150,19 @@ class Ledger(core.KeyedLog):
         if rec.get("expires") and (today or date.today().isoformat()) > rec["expires"]:
             return "suposição"
         return rec["state"]
+
+    def vouched_body(self, block: Block) -> str | None:
+        rec = self.records.get(block.key)
+        return rec.get("body") if rec else None
+
+    def vouched_file(self, root: Path, rel: str) -> str:
+        """The document as you last vouched it: your text where you vouched, current where not."""
+        out = []
+        for b in of_file(root, rel):
+            body = self.vouched_body(b)
+            head = "#" * (b.path.count(" › ") + 1) + " " + b.heading
+            out.append(head + "\n" + (body if body is not None else b.body))
+        return "\n".join(out)
 
     def orphans(self, live: list[Block]) -> list[dict]:
         keys = {b.key for b in live}

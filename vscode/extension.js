@@ -1,0 +1,167 @@
+// A thin surface over the km CLI: the model lives there, the editor only shows it.
+const vscode = require('vscode');
+const cp = require('child_process');
+const fs = require('fs');
+const path = require('path');
+const os = require('os');
+
+const SCHEME = 'km-baseline';
+const CORES = {
+  'aprovado': '#2B6647', 'aceite': '#94600F', 'a-validar': '#2A4B6E',
+  'reprovado': '#8B4E4E', 'suposicao': '#8A5A0B', 'nao revisado': '#5A6660',
+};
+const mexido = (e) => e.startsWith('mexido');
+const chave = (e) => e.normalize('NFD').replace(/[̀-ͯ]/g, '');
+
+function km(args, cwd) {
+  const bin = vscode.workspace.getConfiguration('km').get('path')
+    || path.join(os.homedir(), 'knowledge-manager', 'bin', 'km');
+  return cp.execFileSync(bin, args, { cwd, encoding: 'utf8', maxBuffer: 32 * 1024 * 1024 });
+}
+const raiz = (doc) => vscode.workspace.getWorkspaceFolder(doc.uri)?.uri.fsPath;
+const rel = (doc) => vscode.workspace.asRelativePath(doc.uri, false);
+
+function raizDe(arquivo) {
+  for (const f of vscode.workspace.workspaceFolders || []) {
+    if (fs.existsSync(path.join(f.uri.fsPath, arquivo))) return f.uri.fsPath;
+  }
+  return null;
+}
+
+function blocos(doc) {
+  const r = raiz(doc);
+  if (!r || doc.languageId !== 'markdown') return [];
+  try { return JSON.parse(km(['blocks', rel(doc), '--json'], r)); } catch (e) { return []; }
+}
+
+// ---- a coluna da esquerda: o documento como voce o chancelou -------------------
+class Baseline {
+  provideTextDocumentContent(uri) {
+    const arquivo = uri.query;
+    const dir = raizDe(arquivo);
+    if (!dir) return '# km\n\nArquivo fora do workspace.';
+    try { return km(['baseline', arquivo], dir); }
+    catch (e) { return '# km\n\nNao consegui montar a baseline:\n\n' + e.message; }
+  }
+}
+
+// ---- o aviso no topo do arquivo ------------------------------------------------
+class Aviso {
+  constructor() {
+    this.mudou = new vscode.EventEmitter();
+    this.onDidChangeCodeLenses = this.mudou.event;
+  }
+  provideCodeLenses(doc) {
+    const bs = blocos(doc);
+    if (!bs.length) return [];
+    const m = bs.filter(b => mexido(b.state)).length;
+    const nunca = bs.filter(b => chave(b.state) === 'nao revisado').length;
+    const faixa = new vscode.Range(0, 0, 0, 0);
+    if (!m && !nunca) {
+      return [new vscode.CodeLens(faixa,
+        { title: 'km · ' + bs.length + ' blocos, todos com a sua chancela', command: 'km.review' })];
+    }
+    const partes = [];
+    if (m) partes.push(m + ' mexidos desde a sua chancela');
+    if (nunca) partes.push(nunca + ' nunca revisados');
+    return [new vscode.CodeLens(faixa,
+      { title: 'km · ' + partes.join(' · ') + ' — revisar', command: 'km.review' })];
+  }
+}
+
+// ---- a fronteira de bloco, desenhada sem tocar no texto ------------------------
+const fronteira = vscode.window.createTextEditorDecorationType({
+  isWholeLine: true,
+  borderWidth: '1px 0 0 0', borderStyle: 'dashed',
+  borderColor: new vscode.ThemeColor('editorIndentGuide.background'),
+});
+const porEstado = {};
+for (const estado of Object.keys(CORES)) {
+  porEstado[estado] = vscode.window.createTextEditorDecorationType({
+    isWholeLine: true, overviewRulerColor: CORES[estado],
+    overviewRulerLane: vscode.OverviewRulerLane.Right,
+    borderWidth: '0 0 0 2px', borderStyle: 'solid', borderColor: CORES[estado],
+  });
+}
+const mexidoDeco = vscode.window.createTextEditorDecorationType({
+  isWholeLine: true, overviewRulerColor: '#E3B665',
+  overviewRulerLane: vscode.OverviewRulerLane.Right,
+  borderWidth: '0 0 0 2px', borderStyle: 'solid', borderColor: '#E3B665',
+  after: { contentText: '   mexido depois da sua chancela', color: '#94600F', fontStyle: 'italic' },
+});
+
+function pintar(editor) {
+  if (!editor || editor.document.languageId !== 'markdown') return;
+  const bs = blocos(editor.document);
+  const linhas = [], porCor = {}, mex = [];
+  for (const b of bs) {
+    const l = Math.max(0, b.line - 1);
+    const faixa = new vscode.Range(l, 0, l, 0);
+    linhas.push(faixa);
+    if (mexido(b.state)) mex.push(faixa);
+    else {
+      const k = chave(b.state);
+      (porCor[k] = porCor[k] || []).push(faixa);
+    }
+  }
+  editor.setDecorations(fronteira, linhas);
+  editor.setDecorations(mexidoDeco, mex);
+  for (const estado of Object.keys(CORES)) {
+    editor.setDecorations(porEstado[estado], porCor[estado] || []);
+  }
+}
+
+// ---- dar status ao bloco sob o cursor -----------------------------------------
+const avisos = new Aviso();
+
+async function vouch() {
+  const ed = vscode.window.activeTextEditor;
+  if (!ed) return;
+  const bs = blocos(ed.document);
+  const linha = ed.selection.active.line + 1;
+  const alvo = bs.slice().reverse().find(b => b.line <= linha);
+  if (!alvo) { vscode.window.showWarningMessage('km: nenhum bloco aqui'); return; }
+  const escolha = await vscode.window.showQuickPick([
+    { label: 'aprovado', detail: 'li e endosso' },
+    { label: 'aceite', detail: 'passei o olho; expira em 14 dias' },
+    { label: 'a-validar', detail: 'depende de alguem de fora' },
+    { label: 'reprovado', detail: 'esta errado; a nota e a instrucao' },
+  ], { title: alvo.heading + ' — hoje: ' + alvo.state });
+  if (!escolha) return;
+  const args = ['vouch', alvo.file, '--block', alvo.heading, '--state', escolha.label];
+  if (escolha.label === 'reprovado' || escolha.label === 'a-validar') {
+    const nota = await vscode.window.showInputBox({
+      title: escolha.label === 'reprovado' ? 'O que esta errado?' : 'O que confirmaria isso?' });
+    if (nota) args.push(escolha.label === 'reprovado' ? '--note' : '--validate', nota);
+  }
+  try {
+    km(args, raiz(ed.document));
+    vscode.window.showInformationMessage('km: ' + alvo.heading + ' → ' + escolha.label);
+    pintar(ed);
+    avisos.mudou.fire();
+  } catch (e) { vscode.window.showErrorMessage('km: ' + e.message); }
+}
+
+function activate(ctx) {
+  ctx.subscriptions.push(
+    vscode.workspace.registerTextDocumentContentProvider(SCHEME, new Baseline()),
+    vscode.languages.registerCodeLensProvider({ language: 'markdown' }, avisos),
+    vscode.commands.registerCommand('km.vouch', vouch),
+    vscode.commands.registerCommand('km.review', async () => {
+      const ed = vscode.window.activeTextEditor;
+      if (!ed) return;
+      const arquivo = rel(ed.document);
+      const esq = vscode.Uri.parse(SCHEME + ':' + arquivo).with({ query: arquivo });
+      await vscode.commands.executeCommand('vscode.diff', esq, ed.document.uri,
+        path.basename(arquivo) + ' · chancela ↔ agora');
+    }),
+    vscode.window.onDidChangeActiveTextEditor(pintar),
+    vscode.workspace.onDidSaveTextDocument(function () {
+      pintar(vscode.window.activeTextEditor);
+      avisos.mudou.fire();
+    })
+  );
+  pintar(vscode.window.activeTextEditor);
+}
+
+module.exports = { activate: activate, deactivate: function () {} };

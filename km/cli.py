@@ -483,6 +483,19 @@ def cmd_vouch(args) -> int:
 def cmd_blocks(args) -> int:
     root = _root(args)
     ledger = blk.Ledger(root)
+
+    if args.json:
+        saida = []
+        for rel in _tracked_files(root, args.file):
+            for b in blk.of_file(root, rel):
+                rec = ledger.records.get(b.key, {})
+                saida.append({"file": b.file, "heading": b.heading, "path": b.path,
+                              "line": b.line, "lines": b.lines,
+                              "state": ledger.status_of(b), "at": rec.get("at"),
+                              "note": rec.get("note"), "validate": rec.get("validate"),
+                              "due": rec.get("due"), "vouched": rec.get("body")})
+        print(json.dumps(saida, ensure_ascii=False))
+        return 0
     total: Counter[str] = Counter()
     todos: list[blk.Block] = []
     listagem: list[str] = []
@@ -510,6 +523,11 @@ def cmd_blocks(args) -> int:
         print(f"{len(orfas)} com chancela e sem bloco correspondente (órfãs):")
         for r in orfas[:5]:
             print(f"  {r['file']} › {r['path'][:60]}")
+    return 0
+
+
+def cmd_baseline(args) -> int:
+    print(blk.Ledger(_root(args)).vouched_file(_root(args), args.file), end="")
     return 0
 
 
@@ -624,7 +642,12 @@ def main(argv: list[str]) -> int:
     s = sub.add_parser("blocks", help="status of every block against your chancel")
     s.add_argument("file", nargs="?")
     s.add_argument("--changed", action="store_true", help="hide what still stands")
+    s.add_argument("--json", action="store_true", help="for the editor extension")
     s.set_defaults(func=cmd_blocks)
+
+    s = sub.add_parser("baseline", help="the document as you last vouched it (for the left pane)")
+    s.add_argument("file")
+    s.set_defaults(func=cmd_baseline)
 
     s = sub.add_parser("review", help="what changed since you vouched, block by block")
     s.add_argument("file", nargs="?")
