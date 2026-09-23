@@ -6,6 +6,8 @@
 --ok:#7BC49A;--ok-bg:#16301F;--ace:#E0B463;--ace-bg:#2E2513;--neg:#E09A9A;--neg-bg:#331F1F;
 --val:#6EA8D8;--val-bg:#152433;--pend:#8695A2;--pend-bg:#1C242B}
 *{box-sizing:border-box}
+/* `hidden` esconde, mesmo em quem tem display próprio (a .corpo é flex) */
+[hidden]{display:none !important}
 body{margin:0;background:var(--bg);color:var(--ink);
 font:14.5px/1.55 system-ui,-apple-system,"Segoe UI",sans-serif}
 .topo{display:flex;gap:12px;align-items:center;flex-wrap:wrap;padding:9px 16px;
@@ -128,9 +130,41 @@ font-family:ui-monospace,Menlo,monospace;border-bottom:1px solid var(--rule)}
 .bolinha{display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:6px;vertical-align:1px}
 .txt.mini{font-size:11.5px;max-height:160px;overflow:auto;margin-top:4px;opacity:.85}
 .topo .dir button{padding:3px 8px}
+.vistas{display:flex;border:1px solid var(--rule);border-radius:7px;overflow:hidden}
+.vistas button{border:0;border-radius:0;padding:4px 12px}
+.vistas button[aria-selected=true]{background:var(--ink);color:var(--bg)}
+.arquivos{padding:12px 18px 60px;max-width:1100px}
+.arvore{font:13px/1.5 ui-monospace,Menlo,monospace}
+.arvore .no{display:flex;gap:8px;align-items:center;padding:3px 10px;border-radius:5px;outline:0}
+.arvore .no:hover{background:var(--card)}
+.arvore .no.foco{box-shadow:inset 0 0 0 1px var(--acc)}
+.arvore .seta{width:12px;color:var(--mut);cursor:pointer;user-select:none}
+.arvore .caixa{cursor:pointer;font-size:15px;user-select:none}
+.arvore .caixa.sim{color:var(--ok)}.arvore .caixa.misto{color:var(--ace)}.arvore .caixa.nao{color:var(--mut)}
+.arvore .nome{cursor:pointer}.arvore .nome.pasta{color:#EDF2F7;font-weight:600}
+.arvore .novos{font-size:10.5px;padding:0 7px;border-radius:999px;color:var(--ok);background:var(--ok-bg)}
+.arvore .novos.herdado{background:transparent;border:1px dashed var(--ok-bg)}
+.arvore .info{margin-left:auto;color:var(--mut);font-size:12px;white-space:nowrap}
+.arvore .info.e-ok{color:var(--ok)}.arvore .info.e-ace{color:var(--ace)}.arvore .info.e-mut{opacity:.7}
+.desfazer{position:relative;display:inline-flex}
+.desfazer #btn-desfazer{border-radius:6px 0 0 6px}.desfazer #btn-historico{border-radius:0 6px 6px 0;border-left:0}
+#historico{position:absolute;top:30px;right:0;z-index:30;min-width:280px;display:flex;flex-direction:column;
+background:var(--card);border:1px solid var(--rule);border-radius:8px;padding:4px;box-shadow:0 8px 24px #0008}
+#historico[hidden]{display:none}
+#historico button{text-align:left;border:0;padding:6px 10px;background:transparent;color:var(--ink);cursor:pointer}
+#historico button:hover{background:var(--bg)}
+.vazio-geral{grid-column:1 / 4;padding:40px 20px;color:var(--mut);display:flex;gap:14px;align-items:center}
+.vazio-geral button{font:inherit;padding:5px 12px;border-radius:6px;cursor:pointer;border:1px solid var(--ok-bg);
+background:var(--ok-bg);color:var(--ok)}
 </style></head><body>
-<div class="topo"><b id="repo">km</b><span class="n" id="resumo"></span>
+<div class="topo"><b id="repo">km</b>
+<div class="vistas" role="tablist">
+  <button role="tab" id="aba-revisar" aria-selected="true" onclick="mostrar('revisar')">Revisar</button>
+  <button role="tab" id="aba-arquivos" aria-selected="false" onclick="mostrar('arquivos')">Arquivos</button>
+</div>
+<span class="n" id="resumo"></span>
 <div class="dir">
+<span id="so-revisar">
   <span class="q">no cursor:</span>
   <button onmousedown="event.preventDefault()" onclick="noCursor('⚠️')" title="ressalva: sem certeza">⚠️</button>
   <button onmousedown="event.preventDefault()" onclick="noCursor('❓')" title="a confirmar, com prazo">❓</button>
@@ -139,6 +173,15 @@ font-family:ui-monospace,Menlo,monospace;border-bottom:1px solid var(--rule)}
   <span class="q">comparar com</span><select id="base" onchange="trocarBase()"></select>
   <button onclick="setVer('tudo')" id="v-tudo">texto inteiro</button>
   <button onclick="setVer('mudou')" id="v-mudou">só as mudanças</button>
+</span>
+<span id="so-arquivos" hidden>
+  <span class="desfazer">
+    <button id="btn-desfazer" onclick="desfazer(1)" disabled title="Desfazer (Ctrl+Z)">↶ Desfazer</button>
+    <button id="btn-historico" onclick="abrirHistorico()" disabled aria-haspopup="menu" title="Os últimos passos">▾</button>
+    <div id="historico" role="menu" hidden></div>
+  </span>
+  <button id="btn-refazer" onclick="refazer()" disabled title="Refazer (Ctrl+Shift+Z)">↷</button>
+</span>
 </div></div>
 <div class="recado" id="recado" hidden></div>
 <div id="selecao" hidden>
@@ -146,6 +189,7 @@ font-family:ui-monospace,Menlo,monospace;border-bottom:1px solid var(--rule)}
   <button onmousedown="event.preventDefault()" onclick="naSelecao('reverter')">Reverter seleção</button>
 </div>
 <div class="corpo"><nav class="lado" id="lado"></nav><main class="doc" id="doc"></main></div>
+<main id="arquivos" class="arquivos" hidden></main>
 <script>
 const $ = (id) => document.getElementById(id);
 const esc = s => (s==null?'':String(s)).replace(/[&<>"]/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[m]));
@@ -321,6 +365,13 @@ function desenhar(){
 
   const d = D.docs[doc];
   originais = {};
+  if (!d) {
+    // Nada acompanhado ainda: um repositório novo, ou tudo pausado. A revisão não tem o
+    // que mostrar, e o caminho é escolher arquivos.
+    $('doc').innerHTML = `<div class="vazio-geral">Nenhum arquivo é acompanhado ainda.
+      <button class="pri" onclick="mostrar('arquivos')">Escolher arquivos</button></div>`;
+    return;
+  }
   let html = `<div class="cabgrade rot">${naChancela() ? 'a chancela' : esc(D.base)}</div>
     <div class="cabgrade rot">${esc(d.file)} — agora</div>
     <div class="cabgrade rot">${naChancela() ? 'o que fazer' : 'só leitura — os botões agem na chancela'}</div>`;
@@ -483,6 +534,7 @@ function setVer(v){ ver = v; desenhar(); }
 function trocarBase(){ base = $('base').value; carregar(); }
 
 document.addEventListener('keydown', (e)=>{
+  if (vista !== 'revisar') return;
   const el = e.target;
   if ((e.ctrlKey || e.metaKey) && e.key === 's') {
     e.preventDefault();
@@ -506,6 +558,156 @@ document.addEventListener('keydown', (e)=>{
 
 // O arquivo muda por fora: um agente escreve, o editor salva. A tela se atualiza sozinha
 // quando você não está no meio de escrever nada.
-setInterval(()=>{ if (!form && !temSujo()) carregar(); }, 8000);
+setInterval(()=>{ if (vista === 'revisar' && !form && !temSujo()) carregar(); }, 8000);
+// ---- a vista Arquivos --------------------------------------------------------------
+let vista = 'revisar', ARV = null, abertas = new Set(), focoArq = '.';
+// Os últimos 5 passos, e o que foi desfeito, para refazer. Vive na página: a árvore
+// sempre mostra o estado atual, e cada passo é barato.
+let passos = [], refeitos = [];
+
+function mostrar(v){
+  vista = v;
+  $('aba-revisar').setAttribute('aria-selected', v === 'revisar');
+  $('aba-arquivos').setAttribute('aria-selected', v === 'arquivos');
+  $('so-revisar').hidden = v !== 'revisar';
+  $('so-arquivos').hidden = v !== 'arquivos';
+  $('resumo').hidden = v !== 'revisar';        // o resumo é da revisão; na árvore, cada linha diz o seu
+  document.querySelector('.corpo').hidden = v !== 'revisar';
+  $('arquivos').hidden = v !== 'arquivos';
+  if (v === 'arquivos') carregarArvore(); else carregar();
+}
+
+async function carregarArvore(){
+  ARV = await (await fetch('/api/arquivos')).json();
+  if (!abertas.size) abrirOndeHa(ARV.raiz);
+  desenharArvore();
+}
+
+function abrirOndeHa(n){
+  // Abre as pastas onde há algo acompanhado; o resto começa fechado.
+  if (n.tipo !== 'pasta') return;
+  if (n.caminho === '.' || n.acompanhados > 0) abertas.add(n.caminho);
+  n.filhos.forEach(abrirOndeHa);
+}
+
+const CAIXA = {sim: '☑', nao: '☐', misto: '◐'};
+const ARIA = {sim: 'true', nao: 'false', misto: 'mixed'};
+
+function linhaArvore(n, nivel){
+  const pasta = n.tipo === 'pasta';
+  const aberta = abertas.has(n.caminho);
+  const info = pasta
+    ? (n.total === 0 ? '' : (n.acompanhados === 0 ? 'nenhum' : `${n.acompanhados} de ${n.total}`))
+      + (n.excecoes ? ` · ${n.excecoes} exceç${n.excecoes > 1 ? 'ões' : 'ão'}` : '')
+    : (n.excecao ? 'exceção' : n.estado);
+  const novos = pasta && n.novos
+    ? `<span class="novos ${n.regra_propria ? '' : 'herdado'}" title="${n.regra_propria
+        ? 'arquivos novos nesta pasta entram sozinhos' : 'entram sozinhos, pela regra de uma pasta acima'}">+ novos</span>` : '';
+  let html = `<div class="no ${focoClasse(n)}" role="treeitem" aria-level="${nivel + 1}"
+      aria-checked="${ARIA[n.marcado]}" ${pasta ? `aria-expanded="${aberta}"` : ''}
+      data-caminho="${esc(n.caminho)}" tabindex="${n.caminho === focoArq ? 0 : -1}"
+      style="padding-left:${12 + nivel * 20}px">
+    <span class="seta" onclick="alternar('${esc(n.caminho)}')">${pasta ? (aberta ? '▾' : '▸') : ''}</span>
+    <span class="caixa ${n.marcado}" onclick="clicar('${esc(n.caminho)}')">${CAIXA[n.marcado]}</span>
+    <span class="nome ${pasta ? 'pasta' : ''}" onclick="${pasta ? `alternar('${esc(n.caminho)}')` : `clicar('${esc(n.caminho)}')`}">${esc(n.caminho === '.' ? n.nome + '/' : n.nome + (pasta ? '/' : ''))}</span>
+    ${novos}<span class="info ${estadoClasse(n)}">${esc(info)}</span></div>`;
+  if (pasta && aberta) html += `<div role="group">${n.filhos.map(f => linhaArvore(f, nivel + 1)).join('')}</div>`;
+  return html;
+}
+const focoClasse = (n) => n.caminho === focoArq ? 'foco' : '';
+function estadoClasse(n){
+  if (n.tipo === 'pasta') return '';
+  if (n.estado === 'em dia') return 'e-ok';
+  if (n.estado.endsWith('a aprovar')) return 'e-ace';
+  if (n.estado.startsWith('pausado') || n.estado === 'não existe mais') return 'e-mut';
+  return '';
+}
+
+function desenharArvore(){
+  const a = $('arquivos');
+  // Quem estava usando o teclado na árvore continua nela depois de redesenhar: o
+  // innerHTML troca os elementos, e o foco iria parar no corpo da página.
+  const noTeclado = !!document.activeElement?.closest?.('.arvore');
+  const erro = ARV.erro ? `<div class="recado ruim">✕ ${esc(ARV.erro)}</div>` : '';
+  a.innerHTML = erro + `<div class="arvore" role="tree" aria-multiselectable="true"
+    aria-label="arquivos acompanhados">${linhaArvore(ARV.raiz, 0)}</div>`;
+  $('btn-desfazer').disabled = $('btn-historico').disabled = !passos.length;
+  $('btn-refazer').disabled = !refeitos.length;
+  const f = a.querySelector(`[data-caminho="${CSS.escape(focoArq)}"]`);
+  if (f && noTeclado) f.focus();
+}
+
+function acharNo(caminho, n = ARV.raiz){
+  if (n.caminho === caminho) return n;
+  for (const f of (n.filhos || [])) { const r = acharNo(caminho, f); if (r) return r; }
+  return null;
+}
+function alternar(caminho){
+  abertas.has(caminho) ? abertas.delete(caminho) : abertas.add(caminho);
+  focoArq = caminho; desenharArvore();
+}
+
+async function clicar(caminho){
+  const n = acharNo(caminho); if (!n) return;
+  focoArq = caminho;
+  const r = await (await fetch('/api/arquivos', {method: 'POST', headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({caminho, pasta: n.tipo === 'pasta', marcar: n.marcado !== 'sim', sha: ARV.sha})})).json();
+  ARV = r.arvore;
+  recado = r.ok ? '✓ ' + r.msg : '✕ ' + r.erro;
+  if (r.ok) { passos.push(r.passo); passos = passos.slice(-5); refeitos = []; }
+  desenharRecado(); desenharArvore();
+}
+
+async function trocar(config, esperado){
+  const r = await (await fetch('/api/arquivos/desfazer', {method: 'POST',
+    headers: {'Content-Type': 'application/json'}, body: JSON.stringify({config, esperado})})).json();
+  ARV = r.arvore;
+  if (!r.ok) { recado = '✕ ' + r.erro; passos = []; refeitos = []; }
+  return r.ok;
+}
+async function desfazer(quantos){
+  // Desfaz de trás para frente, um passo de cada vez: cada um confere o anterior.
+  for (let k = 0; k < quantos && passos.length; k++) {
+    const p = passos[passos.length - 1];
+    if (!(await trocar(p.antes, p.depois))) break;
+    refeitos.push(passos.pop());
+    recado = '↶ desfeito: ' + p.rotulo;
+  }
+  $('historico').hidden = true;
+  desenharRecado(); desenharArvore();
+}
+async function refazer(){
+  const p = refeitos[refeitos.length - 1]; if (!p) return;
+  if (await trocar(p.depois, p.antes)) { passos.push(refeitos.pop()); recado = '↷ refeito: ' + p.rotulo; }
+  desenharRecado(); desenharArvore();
+}
+function abrirHistorico(){
+  const h = $('historico');
+  h.innerHTML = passos.slice().reverse().map((p, i) =>
+    `<button role="menuitem" onclick="desfazer(${i + 1})">${esc(p.rotulo)}</button>`).join('');
+  h.hidden = !h.hidden;
+}
+function desenharRecado(){
+  const r = $('recado'); r.hidden = !recado; r.textContent = recado;
+  r.className = 'recado' + (recado.startsWith('✕') ? ' ruim' : '');
+}
+
+// O teclado da árvore é o padrão WAI-ARIA: ↑ ↓ andam, ← → fecham e abrem, espaço marca.
+function visiveisArvore(){ return [...document.querySelectorAll('.arvore [role="treeitem"]')].map(e => e.dataset.caminho); }
+document.addEventListener('keydown', (e) => {
+  if (vista !== 'arquivos') return;
+  if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'z') {
+    e.preventDefault(); return e.shiftKey ? refazer() : desfazer(1);
+  }
+  if (!e.target.closest || !e.target.closest('.arvore')) return;
+  const vis = visiveisArvore(), i = vis.indexOf(focoArq), n = acharNo(focoArq);
+  const ir = (c) => { focoArq = c; desenharArvore(); };
+  if (e.key === 'ArrowDown' && i < vis.length - 1) { e.preventDefault(); ir(vis[i + 1]); }
+  else if (e.key === 'ArrowUp' && i > 0) { e.preventDefault(); ir(vis[i - 1]); }
+  else if (e.key === 'ArrowRight' && n?.tipo === 'pasta' && !abertas.has(focoArq)) { e.preventDefault(); alternar(focoArq); }
+  else if (e.key === 'ArrowLeft' && n?.tipo === 'pasta' && abertas.has(focoArq)) { e.preventDefault(); alternar(focoArq); }
+  else if (e.key === ' ') { e.preventDefault(); clicar(focoArq); }
+});
+
 carregar();
 </script></body></html>
