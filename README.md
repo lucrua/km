@@ -56,6 +56,11 @@ save — which is why a WYSIWYG editor was not used: it would rewrite the file a
 would show changes nobody made. Each change is CodeMirror's own side-by-side comparison, so
 the two columns stay aligned while you type.
 
+**Formatado | Código**, in the top bar, switches every editor on the page between that live
+preview and the plain source: all markers visible, the real line breaks, tables as their
+`|` lines, in a monospace font so the columns align. Only the display changes — the cursor,
+Ctrl+Z and anything typed and not yet saved stay put — and the browser remembers the choice.
+
 **Tables show as a grid**, with long cells wrapping. Clicking a cell turns the table back into
 source at that line. On hover, each row has **+** (a row below) and **×** (remove it), and each
 header cell has **+** (a column to the right) and **×** (remove it); every control rewrites the
