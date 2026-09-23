@@ -3,6 +3,7 @@
 import { EditorView, EditorState, MergeView, keymap, history, historyKeymap, defaultKeymap,
          drawSelection } from '../vendor/cm.js';
 import { vistaViva } from './preview.js';
+import { emPontos } from './pontos.js';
 
 const vivos = new Map();
 
@@ -40,7 +41,9 @@ export function selecao(chave) {
   const v = vivos.get(chave)?.view;
   const r = v && v.state.selection.main;
   if (!r || r.empty) return null;
-  return { a: r.from, b: r.to, rect: v.coordsAtPos(r.from) };
+  // Em code points, como o servidor conta as unidades.
+  const doc = v.state.doc.toString();
+  return { a: emPontos(doc, r.from), b: emPontos(doc, r.to), rect: v.coordsAtPos(r.from) };
 }
 
 export function focado() {
