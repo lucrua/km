@@ -16,6 +16,7 @@ import unicodedata
 from datetime import date
 from pathlib import Path
 
+from . import acompanhamento as ac
 from . import chancela as ch
 
 
@@ -48,7 +49,7 @@ def _arquivos(root: Path, arg: str | None) -> list[str]:
     Naming a file explicitly does not smuggle it in: otherwise the editor would decorate
     and nag about documents this repository deliberately left out.
     """
-    cobertos = ch.documentos(root)
+    cobertos = ac.documentos(root)
     if not arg:
         return cobertos
     return [arg] if arg in cobertos else []
@@ -84,26 +85,14 @@ def _escolher(rel: str, refs: list[str], s: ch.Situacao) -> list[ch.Unidade]:
 
 def cmd_init(args) -> int:
     root = _root(args)
-    d = root / ch.KM_DIR
-    d.mkdir(parents=True, exist_ok=True)
-    cfg = d / ch.CONFIG
+    cfg = root / ac.KM_DIR / ac.CONFIG
     if cfg.exists():
         print(f"{cfg} já existe")
         return 0
-    cfg.write_text(json.dumps(ch.DEFAULT_CONFIG, indent=2, ensure_ascii=False) + "\n",
-                   encoding="utf-8")
-    print(f"criado {cfg}")
-    print("o `include` é o opt-in: só o que estiver nele é revisado")
-    print("nada mais foi tocado — `km pendente` para ver onde você está")
+    ac.gravar(root, ac.vazia())
+    print(f"criado {cfg} — nada é acompanhado ainda")
+    print("escolha os arquivos no painel: km serve, aba Arquivos")
     return 0
-
-
-def _pct(s: ch.Situacao) -> tuple[int, int]:
-    """(characters to decide, characters in the file). A file never chancelled is all of it."""
-    if not s.tem_chancela:
-        n = ch._conta(s.depois)
-        return n, n
-    return ch.pendencia(s.antes, s.depois, s.mudancas)
 
 
 def _resumo(situacoes: list[ch.Situacao]) -> str:
@@ -112,7 +101,7 @@ def _resumo(situacoes: list[ch.Situacao]) -> str:
     vencidas = sum(len(s.vencidas) for s in situacoes)
     pend = total = 0
     for s in situacoes:
-        a, b = _pct(s)
+        a, b = ch.pendencia_do_arquivo(s)
         pend, total = pend + a, total + b
     bits = [f"{em_dia} arquivo(s) em dia com a chancela"]
     if pend:
@@ -142,7 +131,7 @@ def cmd_pendente(args) -> int:
         # No per-heading states and no counts — the unit is the change, the measure is %.
         saida = []
         for s in situacoes:
-            pend, total = _pct(s)
+            pend, total = ch.pendencia_do_arquivo(s)
             saida.append({
                 "file": s.arquivo, "tem_chancela": s.tem_chancela,
                 "pct": ch.percentual(pend, total), "pendente": bool(s.mudancas),
@@ -161,7 +150,7 @@ def cmd_pendente(args) -> int:
     for s in (x for x in situacoes if x.tem_chancela and x.mudancas):
         # Numbers are addresses, not a score: `--hunk 2` takes change 2, `--hunk 2.1` only
         # its first block. How much is left is the percentage, in characters.
-        print(f"\n{s.arquivo}  ·  {ch.percentual(*_pct(s))} a aprovar")
+        print(f"\n{s.arquivo}  ·  {ch.percentual(*ch.pendencia_do_arquivo(s))} a aprovar")
         for m in s.mudancas:
             # Um trecho mudado é uma coisa só para ler: blocos seguidos que mudaram não se
             # listam um a um. `--hunk 2.1` continua valendo para quem precisa endereçar menos.
@@ -203,7 +192,7 @@ def cmd_chancela(args) -> int:
     rel = args.file[0]
     if ch.atual(root, rel) is None:
         raise SystemExit(f"{rel} não existe no disco")
-    if rel not in ch.documentos(root):
+    if rel not in ac.documentos(root):
         raise SystemExit(f"{rel} está fora do `include` do .km/config.json — "
                          f"inclua-o lá antes de chancelar")
     s = ch.situacao(root, rel)
@@ -235,7 +224,7 @@ def cmd_chancela(args) -> int:
         print(f"   🚫 {u.id} {u.titulo} — ficou de fora: {u.bloqueio[:60]}")
     depois = ch.situacao(root, rel)
     resto = depois.mudancas
-    print(f"falta {ch.percentual(*_pct(depois))} deste arquivo" if resto
+    print(f"falta {ch.percentual(*ch.pendencia_do_arquivo(depois))} deste arquivo" if resto
           else "o arquivo está em dia com a chancela")
     if resto:
         # The numbers come from the diff, and the diff just moved. Acting on a number from
@@ -252,7 +241,7 @@ def _chancelar_de(root: Path, args) -> int:
     itself. This states that, at once, and from then on the diff carries the conversation.
     """
     rev = args.origem
-    cobertos = ch.documentos(root)
+    cobertos = ac.documentos(root)
     mudancas: dict[str, str] = {}
     for rel in args.file:
         texto = ch.conteudo_em(root, rev, rel)
@@ -275,7 +264,7 @@ def _chancelar_de(root: Path, args) -> int:
     print(f"{len(mudancas)} arquivo(s) chancelados no conteúdo de {rev}  ·  {commit[:8]}")
     for rel in sorted(mudancas):
         s = ch.situacao(root, rel)
-        print(f"   ✓ {rel}" + (f"  ·  {ch.percentual(*_pct(s))} mudou desde então" if s.mudancas
+        print(f"   ✓ {rel}" + (f"  ·  {ch.percentual(*ch.pendencia_do_arquivo(s))} mudou desde então" if s.mudancas
                                else "  ·  igual ao que está no disco"))
     return 0
 

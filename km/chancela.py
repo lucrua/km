@@ -12,7 +12,6 @@ supposed to rewrite a file on disk.
 
 from __future__ import annotations
 
-import fnmatch
 import hashlib
 import json
 import os
@@ -24,22 +23,6 @@ from difflib import SequenceMatcher
 from pathlib import Path
 
 REF = "refs/km/chancela"
-KM_DIR = ".km"
-CONFIG = "config.json"
-
-#: Which files the chancel covers. Opt-in: a document outside `include` never appears.
-DEFAULT_CONFIG = {
-    "include": ["**/*.md"],
-    "exclude": [
-        "**/node_modules/**",
-        "**/.git/**",
-        "**/.km/**",
-        "**/sandbox/**",
-        "**/CHANGELOG.md",
-        "**/LICENSE*",
-    ],
-}
-
 HEADING = re.compile(r"^(#{1,6})\s+(.*)$")
 
 #: The writing convention, three marks, because each one changes what happens next.
@@ -617,6 +600,14 @@ def percentual(pend: int, total: int) -> str:
     return "<1%" if v < 1 else f"{v:.0f}%"
 
 
+def pendencia_do_arquivo(s: "Situacao") -> tuple[int, int]:
+    """(characters to decide, characters in the file). A file never chancelled is all of it."""
+    if not s.tem_chancela:
+        n = _conta(s.depois)
+        return n, n
+    return pendencia(s.antes, s.depois, s.mudancas)
+
+
 def unidades_por_sha(ms: list[Mudanca], shas: set[str]) -> list[Unidade]:
     return [u for m in ms for u in m.unidades if u.sha in shas]
 
@@ -708,34 +699,6 @@ def situacao(root: Path, rel: str, hoje: str | None = None,
     return Situacao(arquivo=rel, tem_chancela=antes is not None, antes=antes or "",
                     depois=depois, mudancas=mudancas(antes or "", depois),
                     vencidas=vencidas(depois, hoje))
-
-
-# ---- which files ---------------------------------------------------------------------
-
-def load_config(root: Path) -> dict:
-    config = dict(DEFAULT_CONFIG)
-    path = root / KM_DIR / CONFIG
-    if path.exists():
-        config.update(json.loads(path.read_text(encoding="utf-8")))
-    return config
-
-
-def _casa(rel: str, padroes: list[str]) -> bool:
-    return any(fnmatch.fnmatch(rel, p) or fnmatch.fnmatch("/" + rel, p) for p in padroes)
-
-
-def documentos(root: Path, config: dict | None = None) -> list[str]:
-    """The documents this repository opted in, plus anything that already has a chancel."""
-    config = config if config is not None else load_config(root)
-    achados = []
-    for path in sorted(root.rglob("*.md")):
-        rel = path.relative_to(root).as_posix()
-        if _casa(rel, config.get("exclude", [])):
-            continue
-        if config.get("include") and not _casa(rel, config["include"]):
-            continue
-        achados.append(rel)
-    return sorted(set(achados) | set(arquivos(root)))
 
 
 # ---- writing in the document ---------------------------------------------------------

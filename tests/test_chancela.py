@@ -43,8 +43,11 @@ class RepoTest(unittest.TestCase):
         git(self.dir, "config", "user.email", "t@t")
         git(self.dir, "config", "user.name", "t")
         (self.dir / "regras.md").write_text(DOC, encoding="utf-8")
+        (self.dir / ".gitignore").write_text(".km/\n")      # como nos repositórios de verdade
         git(self.dir, "add", "-A")
         git(self.dir, "commit", "-qm", "inicial")
+        from km import acompanhamento as ac
+        ac.gravar(self.dir, {"folders": ["."], "files": [], "except": []})
 
     def tearDown(self):
         shutil.rmtree(self.dir)

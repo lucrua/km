@@ -20,6 +20,7 @@ from datetime import date
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
+from . import acompanhamento as ac
 from . import chancela as ch
 from . import cli
 
@@ -377,12 +378,12 @@ def estado(root: Path, by: str = "", base: str | None = None,
     hoje = date.today().isoformat()
     docs = []
     soma_pend = soma_total = 0
-    for rel in ch.documentos(root):
+    for rel in ac.documentos(root):
         s = ch.situacao(root, rel, hoje, base=base)
         if not s.depois.strip():
             continue
         cheio = rel == arquivo
-        pend, total = cli._pct(s)
+        pend, total = ch.pendencia_do_arquivo(s)
         soma_pend, soma_total = soma_pend + pend, soma_total + total
         d = {"file": rel, "rastreado": s.tem_chancela, "cheio": cheio,
              "pendente": bool(s.mudancas), "pct": ch.percentual(pend, total),
@@ -415,7 +416,7 @@ def agir(root: Path, pedido: dict, by: str) -> dict:
     """One place for every verdict, so the page and the CLI cannot drift apart."""
     acao = pedido.get("acao")
     rel = pedido.get("file", "")
-    if rel not in ch.documentos(root):
+    if rel not in ac.documentos(root):
         return {"ok": False, "erro": f"{rel} está fora do include do .km/config.json"}
 
     if acao == "salvar":
@@ -468,7 +469,7 @@ def agir(root: Path, pedido: dict, by: str) -> dict:
         saiu = sum(len(u.sumidas) for u in inteiras)
         depois = ch.situacao(root, rel)
         msg = (f"na chancela ({commit[:8]})" + (" — só a parte selecionada" if parciais else "")
-               + (f" · falta {ch.percentual(*cli._pct(depois))} deste arquivo"
+               + (f" · falta {ch.percentual(*ch.pendencia_do_arquivo(depois))} deste arquivo"
                   if depois.mudancas else " · arquivo em dia"))
         if saiu:
             msg += f" · {saiu} ressalva(s) removida(s) aprovada(s) junto"
