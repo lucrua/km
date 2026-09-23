@@ -1,6 +1,6 @@
 # Live preview: editing that looks like the document
 
-Status: **design, approved in conversation on 2026-09-23; spec for review.**
+Status: **built** (2026-09-23), on the branch `live-preview`.
 
 ## Where this work happens
 

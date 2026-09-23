@@ -33,8 +33,8 @@ paragraph in a row are one thing to read — placed where it happened, in three 
 
 | | |
 |---|---|
-| **the chancel** | the blocks as you endorsed them, with what left struck through. A selector swaps it for any branch or commit |
-| **now** | the file today, with what arrived marked in place. Editable, like everything else in this column |
+| **the chancel** | the passage as you endorsed it, read-only, with what differs marked. A selector swaps it for any branch or commit |
+| **now** | the file today, editable, with what differs marked live as you type |
 | **what to do** | one set of verdicts for the passage |
 
 **To approve less than the passage, select it.** In the second column, select a paragraph,
@@ -47,11 +47,20 @@ How much is left is a **percentage of the content**: the characters still to dec
 characters the file would have if everything were approved. Not a count of blocks or
 changes — a one-word fix and a new section are not "one" each.
 
-The middle column is Markdown **source**, highlighted, with the change marked the way a
-tracked-changes document does it, in the spirit of [pandiff](https://github.com/davidar/pandiff).
-Source and not rendered prose on purpose: the column is editable, and editing rendered
-Markdown means a serialiser rewrites the whole file on save. Wide tables scroll sideways
-instead of wrapping.
+The text is edited in [CodeMirror](https://codemirror.net/) with a **live preview**, the
+model Obsidian uses: the editor always holds the file's exact bytes, and formatting is only
+a display layer. Headings, bold, links, lists, task boxes and the ⚠️ ❓ 🚫 boxes show
+formatted, with their markers hidden except on the line with the cursor; a hard-wrapped
+paragraph reads as one flowing paragraph until you click into it. Nothing is rewritten on
+save — which is why a WYSIWYG editor was not used: it would rewrite the file and every save
+would show changes nobody made. Each change is CodeMirror's own side-by-side comparison, so
+the two columns stay aligned while you type.
+
+**Tables show as a grid**, with long cells wrapping. Clicking a cell turns the table back into
+source at that line. On hover, each row has **+** (a row below) and **×** (remove it), and each
+header cell has **+** (a column to the right) and **×** (remove it); every control rewrites the
+table's lines in the file. The header, the separator row and the last column cannot be
+removed.
 
 | | |
 |---|---|
@@ -59,6 +68,9 @@ instead of wrapping.
 | **A validar…** | writes `> ❓ **a confirmar até …**` right after the passage, and chancels both: the half-chancel is a visible line, not a hidden state |
 | **Reverter** | puts the chancel's text back in the file |
 | **⚠️ · 🚫** | start a reservation after the passage, in the agreed form, for you to finish |
+
+On a long passage the actions **stay on screen** under the top bar while you scroll it, and
+leave with the passage.
 
 The whole second column is always editable — click and type. The action column offers
 **Salvar no arquivo** when there is something to save; Ctrl+S saves, Esc discards. A save is
@@ -139,7 +151,9 @@ ones, and they write the marks into the text.
 
 ## Requirements
 
-Python 3.11+. No third-party dependencies.
+Python 3.11+. No third-party Python dependencies. The panel's CodeMirror is bundled once
+into `km/vendor/cm.js` and served by `km serve` — no network and no npm at run time; the
+recipe to rebuild it is in [tools/build-cm/](tools/build-cm/README.md).
 
 ```bash
 git clone <this repo> ~/knowledge-manager
@@ -149,6 +163,8 @@ export PATH="$HOME/knowledge-manager/bin:$PATH"
 ## Documentation
 
 - [docs/chancel.md](docs/chancel.md) — the model, with the measurements behind it.
+- [docs/tracked-files.md](docs/tracked-files.md) — which documents the chancel covers.
+- [docs/live-preview.md](docs/live-preview.md) — how the panel edits without changing a byte.
 - [docs/roadmap.md](docs/roadmap.md) — what comes next, and what is deliberately out of
   scope.
 
