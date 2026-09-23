@@ -223,3 +223,45 @@ class ArvoreTest(RepoTest):
         (self.dir / ".km" / "config.json").write_text('{"include": []}')
         arv = ac.arvore(self.dir)
         self.assertIn("include", arv["erro"])
+
+
+class RotaTest(RepoTest):
+    def setUp(self):
+        super().setUp()
+        from km import serve
+        self.serve = serve
+
+    def clicar(self, caminho, pasta, marcar, sha=None):
+        sha = sha or ac.arvore(self.dir)["sha"]
+        return self.serve.arquivos_clicar(self.dir, {"caminho": caminho, "pasta": pasta,
+                                                     "marcar": marcar, "sha": sha})
+
+    def test_a_click_writes_and_returns_the_step(self):
+        r = self.clicar("decisoes", True, True)
+        self.assertTrue(r["ok"], r)
+        self.assertEqual(ac.carregar(self.dir)["folders"], ["decisoes"])
+        self.assertIn("passou a ser acompanhada", r["msg"])
+        self.assertEqual(r["passo"]["antes"], ac.vazia())
+
+    def test_a_stale_click_is_refused(self):
+        sha_velho = ac.arvore(self.dir)["sha"]
+        ac.gravar(self.dir, {"folders": [], "files": ["README.md"], "except": []})   # um agente
+        r = self.clicar("decisoes", True, True, sha=sha_velho)
+        self.assertFalse(r["ok"])
+        self.assertEqual(ac.carregar(self.dir)["files"], ["README.md"])
+
+    def test_undo_and_redo(self):
+        passo = self.clicar("decisoes", True, True)["passo"]
+        r = self.serve.arquivos_trocar(self.dir, {"config": passo["antes"], "esperado": passo["depois"]})
+        self.assertTrue(r["ok"], r)
+        self.assertEqual(ac.carregar(self.dir), ac.vazia())
+        r = self.serve.arquivos_trocar(self.dir, {"config": passo["depois"], "esperado": passo["antes"]})
+        self.assertEqual(ac.carregar(self.dir)["folders"], ["decisoes"])
+
+    def test_undo_refuses_when_the_file_changed_from_outside(self):
+        passo = self.clicar("decisoes", True, True)["passo"]
+        ac.gravar(self.dir, {"folders": ["decisoes"], "files": ["README.md"], "except": []})
+        r = self.serve.arquivos_trocar(self.dir, {"config": passo["antes"], "esperado": passo["depois"]})
+        self.assertFalse(r["ok"])
+        self.assertIn("mudou por fora", r["erro"])
+        self.assertEqual(ac.carregar(self.dir)["files"], ["README.md"])
