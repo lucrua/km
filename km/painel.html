@@ -35,7 +35,7 @@ letter-spacing:.08em;color:var(--mut)}
 
 /* A grade: uma linha por trecho, tres colunas alinhadas. O texto corre de cima a baixo;
    o que separa um trecho do outro e uma regua fina, nao um cartao. */
-.doc{flex:1;min-width:0;display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr) 196px;
+.doc{flex:1;min-width:0;border-left:1px solid var(--rule);display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr) 196px;
 align-items:stretch}
 .cabgrade{position:sticky;top:45px;background:var(--bg);border-bottom:1px solid var(--rule);
 padding:6px 14px;z-index:4}
@@ -49,27 +49,6 @@ padding:6px 14px;z-index:4}
 .tr.foco .col.agora{box-shadow:inset 2px 0 0 var(--acc)}
 .txt{font:12.9px/1.62 ui-monospace,SFMono-Regular,Menlo,monospace;white-space:pre-wrap;
 word-break:break-word;overflow-wrap:anywhere}
-.ln{display:block;padding:0 2px;border-radius:2px;min-height:1.62em}
-.ln.novo{background:var(--ok-bg)}
-.ln.sumiu{background:var(--neg-bg);color:var(--neg);text-decoration:line-through;
-text-decoration-color:color-mix(in srgb,var(--neg) 60%,transparent)}
-.ln.mexido{background:color-mix(in srgb,var(--ace-bg) 55%,transparent)}
-del{background:var(--neg-bg);color:var(--neg);text-decoration:line-through;
-padding:0 2px;border-radius:2px}
-ins{background:var(--ok-bg);color:var(--ok);text-decoration:none;padding:0 2px;border-radius:2px}
-/* o realce do fonte markdown */
-.l-t1,.l-t2,.l-t3,.l-t4,.l-t5,.l-t6{color:#EDF2F7;font-weight:600}
-.l-t1{font-size:16.5px}.l-t2{font-size:15px}.l-t3{font-size:13.8px}
-.l-cit{color:#B9C6D2}.l-marca{color:var(--ace)}
-.l-cod{color:#9FD3B8}.l-tab{color:#B9C6D2}
-/* Tabela não quebra linha: quebrada, uma linha de separadores vira vinte linhas de traços.
-   Ela rola na horizontal, dentro da própria coluna. */
-.ln.l-tab{white-space:pre;width:max-content;min-width:100%}
-.col.base,.col.agora{overflow-x:auto}
-.m-cerquilha{color:#54626E}.m-forte{color:#EDF2F7}.m-enfase{color:#CBD5DE;font-style:italic}
-.m-cod{color:#9FD3B8}.m-link{color:var(--acc)}.m-url{color:#54626E}
-.m-riscado{color:var(--mut)}
-.vaziocol{color:#3C4752;font-size:11.5px;font-family:ui-monospace,Menlo,monospace}
 .chip{font:10.5px/1.7 ui-monospace,Menlo,monospace;padding:0 8px;border-radius:999px;
 white-space:nowrap;align-self:flex-start}
 .e-aprovado{color:var(--ok);background:var(--ok-bg)}.e-mexido{color:var(--ace);background:var(--ace-bg)}
@@ -84,14 +63,6 @@ border:1px solid var(--rule);background:var(--bg);color:var(--ink);text-align:le
 .nota{font-size:12px;border-left:3px solid var(--neg);background:var(--neg-bg);
 padding:6px 9px;margin-bottom:8px;border-radius:0 4px 4px 0}
 .nota.aviso{border-color:var(--ace);background:var(--ace-bg)}
-/* A coluna 2 é sempre a interface de edição: mesmo texto, mesma medida, sem troca de
-   modo. O que muda quando você escreve é só a moldura. */
-.txt.edit{outline:0;border-radius:4px;padding:0 4px;margin:0 -4px;
-caret-color:var(--acc);min-height:1.6em}
-.txt.edit:focus{box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--acc) 45%,transparent)}
-.ln.g{color:transparent;background:repeating-linear-gradient(135deg,
-color-mix(in srgb,var(--rule) 55%,transparent) 0 6px,transparent 6px 12px);opacity:.45}
-.col.agora.sumida{background:color-mix(in srgb,var(--neg-bg) 25%,transparent)}
 .form{display:flex;flex-direction:column;gap:5px}
 .form input{font:inherit;font-size:12.5px;padding:4px 8px;border-radius:6px;
 border:1px solid var(--rule);background:var(--bg);color:var(--ink)}
@@ -157,6 +128,44 @@ background:var(--card);border:1px solid var(--rule);border-radius:8px;padding:4p
 .vazio-geral{grid-column:1 / 4;padding:40px 20px;color:var(--mut);display:flex;gap:14px;align-items:center}
 .vazio-geral button{font:inherit;padding:5px 12px;border-radius:6px;cursor:pointer;border:1px solid var(--ok-bg);
 background:var(--ok-bg);color:var(--ok)}
+/* os editores: CodeMirror com o live preview */
+.cm-editor{background:transparent;color:var(--ink);font:14.5px/1.62 system-ui,-apple-system,"Segoe UI",sans-serif}
+.cm-editor.cm-focused{outline:0}
+.cm-content{padding:2px 0;caret-color:var(--acc)}
+.cm-line.cm-h{padding-top:.35em}
+.cm-link-texto{color:var(--acc)}
+.cm-line.cm-cit{border-left:3px solid var(--rule);padding-left:10px;color:#B9C6D2}
+.cm-line.cm-cit-alerta{border-color:var(--ace);background:color-mix(in srgb,var(--ace-bg) 55%,transparent)}
+.cm-line.cm-cit-pergunta{border-color:var(--val);background:color-mix(in srgb,var(--val-bg) 55%,transparent)}
+.cm-line.cm-cit-veto{border-color:var(--neg);background:color-mix(in srgb,var(--neg-bg) 55%,transparent)}
+.cm-vencida{color:var(--neg);font-weight:700}
+.cm-line.cm-codigo{font-family:ui-monospace,Menlo,monospace;font-size:.92em;background:var(--card)}
+.cm-line.cm-cerca{font-size:0;line-height:6px}
+.cm-line.cm-hr{border-bottom:1px solid var(--rule);color:transparent}
+.cm-bala{color:var(--mut);padding-right:2px}.cm-tarefa{color:var(--acc)}
+.cm-tabela{overflow-x:auto;margin:4px 0}
+.cm-tabela table{border-collapse:collapse;font-size:13.5px}
+.cm-tabela th,.cm-tabela td{border:1px solid var(--rule);padding:4px 8px;vertical-align:top;position:relative}
+.cm-tabela th{background:var(--card);font-weight:700}
+.cm-tab-ctl{display:none;font:inherit;font-size:11px;padding:0 5px;margin-left:4px;border-radius:4px;
+  border:1px solid var(--rule);background:var(--bg);color:var(--mut);cursor:pointer}
+.cm-tabela tr:hover .cm-tab-ctl,.cm-tabela th:hover .cm-tab-ctl{display:inline-block}
+.cm-tab-ctl.recusado{border-color:var(--neg);color:var(--neg)}
+.cm-tab-linha{border:0 !important;background:transparent;white-space:nowrap}
+.col.mudanca-cm{grid-column:1 / 3;padding:0}
+@media(max-width:1200px){.col.mudanca-cm{grid-column:1 / 2}}
+.cm-mergeView .cm-editor{padding:10px 14px}
+/* As duas colunas de uma mudança vão da borda de cima à de baixo da linha, como as outras:
+   a da chancela escura e separada por um fio; a de hoje, com o fundo da página. */
+.col.mudanca-cm{display:flex;flex-direction:column}
+.col.mudanca-cm>.cm-lugar{flex:1;display:flex;flex-direction:column}
+.cm-lugar>.cm-mergeView{flex:1;display:flex;flex-direction:column}
+.cm-mergeViewEditors{flex:1}
+.cm-mergeViewEditor:first-child{background:color-mix(in srgb,var(--bg) 55%,#000);border-right:1px solid var(--rule)}
+/* O que mudou se marca na palavra; a linha inteira não ganha fundo. */
+.col.mudanca-cm .cm-merge-a .cm-changedText{text-decoration:line-through;text-decoration-color:var(--neg);background:none}
+.col.mudanca-cm .cm-mergeView .cm-editor .cm-changedLine,.col.mudanca-cm .cm-mergeView .cm-editor .cm-deletedChunk{background:transparent}
+.grudado{position:sticky;top:46px;display:flex;flex-direction:column;gap:4px}
 </style></head><body>
 <div class="topo"><b id="repo">km</b>
 <div class="vistas" role="tablist">
@@ -191,8 +200,11 @@ background:var(--ok-bg);color:var(--ok)}
 </div>
 <div class="corpo"><nav class="lado" id="lado"></nav><main class="doc" id="doc"></main></div>
 <main id="arquivos" class="arquivos" hidden></main>
+<script type="module" src="/static/painel/editores.js"></script>
 <script>
 const $ = (id) => document.getElementById(id);
+// Os editores chegam como módulo, depois deste script; tudo que desenha espera por eles.
+const kmPronto = new Promise((ok) => window.km ? ok() : window.addEventListener('km-pronto', ok, { once: true }));
 const esc = s => (s==null?'':String(s)).replace(/[&<>"]/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[m]));
 const neg = s => esc(s).replace(/\*\*(.+?)\*\*/g, '<b>$1</b>');
 const emDias = n => new Date(Date.now()+n*864e5).toISOString().slice(0,10);
@@ -226,8 +238,17 @@ async function _carregar(arquivo){
   const nova = await (await fetch('/api/state?' + q)).json();
   base = nova.base;
   const i = nova.docs.findIndex(d => d.file === alvo);
+  const antigo = JSON.stringify(D), velho = D, docVelho = doc;
   D = nova; doc = i >= 0 ? i : 0;
   if (D.docs[doc] && !D.docs[doc].cheio) return _carregar(D.docs[doc].file);
+  await kmPronto;
+  // A recarga de 8 em 8 segundos não reconstrói os editores se nada mudou: reconstruir tira
+  // o cursor do lugar e pisca a tela de quem só está lendo.
+  if (!arquivo && JSON.stringify(D) === antigo) return;
+  // Quem digitou ou está com o cursor num editor enquanto a recarga voltava não perde o texto
+  // nem o foco. A página fica inteira no estado que os editores mostram — os shas e as posições
+  // precisam casar com eles — e a próxima recarga, depois de salvar ou sair do texto, redesenha.
+  if (!arquivo && (temSujo() || km.focado())) { D = velho; doc = docVelho; return; }
   desenhar();
 }
 
@@ -263,33 +284,25 @@ function lado(){
   }).join('');
 }
 
-// ---- as linhas, dos dois lados ----------------------------------------------------
-// Uma linha de cada lado, sempre no mesmo número: onde um lado não tem nada entra uma linha
-// fantasma, que não é texto — ela é pulada na hora de ler o que você escreveu.
-const fantasma = () => '<span class="ln g" data-g contenteditable="false"></span>';
-function coluna(ls, lado){
-  return (ls||[]).map(l => {
-    const c = l[lado];
-    if (!c) return fantasma();
-    return `<span class="ln ${l.tipo === 'igual' ? '' : l.tipo} ${c.classe}">${c.html}</span>`;
-  }).join('');
+// ---- os editores ------------------------------------------------------------------
+// Cada trecho igual é um editor; cada trecho mudado, uma MergeView (chancela à esquerda,
+// hoje à direita). Eles guardam o texto do arquivo e nada mais.
+function lugar(chave, linha){
+  return `<div class="cm-lugar" data-chave="${esc(chave)}" data-linha="${linha}"></div>`;
 }
-function textoDaColuna(el){
-  const partes = [];
-  for (const n of el.childNodes){
-    if (n.nodeType === 1 && n.hasAttribute('data-g')) continue;
-    partes.push(n.nodeType === 1 ? n.innerText : n.textContent);
+function montarEditores(){
+  for (const el of document.querySelectorAll('.cm-lugar')) {
+    const chave = el.dataset.chave;
+    const s = chave.startsWith('c:') ? mudancas().find((m) => 'c:' + m.chave === chave)
+                                     : segs().find((x) => 'g:' + x.linha === chave);
+    if (!s) continue;
+    const hojeTexto = chave.startsWith('c:') ? s.agora : s.texto;
+    originais[chave] = hojeTexto;
+    const atual = sujos[chave] !== undefined ? sujos[chave] : hojeTexto;
+    const mudou = (t) => mexeuTexto(chave, t);
+    if (chave.startsWith('c:')) km.editorMudanca(el, chave, s.antes, atual, naChancela(), mudou, mostrarBarraSelecao);
+    else km.editorSimples(el, chave, atual, true, mudou, null);
   }
-  return partes.join('\n').replace(/ /g, '');
-}
-function editavel(chave, linha, texto, html){
-  originais[chave] = texto;
-  const corpo = sujos[chave] !== undefined
-    ? esc(sujos[chave]).split('\n').map(l => `<span class="ln">${l}</span>`).join('')
-    : html;
-  return `<div class="txt edit" contenteditable="plaintext-only" spellcheck="false"
-    data-chave="${esc(chave)}" data-linha="${linha}"
-    oninput="mexeu(this)" onfocus="foco=this.dataset.chave">${corpo}</div>`;
 }
 
 // ---- o que fazer, por bloco e por mudança -----------------------------------------
@@ -328,7 +341,7 @@ function acoesDaMudanca(m){
   const rotulo = {novo: 'novo', saiu: 'saiu', editado: 'editado'}[m.geral];
   if (!naChancela()) return `<span class="chip e-pendente">${rotulo}</span>`;
   const js = esc(JSON.stringify(shas));
-  const marcas = m.texto ? `<div class="marcas">
+  const marcas = m.agora ? `<div class="marcas">
       <button onclick="marcaNaMudanca('${chave}','⚠️')" title="ressalva: sem certeza">⚠️</button>
       <button onclick="marcaNaMudanca('${chave}','🚫')" title="discordo — bloqueia a chancela">🚫</button></div>` : '';
   return `<span class="chip ${m.geral==='saiu'?'e-negado':(m.geral==='novo'?'e-aprovado':'e-mexido')}">${rotulo}</span>
@@ -366,6 +379,7 @@ function desenhar(){
 
   const d = D.docs[doc];
   originais = {};
+  km.destruirTodos();
   if (!d) {
     // Nada acompanhado ainda: um repositório novo, ou tudo pausado. A revisão não tem o
     // que mostrar, e o caminho é escolher arquivos. Uma config quebrada diz o que tem.
@@ -386,19 +400,17 @@ function desenhar(){
         html += `<div class="dobra" onclick="setVer('tudo')">⋯ ${s.n_linhas} linhas sem mudança</div>`;
         continue;
       }
-      html += `<div class="col agora inteiro">${editavel(chave, s.linha, s.texto, coluna(s.linhas, 'dir'))}</div>
-        <div class="col acoes">${salvarCel(chave)}</div>`;
+      html += `<div class="col agora inteiro">${lugar(chave, s.linha)}</div>
+        <div class="col acoes" data-acoes="${esc(chave)}">${salvarCel(chave)}</div>`;
       continue;
     }
     const chave = 'c:' + s.chave;
     const inicio = ` inicio-m${foco === 'm:' + s.n ? ' foco-m' : ''}`;
-    html += `<div class="col base ${s.geral}${inicio}" id="m${s.n}"><div class="txt">${coluna(s.linhas, 'esq')}</div></div>
-      <div class="col agora ${s.geral}${inicio}">${avisosDaMudanca(s)}${s.texto
-        ? editavel(chave, s.linha, s.texto, coluna(s.linhas, 'dir'))
-        : '<div class="vaziocol">— saiu do arquivo —</div>'}</div>
-      <div class="col acoes${inicio}">${acoesDaMudanca(s)}</div>`;
+    html += `<div class="col mudanca-cm ${s.geral}${inicio}" id="m${s.n}">${avisosDaMudanca(s)}${lugar(chave, s.linha)}</div>
+      <div class="col acoes${inicio}" data-acoes="${esc(chave)}"><div class="grudado">${acoesDaMudanca(s)}</div></div>`;
   }
   $('doc').innerHTML = html;
+  montarEditores();
   const campo = $('f-texto');
   if (campo) campo.focus();
 }
@@ -418,23 +430,17 @@ function enviar(){
   if (form.tipo === 'validar') return agir({acao:'validar', shas: form.shas, texto, prazo});
   return agir({acao:'reverter', shas: form.shas, motivo: texto});
 }
-function celula(chave){ return document.querySelector(`.txt.edit[data-chave="${CSS.escape(chave)}"]`); }
-function mexeu(el){
-  const chave = el.dataset.chave;
-  const texto = textoDaColuna(el);
+function mexeuTexto(chave, texto){
   if (mesmo(texto, originais[chave])) delete sujos[chave]; else sujos[chave] = texto;
   // Só a coluna das ações muda; o texto que você está digitando fica onde está.
-  const cel = el.closest('.col').nextElementSibling;
-  if (cel && cel.classList.contains('acoes')) {
-    if (chave.startsWith('c:')) {
-      const m = mudancas().find(x => 'c:' + x.chave === chave);
-      cel.innerHTML = m ? acoesDaMudanca(m) : salvarCel(chave);
-    } else cel.innerHTML = salvarCel(chave);
-  }
+  const cel = document.querySelector(`[data-acoes="${CSS.escape(chave)}"]`);
+  if (!cel) return;
+  const m = chave.startsWith('c:') ? mudancas().find((x) => 'c:' + x.chave === chave) : null;
+  cel.innerHTML = m ? `<div class="grudado">${acoesDaMudanca(m)}</div>` : salvarCel(chave);
 }
 function salvar(chave){
   if (sujos[chave] === undefined) return;
-  const el = celula(chave);
+  const el = document.querySelector(`.cm-lugar[data-chave="${CSS.escape(chave)}"]`);
   agir({acao:'salvar', chave, original: originais[chave], texto: sujos[chave],
         linha: el ? Number(el.dataset.linha) : 1});
 }
@@ -443,87 +449,42 @@ function copiar(chave){ navigator.clipboard?.writeText(sujos[chave] || ''); reca
 
 // A marca entra onde está o cursor, no formato combinado, e vira texto seu: você completa
 // e salva como qualquer outra edição.
-function inserir(el, marca){
-  el.focus();
-  const modelo = typeof MODELO[marca] === 'function' ? MODELO[marca]() : MODELO[marca];
-  // A marca é um bloco próprio: vai para o fim da linha onde está o cursor, com linha em
-  // branco antes e depois. Colada no meio da linha, ela viraria parte do parágrafo — e
-  // sem a linha em branco depois, o parágrafo seguinte viraria parte da citação.
-  const s = getSelection();
-  s.modify('move', 'forward', 'lineboundary');
-  document.execCommand('insertText', false, '\n\n' + modelo + '\n');
-  s.modify('move', 'backward', 'character');
-}
+const modeloDe = (marca) => typeof MODELO[marca] === 'function' ? MODELO[marca]() : MODELO[marca];
 function noCursor(marca){
-  const s = getSelection();
-  const el = s && s.anchorNode && (s.anchorNode.nodeType === 1 ? s.anchorNode : s.anchorNode.parentElement)?.closest('.txt.edit');
-  if (!el) { recado = '✕ clique no texto, onde a marca deve entrar, e depois no botão'; return desenhar(); }
-  inserir(el, marca);
+  const chave = km.focado();
+  if (!chave) { recado = '✕ clique no texto, onde a marca deve entrar, e depois no botão'; return desenhar(); }
+  km.inserirMarca(chave, modeloDe(marca));
 }
 function marcaNaMudanca(chave, marca){
-  const el = celula(chave); if (!el) return;
-  el.focus();
-  const r = document.createRange(); r.selectNodeContents(el); r.collapse(false);
-  const s = getSelection(); s.removeAllRanges(); s.addRange(r);
-  inserir(el, marca);
+  km.focarFim(chave);
+  km.inserirMarca(chave, modeloDe(marca));
 }
 // ---- aprovar parte de um bloco ----------------------------------------------------
 // Como aceitar metade de um hunk numa revisão de código: selecione, na coluna do texto
 // de hoje, o pedaço cuja mudança você aceita. O resto do bloco continua pendente.
-function deslocamento(el, no, off){
-  // posição no texto do bloco (o mesmo texto que o servidor tem), pulando as fantasmas
-  if (no === el) {
-    let total = 0, primeiro = true;
-    for (const f of [...el.childNodes].slice(0, off)) {
-      if (f.nodeType === 1 && f.hasAttribute('data-g')) continue;
-      if (!primeiro) total += 1; primeiro = false;
-      total += (f.nodeType === 1 ? f.innerText : f.textContent).length;
-    }
-    return total;
-  }
-  let total = 0, primeiro = true;
-  for (const f of el.childNodes) {
-    if (f.nodeType === 1 && f.hasAttribute('data-g')) continue;
-    if (!primeiro) total += 1; primeiro = false;
-    if (f === no || f.contains(no)) {
-      const r = document.createRange(); r.selectNodeContents(f); r.setEnd(no, off);
-      return total + r.toString().length;
-    }
-    total += (f.nodeType === 1 ? f.innerText : f.textContent).length;
-  }
-  return total;
-}
 function selecaoAtual(){
-  const s = getSelection();
-  if (!s || s.isCollapsed || !s.rangeCount || !naChancela()) return null;
-  const r = s.getRangeAt(0);
-  const host = n => (n.nodeType === 1 ? n : n.parentElement)?.closest('.txt.edit[data-chave^="c:"]');
-  const el = host(r.startContainer);
-  if (!el || el !== host(r.endContainer)) return null;       // um trecho de cada vez
-  const chave = el.dataset.chave;
-  if (sujos[chave] !== undefined) return {erro: 'salve ou descarte a edição deste trecho antes de aprovar parte dele'};
-  const m = mudancas().find(x => 'c:' + x.chave === chave);
-  if (!m) return null;
-  const a = deslocamento(el, r.startContainer, r.startOffset);
-  const b = deslocamento(el, r.endContainer, r.endOffset);
+  const chave = km.focado();
+  if (!chave || !chave.startsWith('c:') || !naChancela()) return null;
+  if (sujos[chave] !== undefined) return {erro: 'salve ou descarte a edição deste trecho antes de aprovar parte dela'};
+  const sel = km.selecao(chave), m = mudancas().find((x) => 'c:' + x.chave === chave);
+  if (!sel || !m) return null;
   // O motor aplica por bloco; a tela converte a seleção no trecho em "esta parte deste bloco".
   const shas = [], parciais = [];
   for (const u of m.unidades) {
-    if (u.ini === u.fim) { if (a <= u.ini && u.ini <= b) shas.push(u.sha); continue; }
-    if (b <= u.ini || a >= u.fim) continue;
-    if (a <= u.ini && b >= u.fim) shas.push(u.sha);
-    else parciais.push({sha: u.sha, ini: Math.max(a, u.ini) - u.ini, fim: Math.min(b, u.fim) - u.ini});
+    if (u.ini === u.fim) { if (sel.a <= u.ini && u.ini <= sel.b) shas.push(u.sha); continue; }
+    if (sel.b <= u.ini || sel.a >= u.fim) continue;
+    if (sel.a <= u.ini && sel.b >= u.fim) shas.push(u.sha);
+    else parciais.push({sha: u.sha, ini: Math.max(sel.a, u.ini) - u.ini, fim: Math.min(sel.b, u.fim) - u.ini});
   }
-  if (!shas.length && !parciais.length) return null;
-  return {shas, parciais, rect: r.getBoundingClientRect()};
+  return (shas.length || parciais.length) ? {shas, parciais, rect: sel.rect} : null;
 }
-document.addEventListener('selectionchange', () => {
+function mostrarBarraSelecao(){
   const barra = $('selecao'), sel = selecaoAtual();
-  if (!sel || sel.erro) { barra.hidden = true; return; }
+  if (!sel || sel.erro || !sel.rect) { barra.hidden = true; return; }
   barra.hidden = false;
   barra.style.top = Math.max(50, sel.rect.top - 40) + 'px';
   barra.style.left = Math.min(innerWidth - 300, Math.max(10, sel.rect.left)) + 'px';
-});
+}
 function naSelecao(acao){
   const sel = selecaoAtual();
   if (!sel) return;
@@ -540,11 +501,13 @@ document.addEventListener('keydown', (e)=>{
   const el = e.target;
   if ((e.ctrlKey || e.metaKey) && e.key === 's') {
     e.preventDefault();
-    if (el.isContentEditable) salvar(el.dataset.chave);
+    const chave = km.focado();
+    if (chave) salvar(chave);
     return;
   }
   if (el.isContentEditable) {
-    if (e.key === 'Escape') { el.blur(); descartar(el.dataset.chave); }
+    const chave = km.focado();
+    if (e.key === 'Escape' && chave) { el.blur(); descartar(chave); }
     return;   // dentro do texto, letra é letra
   }
   if (el.tagName === 'INPUT' || el.tagName === 'SELECT') { if (e.key === 'Escape') fechar(); return; }

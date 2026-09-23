@@ -367,13 +367,14 @@ class PainelTest(RepoTest):
                          ["igual", "mudanca", "igual", "mudanca", "igual"][:len(segs)])
         self.assertEqual(len([s for s in segs if s["tipo"] == "mudanca"]), 2)
 
-    def test_what_left_is_cut_on_the_left_and_the_right_is_the_file(self):
+    def test_a_change_carries_both_texts_and_no_html(self):
         self.escrever(DOC.replace("horas úteis", "horas corridas"))
         [m] = self.mudancas()
-        mexida = [l for l in m["linhas"] if l["tipo"] == "mexido"][0]
-        self.assertIn("<del>", mexida["esq"]["html"])
-        self.assertNotIn("<del>", mexida["dir"]["html"])
-        self.assertEqual(m["texto"], "O prazo conta em horas corridas.")
+        self.assertEqual(m["antes"], "O prazo conta em horas úteis.")
+        self.assertEqual(m["agora"], "O prazo conta em horas corridas.")
+        self.assertNotIn("linhas", m)
+        segs = self.doc()["segmentos"]
+        self.assertTrue(all("<" not in (s.get("texto") or "") or "<" in DOC for s in segs))
 
     def test_consecutive_changed_blocks_are_one_passage(self):
         """A heading, a table and a paragraph that all changed, one after the other, are
@@ -381,16 +382,16 @@ class PainelTest(RepoTest):
         self.escrever(DOC.replace("## A lista fechada de colunas\n\nOnze colunas, nesta ordem.",
                                   "## A lista aberta de colunas\n\nDoze colunas, em outra ordem."))
         [m] = self.mudancas()
-        self.assertEqual(m["texto"], "## A lista aberta de colunas\n\nDoze colunas, em outra ordem.")
+        self.assertEqual(m["agora"], "## A lista aberta de colunas\n\nDoze colunas, em outra ordem.")
         self.assertEqual(len(m["unidades"]), 2)                     # o motor ainda sabe dos blocos
-        self.assertEqual(m["unidades"][1]["ini"], m["texto"].index("Doze"))
+        self.assertEqual(m["unidades"][1]["ini"], m["agora"].index("Doze"))
 
     def test_a_selection_over_the_passage_reaches_the_right_block(self):
         self.escrever(DOC.replace("## A lista fechada de colunas\n\nOnze colunas, nesta ordem.",
                                   "## A lista aberta de colunas\n\nDoze colunas, em outra ordem."))
         [m] = self.mudancas()
         par = m["unidades"][1]                                       # o parágrafo
-        i = m["texto"].index("Doze")
+        i = m["agora"].index("Doze")
         r = self.agir(acao="aprovar", parciais=[{"sha": par["sha"], "ini": i - par["ini"],
                                                  "fim": i + 4 - par["ini"]}])
         self.assertTrue(r["ok"], r)
@@ -449,7 +450,7 @@ class PainelTest(RepoTest):
         self.escrever(DOC.replace("horas úteis", "horas corridas"))
         u = self.mudancas()[0]
         self.escrever("Linha nova no topo.\n\n" + self.texto())       # um agente empurrou tudo
-        r = self.agir(acao="salvar", original=u["texto"], linha=u["linha"],
+        r = self.agir(acao="salvar", original=u["agora"], linha=u["linha"],
                       texto="O prazo conta em horas úteis, sempre.")
         self.assertTrue(r["ok"], r)
         self.assertIn("Linha nova no topo.", self.texto())
@@ -459,7 +460,7 @@ class PainelTest(RepoTest):
         self.escrever(DOC.replace("horas úteis", "horas corridas"))
         u = self.mudancas()[0]
         self.escrever(DOC.replace("horas úteis", "dias corridos"))    # outro agente reescreveu
-        r = self.agir(acao="salvar", original=u["texto"], linha=u["linha"], texto="minha versão")
+        r = self.agir(acao="salvar", original=u["agora"], linha=u["linha"], texto="minha versão")
         self.assertFalse(r["ok"])
         self.assertIn("dias corridos", r["conflito"]["atual"])
         self.assertNotIn("minha versão", self.texto())
@@ -489,18 +490,18 @@ class PainelTest(RepoTest):
         self.escrever(DOC.replace("horas úteis", "dias corridos, sempre"))
         m = self.mudancas()[0]
         u = m["unidades"][0]
-        i = m["texto"].index("dias corridos") - u["ini"]
+        i = m["agora"].index("dias corridos") - u["ini"]
         r = self.agir(acao="aprovar", parciais=[{"sha": u["sha"], "ini": i, "fim": i + 13}])
         self.assertTrue(r["ok"], r)
         self.assertIn("O prazo conta em dias corridos.", ch.chancelado(self.dir, "regras.md"))
         [resto] = self.mudancas()
-        self.assertIn("sempre", resto["texto"])
+        self.assertIn("sempre", resto["agora"])
 
     def test_reverting_a_selection_undoes_only_that_part_in_the_file(self):
         self.escrever(DOC.replace("horas úteis", "dias corridos, sempre"))
         m = self.mudancas()[0]
         u = m["unidades"][0]
-        i = m["texto"].index(", sempre") - u["ini"]
+        i = m["agora"].index(", sempre") - u["ini"]
         r = self.agir(acao="reverter", parciais=[{"sha": u["sha"], "ini": i, "fim": i + 8}])
         self.assertTrue(r["ok"], r)
         self.assertIn("O prazo conta em dias corridos.", self.texto())

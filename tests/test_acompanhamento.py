@@ -411,3 +411,26 @@ class OrigemTest(unittest.TestCase):
     def test_the_panel_itself_can(self):
         self.assertEqual(self.post(**{"Content-Type": "application/json",
                                       "Origin": f"http://127.0.0.1:{self.porta}"}), 200)
+
+
+class EstaticoTest(unittest.TestCase):
+    def setUp(self):
+        self.dir = Path(tempfile.mkdtemp())
+        (self.dir / "painel").mkdir()
+        (self.dir / "painel" / "a.js").write_text("export const a = 1;\n")
+        (self.dir / "segredo.py").write_text("x = 1\n")
+        self.raizes = {"painel": self.dir / "painel"}
+
+    def tearDown(self):
+        shutil.rmtree(self.dir)
+
+    def test_a_module_is_served(self):
+        from km import serve
+        self.assertEqual(serve.arquivo_estatico("/static/painel/a.js", self.raizes),
+                         self.dir / "painel" / "a.js")
+
+    def test_nothing_outside_the_two_folders(self):
+        from km import serve
+        for ruim in ("/static/painel/../segredo.py", "/static/outra/a.js", "/static/painel/nao.js",
+                     "/static/painel/", "/static/painel/%2e%2e/segredo.py"):
+            self.assertIsNone(serve.arquivo_estatico(ruim, self.raizes), ruim)

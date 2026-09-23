@@ -4,3 +4,4 @@ sandbox/
 .km/last-listing.json
 .superpowers/
 .worktrees/
+tools/build-cm/node_modules/
