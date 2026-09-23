@@ -2,14 +2,19 @@
 // Off the cursor's line the Markdown markers are hidden, paragraphs flow, ⚠️ ❓ 🚫 quotes
 // become coloured boxes and tables become a grid with row and column controls. All of it
 // lives in one StateField: hidden line breaks and block widgets are decorations CodeMirror
-// accepts only from the state, never from a plugin.
-import { EditorView, Decoration, WidgetType, StateField, StateEffect, EditorState, syntaxTree,
-         ensureSyntaxTree, markdown, markdownLanguage, syntaxHighlighting, HighlightStyle,
-         tags } from '../vendor/cm.js';
+// accepts only from the state, never from a plugin. The Código mode swaps that layer out for
+// plain highlighting in a monospace font — the same text, every marker and line break shown.
+import { EditorView, Decoration, WidgetType, StateField, StateEffect, EditorState, Compartment,
+         syntaxTree, ensureSyntaxTree, markdown, markdownLanguage, syntaxHighlighting,
+         HighlightStyle, tags } from '../vendor/cm.js';
 import { quebrasOcultas } from './paragrafo.js';
 import * as tabela from './tabela.js';
 
-const hoje = () => new Date().toISOString().slice(0, 10);
+// A data de hoje no relógio de quem lê: em UTC, um ❓ que vence hoje apareceria vencido
+// depois das 21h no Brasil.
+const doisDigitos = (n) => String(n).padStart(2, '0');
+export const hoje = (d = new Date()) =>
+  `${d.getFullYear()}-${doisDigitos(d.getMonth() + 1)}-${doisDigitos(d.getDate())}`;
 const esc = (s) => s.replace(/[&<>"]/g, (m) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[m]));
 
 // Markdown inline, só para ler as células da tabela — nunca usado para escrever nada.
@@ -142,10 +147,13 @@ export function decorar(state, editavel) {
   arvore.iterate({ enter: (n) => {
     const nome = n.name;
     if (nome === 'Table') return false;
+    // Sem URL não é link que o preview conheça — uma nota de rodapé `[^1]`, uma referência:
+    // fica como está no arquivo, com os colchetes.
+    if (nome === 'Link' && !n.node.getChild('URL')) return false;
     const pai = n.node.parent ? n.node.parent.name : '';
     const m = /^ATXHeading(\d)$/.exec(nome);
     if (m) linha(n.from, n.to, 'cm-h cm-h' + m[1]);
-    else if (nome === 'HeaderMark' && !ativa(n.from)) esconder(n.from, depoisEspaco(n.to));
+    else if (nome === 'HeaderMark' && pai.startsWith('ATXHeading') && !ativa(n.from)) esconder(n.from, depoisEspaco(n.to));
     else if (nome === 'CodeMark' && pai === 'FencedCode') { /* cercas: tratadas em FencedCode */ }
     else if (OCULTAVEIS.has(nome) && !ativa(n.from)) esconder(n.from, n.to);
     else if (nome === 'URL' && pai === 'Link' && !ativa(n.from)) esconder(n.from, n.to);
@@ -185,33 +193,59 @@ const campo = (editavel) => StateField.define({
   provide: (f) => EditorView.decorations.from(f),
 });
 
-const estilo = HighlightStyle.define([
-  { tag: tags.heading1, fontSize: '1.5em', fontWeight: '700' },
-  { tag: tags.heading2, fontSize: '1.3em', fontWeight: '700' },
-  { tag: tags.heading3, fontSize: '1.15em', fontWeight: '700' },
-  { tag: [tags.heading4, tags.heading5, tags.heading6], fontWeight: '700' },
+// Cores e pesos do Markdown, nos dois modos; os tamanhos e a fonte do código inline só no
+// Formatado — no Código tudo tem a mesma largura, para as tabelas alinharem.
+const cores = [
+  { tag: [tags.heading1, tags.heading2, tags.heading3, tags.heading4, tags.heading5, tags.heading6], fontWeight: '700' },
   { tag: tags.strong, fontWeight: '700' },
   { tag: tags.emphasis, fontStyle: 'italic' },
   { tag: tags.strikethrough, textDecoration: 'line-through' },
-  { tag: tags.monospace, fontFamily: 'ui-monospace, Menlo, monospace', fontSize: '0.92em' },
   { tag: tags.link, color: 'var(--acc)' },
   { tag: tags.url, color: 'var(--mut)' },
   { tag: tags.processingInstruction, color: 'var(--mut)' },
+];
+const estiloFormatado = HighlightStyle.define([
+  ...cores,
+  { tag: tags.heading1, fontSize: '1.5em' },
+  { tag: tags.heading2, fontSize: '1.3em' },
+  { tag: tags.heading3, fontSize: '1.15em' },
+  { tag: tags.monospace, fontFamily: 'ui-monospace, Menlo, monospace', fontSize: '0.92em' },
 ]);
+const estiloCodigo = HighlightStyle.define([...cores, { tag: tags.monospace, color: 'var(--ace)' }]);
 
-// Texto de documento, não de código: o CodeMirror vem com fonte monoespaçada por padrão.
 // O painel é escuro: o cursor e a seleção vêm das cores da página, não do tema claro do
 // CodeMirror, que desenha um cursor preto e uma seleção quase branca.
 const tema = EditorView.theme({
-  '.cm-scroller': { fontFamily: 'inherit', lineHeight: '1.62' },
-  '.cm-content': { fontFamily: 'inherit', caretColor: 'var(--acc)' },
+  '.cm-scroller': { lineHeight: '1.62' },
+  '.cm-content': { caretColor: 'var(--acc)' },
   '.cm-cursor, .cm-dropCursor': { borderLeftColor: 'var(--acc)', borderLeftWidth: '2px' },
   '&.cm-focused > .cm-scroller > .cm-selectionLayer .cm-selectionBackground, .cm-selectionBackground, .cm-content ::selection':
     { background: 'color-mix(in srgb, var(--acc) 32%, transparent)' },
 }, { dark: true });
 
-export function vistaViva({ editavel = true } = {}) {
-  return [markdown({ base: markdownLanguage }), syntaxHighlighting(estilo), foco,
-          EditorView.focusChangeEffect.of((s, focando) => mudouFoco.of(focando)), campo(editavel),
-          tema, EditorView.lineWrapping, EditorState.readOnly.of(!editavel), EditorView.editable.of(editavel)];
+// Texto de documento no Formatado (o CodeMirror vem com fonte monoespaçada por padrão);
+// monoespaçada no Código.
+const fonte = (familia) => EditorView.theme({ '.cm-scroller, .cm-content': { fontFamily: familia } });
+
+// O live preview: a camada que esconde marcas, junta parágrafos e desenha a grade.
+function vistaViva(editavel) {
+  return [syntaxHighlighting(estiloFormatado), fonte('inherit'), foco,
+          EditorView.focusChangeEffect.of((s, focando) => mudouFoco.of(focando)), campo(editavel)];
+}
+const vistaCodigo = () => [syntaxHighlighting(estiloCodigo), fonte('ui-monospace, Menlo, monospace')];
+
+// O modo mora num Compartment: trocar reconfigura o editor em vez de refazê-lo, e o cursor,
+// o histórico e o que foi digitado continuam onde estavam.
+const modo = new Compartment();
+const camada = (codigo, editavel) => (codigo ? vistaCodigo() : vistaViva(editavel));
+
+export function editorMarkdown({ editavel = true, codigo = false } = {}) {
+  return [markdown({ base: markdownLanguage }), tema, EditorView.lineWrapping,
+          EditorState.readOnly.of(!editavel), EditorView.editable.of(editavel),
+          modo.of(camada(codigo, editavel))];
+}
+
+// O efeito que põe um estado criado por editorMarkdown no modo pedido.
+export function trocarModo(state, codigo) {
+  return modo.reconfigure(camada(codigo, state.facet(EditorView.editable)));
 }
