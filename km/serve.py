@@ -11,10 +11,7 @@ or a passage you edited here.
 
 from __future__ import annotations
 
-import difflib
-import html
 import json
-import re
 import webbrowser
 from datetime import date
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -26,219 +23,25 @@ from . import cli
 
 PAGINA = Path(__file__).with_name("painel.html")
 
-PALAVRA = re.compile(r"\d{4}-\d{2}-\d{2}|\s+|\w+|[^\w\s]")
+ESTATICOS = {"vendor": Path(__file__).with_name("vendor"),
+             "painel": Path(__file__).with_name("painel")}
+TIPOS = {".js": "text/javascript; charset=utf-8", ".mjs": "text/javascript; charset=utf-8",
+         ".css": "text/css; charset=utf-8"}
 
 
-# ---- markdown, realçado e marcado ----------------------------------------------------
-#
-# O diff é feito por linha e, dentro da linha mexida, por palavra — é o que pandiff faz
-# com prosa: você lê o texto corrido e vê no lugar o que entrou, o que saiu e o que mudou.
-# O realce é do **fonte** markdown, não do markdown renderizado: a coluna do meio é
-# editável, e editar texto renderizado é WYSIWYG, que reescreve o arquivo inteiro na hora
-# de salvar.
+def arquivo_estatico(caminho: str, raizes: dict | None = None) -> Path | None:
+    """`/static/<raiz>/<arquivo>` → a file inside km/vendor or km/painel, and nothing else."""
+    from urllib.parse import unquote, urlparse
 
-CERCA = re.compile(r"^\s*(```|~~~)")
-TITULO = re.compile(r"^(#{1,6})\s+(.*)$")
-CITACAO = re.compile(r"^(\s*>\s?)(.*)$")
-ITEM = re.compile(r"^(\s*)([-*+]|\d{1,3}[.)])\s+(.*)$")
-TABELA = re.compile(r"^\s*\|.*\|\s*$")
-INLINE = re.compile(r"(`[^`]+`|\*\*[^*]+\*\*|__[^_]+__|\*[^*\s][^*]*\*|_[^_\s][^_]*_"
-                    r"|\[[^\]]+\]\([^)]+\)|~~[^~]+~~)")
-
-
-def realce_inline(texto: str) -> str:
-    """Emphasis, code, links — enough for the eye to find its way in the source."""
-    out = []
-    for parte in INLINE.split(texto):
-        if not parte:
-            continue
-        e = html.escape(parte)
-        if parte.startswith("`"):
-            out.append(f'<span class="m-cod">{e}</span>')
-        elif parte.startswith(("**", "__")):
-            out.append(f'<span class="m-forte">{e}</span>')
-        elif parte.startswith("~~"):
-            out.append(f'<span class="m-riscado">{e}</span>')
-        elif parte.startswith("["):
-            alvo = e.split("](", 1)
-            out.append(f'<span class="m-link">{alvo[0]}]</span>'
-                       f'<span class="m-url">({alvo[1]}</span>' if len(alvo) == 2 else e)
-        elif parte.startswith(("*", "_")):
-            out.append(f'<span class="m-enfase">{e}</span>')
-        else:
-            out.append(e)
-    return "".join(out)
-
-
-def _classe_da_linha(linha: str, em_codigo: bool) -> str:
-    if em_codigo or CERCA.match(linha):
-        return "l-cod"
-    m = TITULO.match(linha)
-    if m:
-        return f"l-t{len(m.group(1))}"
-    if CITACAO.match(linha):
-        marca = next((c for c in linha if c in MARCAS_TXT), "")
-        return "l-cit" + (" l-marca" if marca else "")
-    if TABELA.match(linha):
-        return "l-tab"
-    if ITEM.match(linha):
-        return "l-item"
-    return ""
-
-
-MARCAS_TXT = "⚠❓🚫"
-
-
-def realce_linha(linha: str, em_codigo: bool) -> str:
-    if em_codigo or CERCA.match(linha):
-        return html.escape(linha)
-    m = TITULO.match(linha)
-    if m:
-        return (f'<span class="m-cerquilha">{m.group(1)}</span> '
-                + realce_inline(m.group(2)))
-    m = CITACAO.match(linha)
-    if m:
-        return f'<span class="m-cerquilha">{html.escape(m.group(1))}</span>' + realce_inline(m.group(2))
-    m = ITEM.match(linha)
-    if m:
-        return (html.escape(m.group(1)) + f'<span class="m-cerquilha">{m.group(2)}</span> '
-                + realce_inline(m.group(3)))
-    return realce_inline(linha)
-
-
-def _palavras(a: str, b: str, lado: str = "dir") -> str:
-    """One changed line, word by word — each side showing only its own words.
-
-    The left keeps what left, the right what arrived: the same line read twice, once as it
-    was and once as it is, instead of both interleaved in one column.
-    """
-    pa, pb = PALAVRA.findall(a), PALAVRA.findall(b)
-    out = []
-    for tag, i1, i2, j1, j2 in difflib.SequenceMatcher(None, pa, pb, autojunk=False).get_opcodes():
-        ta, tb = "".join(pa[i1:i2]), "".join(pb[j1:j2])
-        if tag == "equal":
-            out.append(realce_inline(ta if lado == "esq" else tb))
-        elif tag == "delete":
-            if lado == "esq":
-                out.append(f"<del>{realce_inline(ta)}</del>")
-        elif tag == "insert":
-            if lado == "dir":
-                out.append(f"<ins>{realce_inline(tb)}</ins>")
-        else:
-            out.append(f"<del>{realce_inline(ta)}</del>" if lado == "esq"
-                       else f"<ins>{realce_inline(tb)}</ins>")
-    return "".join(out)
-
-
-def _casar(velhas: list[str], novas: list[str], corte: float = 0.45) -> list[tuple]:
-    # devolve tuplas (tipo, linha de antes, linha de agora) — None do lado que não existe
-    """Which old line became which new one, inside one changed block.
-
-    Pairing by position turns a rewritten paragraph into soup — two lines with nothing to
-    do with each other shown word by word. Pairing by similarity, in order, gives the
-    "edited" line where there is one and an honest gone/new where there is not.
-    """
-    saida: list[tuple] = []
-    disponiveis = list(enumerate(velhas))
-    usadas: set[int] = set()
-    casos: dict[int, int] = {}
-    for j, nova in enumerate(novas):
-        melhor, nota = None, corte
-        for i, velha in disponiveis:
-            if i in usadas:
-                continue
-            r = difflib.SequenceMatcher(None, velha, nova).ratio()
-            if r >= nota:
-                melhor, nota = i, r
-        if melhor is not None:
-            usadas.add(melhor)
-            casos[j] = melhor
-    # A linha que saiu aparece onde ela estava, e não empilhada no começo do bloco: quem
-    # lê está lendo o texto, não um relatório de diferenças.
-    posicao = 0
-    for j, nova in enumerate(novas):
-        alvo = casos.get(j)
-        limite = alvo if alvo is not None else len(velhas)
-        while posicao < limite:
-            if posicao not in usadas:
-                saida.append(("sumiu", velhas[posicao], None))
-            posicao += 1
-        if alvo is not None:
-            saida.append(("mexido", velhas[alvo], nova))
-            posicao = alvo + 1
-        else:
-            saida.append(("novo", None, nova))
-    while posicao < len(velhas):
-        if posicao not in usadas:
-            saida.append(("sumiu", velhas[posicao], None))
-        posicao += 1
-    return saida
-
-
-def marcar(antes: str, depois: str) -> list[dict]:
-    """The passage as two aligned columns of text.
-
-    What was removed is cut on the left, where it was — not copied to the right to be
-    struck there. The right-hand column is then exactly the file's text, which is what
-    makes it editable in place: nothing on it is a ghost of something that no longer
-    exists.
-
-    Each row carries `esq` and `dir`; either can be None, and the page draws an empty line
-    in its place so the two columns stay side by side.
-    """
-    a, b = antes.splitlines(), depois.splitlines()
-    if not antes:
-        pares = [("novo", None, l) for l in b]
-    else:
-        pares = []
-        for tag, i1, i2, j1, j2 in difflib.SequenceMatcher(None, a, b, autojunk=False).get_opcodes():
-            if tag == "equal":
-                pares += [("igual", x, y) for x, y in zip(a[i1:i2], b[j1:j2])]
-            elif tag == "insert":
-                pares += [("novo", None, l) for l in b[j1:j2]]
-            elif tag == "delete":
-                pares += [("sumiu", l, None) for l in a[i1:i2]]
-            else:
-                pares += _casar(a[i1:i2], b[j1:j2])
-
-    esq_codigo = dir_codigo = False
-    saida = []
-    for tipo, velha, nova in pares:
-        linha = {"tipo": tipo, "esq": None, "dir": None}
-        if velha is not None:
-            classe = _classe_da_linha(velha, esq_codigo)
-            if CERCA.match(velha):
-                esq_codigo = not esq_codigo
-            corpo = (_palavras(velha, nova, lado="esq") if tipo == "mexido"
-                     else realce_linha(velha, esq_codigo and not CERCA.match(velha)))
-            linha["esq"] = {"classe": classe, "html": corpo}
-        if nova is not None:
-            classe = _classe_da_linha(nova, dir_codigo)
-            if CERCA.match(nova):
-                dir_codigo = not dir_codigo
-            corpo = (_palavras(velha, nova, lado="dir") if tipo == "mexido"
-                     else realce_linha(nova, dir_codigo and not CERCA.match(nova)))
-            linha["dir"] = {"classe": classe, "html": corpo}
-        saida.append(linha)
-    return saida
-
-
-def realcar(texto: str) -> list[dict]:
-    """The same shape, with nothing to compare: one column of plain, highlighted text."""
-    em_codigo = False
-    saida = []
-    for linha in texto.splitlines():
-        classe = _classe_da_linha(linha, em_codigo)
-        if CERCA.match(linha):
-            em_codigo = not em_codigo
-        corpo = realce_linha(linha, em_codigo and not CERCA.match(linha))
-        saida.append({"tipo": "igual", "esq": None, "dir": {"classe": classe, "html": corpo}})
-    return saida
-
-
-def so_esquerda(texto: str) -> list[dict]:
-    """A passage that left the file: it only has a left-hand column now."""
-    return [{"tipo": "sumiu", "dir": None, "esq": l["dir"]} for l in realcar(texto)]
+    raizes = raizes or ESTATICOS
+    partes = unquote(urlparse(caminho).path).split("/")
+    if len(partes) != 4 or partes[1] != "static" or partes[2] not in raizes or not partes[3]:
+        return None
+    base = raizes[partes[2]].resolve()
+    alvo = (base / partes[3]).resolve()
+    if alvo.parent != base or not alvo.is_file():
+        return None
+    return alvo
 
 
 def _ultima(root: Path, rel: str) -> str:
@@ -265,7 +68,6 @@ def segmentos(s: ch.Situacao) -> list[dict]:
             if j2 > j1:
                 texto = "".join(b.cru for b in bd[j1:j2]).rstrip("\n")
                 out.append({"tipo": "igual", "linha": bd[j1].linha, "texto": texto,
-                            "linhas": realcar(texto),
                             "n_linhas": len(texto.splitlines())})
             continue
         n += 1
@@ -317,9 +119,8 @@ def _trecho_mudado(s: ch.Situacao, m: ch.Mudanca) -> dict:
     tipos = {u.tipo for u in m.unidades}
     geral = "novo" if tipos == {"novo"} else ("saiu" if tipos == {"sumiu"} else "editado")
     return {"tipo": "mudanca", "n": m.n, "titulo": m.titulo, "geral": geral,
-            "linha": linha or m.linha, "texto": agora,
+            "linha": linha or m.linha, "antes": antes, "agora": agora,
             "chave": ch.sha_do(antes + "\x00" + agora),
-            "linhas": marcar(antes, agora) if agora else so_esquerda(antes),
             "unidades": unidades, "bloqueio": m.bloqueio, "sumidas": m.sumidas}
 
 
@@ -497,6 +298,13 @@ class Handler(BaseHTTPRequestHandler):
                     "application/json; charset=utf-8", codigo)
 
     def do_GET(self) -> None:  # noqa: N802
+        if self.path.startswith("/static/"):
+            alvo = arquivo_estatico(self.path)
+            if alvo is None or alvo.suffix not in TIPOS:
+                self._envia(b"nao encontrado", "text/plain; charset=utf-8", 404)
+            else:
+                self._envia(alvo.read_bytes(), TIPOS[alvo.suffix])
+            return
         if self.path.startswith("/api/arquivos"):
             self._json(ac.arvore(self.root))
         elif self.path.startswith("/api/state"):
