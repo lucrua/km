@@ -167,6 +167,55 @@ class MudancaTest(unittest.TestCase):
         self.assertTrue(ch.unidades_por_sha(ch.mudancas(DOC, empurrado), {sha}))
 
 
+class ParcialTest(unittest.TestCase):
+    """Approving part of a block, like staging half a hunk."""
+
+    A = "O prazo conta em horas úteis, pelo calendário do contrato."
+    B = "O prazo conta em dias corridos, pelo calendário vigente do contrato assinado."
+
+    def test_only_the_selected_change_is_taken(self):
+        i = self.B.index("dias")
+        self.assertEqual(ch.mesclar(self.A, self.B, i, i + len("dias corridos")),
+                         "O prazo conta em dias corridos, pelo calendário do contrato.")
+
+    def test_a_selection_inside_a_word_takes_the_word(self):
+        i = self.B.index("vigente")
+        self.assertIn("calendário vigente do contrato.", ch.mesclar(self.A, self.B, i + 2, i + 3))
+
+    def test_reverting_a_selection_undoes_only_it(self):
+        i = self.B.index("assinado")
+        self.assertEqual(ch.mesclar(self.A, self.B, i, len(self.B), aceitar=False),
+                         "O prazo conta em dias corridos, pelo calendário vigente do contrato.")
+
+    def test_selecting_everything_is_the_new_text_and_nothing_the_old(self):
+        self.assertEqual(ch.mesclar(self.A, self.B, 0, len(self.B)), self.B)
+        self.assertEqual(ch.mesclar(self.A, self.B, 0, len(self.B), aceitar=False), self.A)
+
+
+class PendenciaTest(unittest.TestCase):
+    def test_a_long_one_line_paragraph_edited_is_an_edit(self):
+        """A 4,000-character changelog on one line, with one entry added: an edit of a few
+        dozen characters — not the whole paragraph gone and another one arrived."""
+        base = "**Changelog** — " + " · ".join(f"2026-09-{d:02d}: entrada número {d} do registro" for d in range(1, 90))
+        antes = f"# T\n\n{base}\n"
+        depois = f"# T\n\n**Changelog** — 2026-09-22: uma entrada nova · {base[len('**Changelog** — '):]}\n"
+        [m] = ch.mudancas(antes, depois)
+        self.assertEqual([u.tipo for u in m.unidades], ["mexido"])
+        pend, total = ch.pendencia(antes, depois)
+        self.assertLess(pend, total * 0.05)
+
+
+    def test_counted_in_characters_that_changed_not_in_blocks(self):
+        pequena = ch.pendencia(DOC, DOC.replace("Onze", "Doze"))
+        grande = ch.pendencia(DOC, DOC + "\n## Nova\n\n" + "texto novo " * 40 + "\n")
+        self.assertLess(pequena[0], grande[0])
+        self.assertEqual(ch.pendencia(DOC, DOC), (0, ch._conta(DOC)))
+
+    def test_something_pending_never_reads_as_zero(self):
+        self.assertEqual(ch.percentual(1, 100000), "<1%")
+        self.assertEqual(ch.percentual(0, 100), "0%")
+
+
 class RessalvaTest(unittest.TestCase):
     def test_reads_the_three_marks(self):
         texto = ("> ⚠️ **sem certeza** — x\n"
@@ -202,19 +251,17 @@ class RessalvaTest(unittest.TestCase):
 
 
 class EstadoTest(RepoTest):
-    def test_passages_report_standing_moved_and_never_chancelled(self):
+    def test_the_file_reports_its_changes_where_they_are(self):
         ch.escrever(self.dir, {"regras.md": DOC}, "chancela")
         self.escrever(DOC.replace("horas úteis", "horas corridas") + "\n## Nova\n\nx\n")
         s = ch.situacao(self.dir, "regras.md")
-        por_titulo = {e["heading"]: e["state"] for e in ch.estados(s)}
-        self.assertEqual(por_titulo["A lista fechada de colunas"], "com chancela")
-        self.assertEqual(por_titulo["Prazo"], "mexido")
-        self.assertEqual(por_titulo["Nova"], "sem chancela")
+        self.assertEqual([m.titulo for m in s.mudancas], ["Prazo"])
+        self.assertEqual([u.tipo for u in s.unidades], ["mexido", "novo", "novo"])
 
-    def test_a_file_with_no_chancel_at_all(self):
+    def test_a_file_with_no_chancel_is_all_new(self):
         s = ch.situacao(self.dir, "regras.md")
         self.assertFalse(s.tem_chancela)
-        self.assertTrue(all(e["state"] == "sem chancela" for e in ch.estados(s)))
+        self.assertTrue(all(u.tipo == "novo" for u in s.unidades))
 
     def test_realigning_a_table_is_not_a_change(self):
         tabela = "# T\n\n| a | b |\n|---|---|\n| 1 | 2 |\n"
@@ -412,6 +459,31 @@ class PainelTest(RepoTest):
                              capture_output=True, text=True).stdout.strip()
         self.escrever(DOC.replace("horas úteis", "horas corridas"))
         self.assertEqual(len(self.mudancas(base=sha)), 1)
+
+    def test_approving_a_selection_takes_only_that_part(self):
+        self.escrever(DOC.replace("horas úteis", "dias corridos, sempre"))
+        u = self.mudancas()[0]["unidades"][0]
+        i = u["texto"].index("dias corridos")
+        r = self.agir(acao="aprovar", parciais=[{"sha": u["sha"], "ini": i, "fim": i + 13}])
+        self.assertTrue(r["ok"], r)
+        self.assertIn("O prazo conta em dias corridos.", ch.chancelado(self.dir, "regras.md"))
+        [resto] = self.mudancas()
+        self.assertIn("sempre", resto["unidades"][0]["texto"])
+
+    def test_reverting_a_selection_undoes_only_that_part_in_the_file(self):
+        self.escrever(DOC.replace("horas úteis", "dias corridos, sempre"))
+        u = self.mudancas()[0]["unidades"][0]
+        i = u["texto"].index(", sempre")
+        r = self.agir(acao="reverter", parciais=[{"sha": u["sha"], "ini": i, "fim": i + 8}])
+        self.assertTrue(r["ok"], r)
+        self.assertIn("O prazo conta em dias corridos.", self.texto())
+
+    def test_the_rail_speaks_in_percent_not_counts(self):
+        self.escrever(DOC.replace("horas úteis", "horas corridas"))
+        d = self.serve.estado(self.dir)["docs"][0]
+        self.assertTrue(d["pct"].endswith("%"))
+        self.assertNotIn("blocos", d)
+        self.assertNotIn("mudancas", d)
 
 
 if __name__ == "__main__":

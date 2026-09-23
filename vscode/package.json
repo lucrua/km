@@ -1,7 +1,7 @@
 {
   "name": "km-review",
   "displayName": "km · chancela",
-  "description": "O que mudou desde a sua chancela, trecho a trecho.",
+  "description": "O que mudou desde a sua chancela, e quanto falta aprovar.",
   "version": "0.1.0",
   "publisher": "local",
   "engines": {
@@ -26,30 +26,11 @@
       },
       {
         "command": "km.veredicto",
-        "title": "km: aprovar, a validar ou reverter o trecho sob o cursor"
+        "title": "km: aprovar ou reverter a mudança sob o cursor"
       },
       {
         "command": "km.chancelarArquivo",
         "title": "km: chancelar o arquivo inteiro"
-      },
-      {
-        "command": "km.reply",
-        "title": "km: escrever uma ressalva ⚠️ no texto"
-      },
-      {
-        "command": "km.aprovarThread",
-        "title": "Aprovar",
-        "icon": "$(check)"
-      },
-      {
-        "command": "km.validarThread",
-        "title": "A validar",
-        "icon": "$(clock)"
-      },
-      {
-        "command": "km.reverterThread",
-        "title": "Reverter",
-        "icon": "$(discard)"
       }
     ],
     "configuration": {
@@ -80,30 +61,6 @@
       }
     ],
     "menus": {
-      "comments/commentThread/context": [
-        {
-          "command": "km.reply",
-          "group": "inline@1",
-          "when": "commentController == km"
-        }
-      ],
-      "comments/commentThread/title": [
-        {
-          "command": "km.aprovarThread",
-          "group": "navigation@1",
-          "when": "commentController == km"
-        },
-        {
-          "command": "km.validarThread",
-          "group": "navigation@2",
-          "when": "commentController == km"
-        },
-        {
-          "command": "km.reverterThread",
-          "group": "navigation@3",
-          "when": "commentController == km"
-        }
-      ],
       "editor/context": [
         {
           "command": "km.abrirPainel",

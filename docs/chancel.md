@@ -47,6 +47,13 @@ a table, a heading, a quote, a code fence. What lands in the ref is *the previou
 the blocks you accepted* — `git add -p` semantics, at the grain prose actually has. Nobody
 needs to approve half a paragraph, and a line diff kept offering exactly that.
 
+Less than a block is possible too: a selection over the new text takes only the changes
+inside it, decided word by word, with the spaces around each word travelling with it. The
+same function, inverted, undoes only the selected part in the file.
+
+How much is pending is measured in characters, not in blocks: what is left to decide over
+what the file holds today, which is what the chancel would hold if everything were approved.
+
 A **change** is a run of blocks that differ between two runs that do not. It is one row on
 the page and one number in `km pendente` (`2`); its blocks are `2.1`, `2.2`. Headings
 do not cut anything: they are blocks like the rest, and label the change they sit in.

@@ -339,15 +339,18 @@ def estado(root: Path, by: str = "", base: str | None = None,
     """
     hoje = date.today().isoformat()
     docs = []
+    soma_pend = soma_total = 0
     for rel in ch.documentos(root):
         s = ch.situacao(root, rel, hoje, base=base)
         if not s.depois.strip():
             continue
         cheio = rel == arquivo
+        pend, total = cli._pct(s)
+        soma_pend, soma_total = soma_pend + pend, soma_total + total
         d = {"file": rel, "rastreado": s.tem_chancela, "cheio": cheio,
-             "mudancas": len(s.mudancas), "blocos": len(s.unidades),
+             "pendente": bool(s.mudancas), "pct": ch.percentual(pend, total),
              "bloqueado": any(u.bloqueio for u in s.unidades),
-             "vencidas": len(s.vencidas), "linhas": len(s.depois.splitlines())}
+             "vencidas": len(s.vencidas)}
         if cheio:
             d["em"] = _ultima(root, rel)
             d["segmentos"] = segmentos(s)
@@ -355,7 +358,8 @@ def estado(root: Path, by: str = "", base: str | None = None,
         docs.append(d)
     docs.sort(key=lambda d: (not d["rastreado"], d["file"]))
     return {"repo": root.name, "root": str(root), "docs": docs, "hoje": hoje, "by": by,
-            "base": base or ch.REF, "revisoes": ch.revisoes(root)}
+            "base": base or ch.REF, "revisoes": ch.revisoes(root),
+            "pct": ch.percentual(soma_pend, soma_total) if soma_pend else ""}
 
 
 # ---- the actions ---------------------------------------------------------------------
@@ -386,16 +390,23 @@ def agir(root: Path, pedido: dict, by: str) -> dict:
                     "conflito": {"atual": e.atual}}
         return {"ok": True, "msg": "salvo no arquivo"}
 
+    # Uma seleção vem como {sha, ini, fim}: só as mudanças dentro daquele pedaço do texto
+    # novo daquele bloco. É o "aceitar metade do hunk" de uma revisão de código.
+    selecao = pedido.get("parciais") or []
     try:
-        s, alvos = _unidades(root, rel, pedido.get("shas") or [])
+        s, alvos = _unidades(root, rel, (pedido.get("shas") or []) + [x["sha"] for x in selecao])
     except LookupError as e:
         return {"ok": False, "erro": str(e)}
     if not alvos:
         return {"ok": False, "erro": "nada escolhido"}
+    por_sha = {u.sha: u for u in alvos}
+    parciais = {por_sha[x["sha"]].id: (int(x["ini"]), int(x["fim"])) for x in selecao}
+    inteiras = [u for u in alvos if u.id not in parciais]
 
     if acao == "reverter":
-        cli.reverter(root, rel, alvos, s)
-        return {"ok": True, "msg": f"{len(alvos)} bloco(s) de volta ao texto chancelado"}
+        cli.reverter(root, rel, inteiras, s, parciais)
+        return {"ok": True, "msg": "de volta ao texto chancelado"
+                + (" — só a parte selecionada" if parciais else "")}
 
     if acao == "validar":
         # O ❓ entra logo depois do último bloco escolhido, como bloco próprio, e entra na
@@ -409,15 +420,19 @@ def agir(root: Path, pedido: dict, by: str) -> dict:
         s = ch.situacao(root, rel)
         alvos = [u for u in s.unidades
                  if u.sha in shas or (u.depois and u.depois.texto == marca)]
+        inteiras, parciais = alvos, {}
         acao = "aprovar"
 
     if acao == "aprovar":
         barradas = [u for u in alvos if u.bloqueio]
         if barradas and not pedido.get("force"):
             return {"ok": False, "erro": "🚫 " + barradas[0].bloqueio.lstrip("> ")}
-        commit = cli.chancelar(root, rel, alvos, s, pedido.get("motivo"), by)
-        saiu = sum(len(u.sumidas) for u in alvos)
-        msg = f"{len(alvos)} bloco(s) na chancela ({commit[:8]})"
+        commit = cli.chancelar(root, rel, inteiras, s, pedido.get("motivo"), by, parciais)
+        saiu = sum(len(u.sumidas) for u in inteiras)
+        depois = ch.situacao(root, rel)
+        msg = (f"na chancela ({commit[:8]})" + (" — só a parte selecionada" if parciais else "")
+               + (f" · falta {ch.percentual(*cli._pct(depois))} deste arquivo"
+                  if depois.mudancas else " · arquivo em dia"))
         if saiu:
             msg += f" · {saiu} ressalva(s) removida(s) aprovada(s) junto"
         return {"ok": True, "msg": msg}
@@ -609,6 +624,17 @@ border:1px solid var(--rule);background:var(--bg);color:var(--ink)}
 .cab-m .nota{flex-basis:100%;margin:2px 0 0}
 .cab-m .form{flex-direction:row;flex-wrap:wrap;align-items:center}
 .col.base.novo,.col.agora.sumiu{background:color-mix(in srgb,var(--bg) 70%,#000)}
+.inicio-m{border-top:2px solid color-mix(in srgb,var(--ace) 55%,transparent)}
+.foco-m{box-shadow:inset 0 2px 0 var(--acc)}
+.acoes .par2{display:flex;gap:4px}.acoes .par2 button{flex:1;padding:4px 6px;font-size:12px}
+.acoes .tudo{display:flex;flex-direction:column;gap:4px;padding-bottom:8px;margin-bottom:6px;
+border-bottom:1px dashed var(--rule)}
+#selecao{position:fixed;z-index:20;display:flex;gap:6px;padding:5px;border-radius:8px;
+background:var(--card);border:1px solid var(--acc);box-shadow:0 6px 24px #0008}
+#selecao[hidden]{display:none}
+#selecao button{font:inherit;font-size:12.5px;padding:4px 11px;border-radius:6px;cursor:pointer;
+border:1px solid var(--rule);background:var(--bg);color:var(--ink)}
+#selecao button.pri{background:var(--ok-bg);border-color:var(--ok-bg);color:var(--ok)}
 .dobra{grid-column:1 / 4;padding:4px 14px;color:var(--mut);font-size:11.5px;cursor:pointer;
 font-family:ui-monospace,Menlo,monospace;border-bottom:1px solid var(--rule)}
 .dobra:hover{color:var(--ink)}
@@ -629,6 +655,10 @@ font-family:ui-monospace,Menlo,monospace;border-bottom:1px solid var(--rule)}
   <button onclick="setVer('mudou')" id="v-mudou">só as mudanças</button>
 </div></div>
 <div class="recado" id="recado" hidden></div>
+<div id="selecao" hidden>
+  <button class="pri" onmousedown="event.preventDefault()" onclick="naSelecao('aprovar')">Aprovar seleção</button>
+  <button onmousedown="event.preventDefault()" onclick="naSelecao('reverter')">Reverter seleção</button>
+</div>
 <div class="corpo"><nav class="lado" id="lado"></nav><main class="doc" id="doc"></main></div>
 <script>
 const $ = (id) => document.getElementById(id);
@@ -650,7 +680,13 @@ const naChancela = () => !D || D.base === 'refs/km/chancela';
 // marcar como editado um pedaço em que você só clicou.
 const mesmo = (a, b) => (a||'').replace(/\\s+$/, '') === (b||'').replace(/\\s+$/, '');
 
+let carregando = false;
 async function carregar(arquivo){
+  if (carregando && !arquivo) return;   // um pedido de cada vez: não empilhar recargas
+  carregando = true;
+  try { return await _carregar(arquivo); } finally { carregando = false; }
+}
+async function _carregar(arquivo){
   // Só o documento aberto vem com o texto; o resto é a régua lateral.
   const q = new URLSearchParams();
   if (base) q.set('base', base);
@@ -660,7 +696,7 @@ async function carregar(arquivo){
   base = nova.base;
   const i = nova.docs.findIndex(d => d.file === alvo);
   D = nova; doc = i >= 0 ? i : 0;
-  if (D.docs[doc] && !D.docs[doc].cheio) return carregar(D.docs[doc].file);
+  if (D.docs[doc] && !D.docs[doc].cheio) return _carregar(D.docs[doc].file);
   desenhar();
 }
 
@@ -688,9 +724,8 @@ function lado(){
     let antes = '';
     if (!d.rastreado && !divisor) { divisor = true;
       antes = '<div class="rot" style="padding:11px 8px 5px">sem chancela ainda</div>'; }
-    const estado = !d.rastreado ? `${d.blocos} blocos`
-      : (d.mudancas ? `${d.mudancas} mudança${d.mudancas>1?'s':''} · ${d.blocos} bloco${d.blocos>1?'s':''}` : 'em dia');
-    const cor = !d.rastreado ? 'var(--rule)' : (d.bloqueado ? 'var(--neg)' : (d.mudancas ? 'var(--ace)' : 'var(--ok)'));
+    const estado = !d.rastreado ? 'sem chancela' : (d.pendente ? `${d.pct} a aprovar` : 'em dia');
+    const cor = !d.rastreado ? 'var(--rule)' : (d.bloqueado ? 'var(--neg)' : (d.pendente ? 'var(--ace)' : 'var(--ok)'));
     return antes + `<button aria-current="${i===doc}" onclick="abrir(${i})">
       <div class="f">${esc(d.file)}</div>
       <div class="q"><i class="bolinha" style="background:${cor}"></i>${estado}${d.vencidas?' · ❓ vencida':''}</div></button>`;
@@ -763,39 +798,40 @@ function acoesDoBloco(u){
   const marcas = u.tipo === 'sumiu' ? '' : `<div class="marcas">
       <button onclick="marcaNoBloco('${chave}','⚠️')" title="ressalva: sem certeza">⚠️</button>
       <button onclick="marcaNoBloco('${chave}','🚫')" title="discordo — bloqueia a chancela">🚫</button></div>`;
-  return `<span class="chip ${u.tipo==='sumiu'?'e-negado':(u.tipo==='novo'?'e-aprovado':'e-mexido')}">${u.id} · ${TIPO[u.tipo]}</span>
+  return `<span class="chip ${u.tipo==='sumiu'?'e-negado':(u.tipo==='novo'?'e-aprovado':'e-mexido')}">${TIPO[u.tipo]}</span>
     <button class="pri" ${trava} onclick="aprovar(['${u.sha}'])">${u.tipo==='sumiu'?'Aprovar a remoção':'Aprovar'}</button>
-    <button onclick="abrirForm('${chave}','validar',['${u.sha}'])">A validar…</button>
-    <button onclick="abrirForm('${chave}','reverter',['${u.sha}'])">${u.tipo==='sumiu'?'Trazer de volta':'Reverter'}</button>
+    <div class="par2">
+      <button onclick="abrirForm('${chave}','validar',['${u.sha}'])">A validar…</button>
+      <button onclick="abrirForm('${chave}','reverter',['${u.sha}'])">${u.tipo==='sumiu'?'Trazer de volta':'Reverter'}</button></div>
     ${marcas}`;
 }
 
-function cabecaDaMudanca(m){
-  const shas = m.unidades.map(u => u.sha);
-  const k = m.unidades.length;
+function acoesDaMudanca(m){
+  if (m.unidades.length < 2 || !naChancela()) return '';
+  const shas = esc(JSON.stringify(m.unidades.map(u => u.sha)));
   const chave = 'm:' + m.n;
-  let notas = '';
-  for (const s of (m.sumidas||[])) notas += `<div class="nota"><b>ressalva removida</b> — ${neg(s.replace(/^\\s*>\\s*/,''))}
-    <span class="q">· estava na chancela; aprovar o bloco aprova a remoção</span></div>`;
-  if (m.bloqueio) notas += `<div class="nota"><b>🚫 bloqueado</b> — ${neg(m.bloqueio.replace(/^\\s*>\\s*/,''))}</div>`;
-  const botoes = !naChancela() ? '' : (form && form.chave === chave ? formulario(chave, shas) : `
-    <button class="pri" ${m.bloqueio?'disabled':''} onclick="aprovar(${esc(JSON.stringify(shas))})">Aprovar ${k>1?'os '+k+' blocos':'o bloco'}</button>
-    <button onclick="abrirForm('${chave}','reverter',${esc(JSON.stringify(shas))})">Reverter ${k>1?'tudo':''}</button>`);
-  return `<div class="cab-m ${foco===chave?'foco':''}" id="m${m.n}" data-n="${m.n}">
-    <span class="rot">mudança ${m.n}</span>
-    <span class="titulo-m">${esc(m.titulo || '(início do arquivo)')}</span>
-    <span class="q">${k} bloco${k>1?'s':''}</span>
-    <span class="botoes-m">${botoes}</span>${notas}</div>`;
+  if (form && form.chave === chave) return formulario(chave, m.unidades.map(u => u.sha));
+  return `<div class="tudo">
+    <button class="pri" ${m.bloqueio?'disabled':''} onclick="aprovar(${shas})">Aprovar tudo</button>
+    <button onclick="abrirForm('${chave}','reverter',${shas})">Reverter tudo</button></div>`;
+}
+
+function avisosDoBloco(u){
+  let out = '';
+  for (const s of (u.sumidas||[])) out += `<div class="nota"><b>ressalva removida</b> — ${neg(s.replace(/^\\s*>\\s*/,''))}
+    <div class="q">estava na chancela; aprovar aqui aprova a remoção</div></div>`;
+  if (u.bloqueio) out += `<div class="nota"><b>🚫 bloqueado</b> — ${neg(u.bloqueio.replace(/^\\s*>\\s*/,''))}</div>`;
+  return out;
 }
 
 // ---- o documento ----------------------------------------------------------------
 function desenhar(){
   if (!D) return;
   $('repo').textContent = D.repo;
-  const em = D.docs.filter(d => d.rastreado && !d.mudancas).length;
-  const mud = D.docs.reduce((a,d)=>a+(d.rastreado?d.mudancas:0),0);
+  const em = D.docs.filter(d => d.rastreado && !d.pendente).length;
   const sem = D.docs.filter(d => !d.rastreado).length;
-  $('resumo').textContent = `${D.docs.length} arquivos · ${em} em dia · ${mud} mudanças pendentes · ${sem} sem chancela`;
+  $('resumo').textContent = `${D.docs.length} arquivos · ${em} em dia · `
+    + (D.pct ? `${D.pct} do conteúdo a aprovar` : 'nada a aprovar') + (sem ? ` · ${sem} sem chancela` : '');
   const r = $('recado'); r.hidden = !recado; r.textContent = recado;
   r.className = 'recado' + (recado.startsWith('✕') ? ' ruim' : '');
   $('base').innerHTML = D.revisoes.map(v =>
@@ -822,15 +858,16 @@ function desenhar(){
         <div class="col acoes">${salvarCel(chave)}</div>`;
       continue;
     }
-    html += cabecaDaMudanca(s);
-    for (const u of s.unidades){
+    s.unidades.forEach((u, k) => {
       const chave = 'u:' + u.sha;
-      html += `<div class="col base ${u.tipo}"><div class="txt">${coluna(u.linhas, 'esq')}</div></div>
-        <div class="col agora ${u.tipo}">${u.tipo === 'sumiu'
+      const inicio = k === 0 ? ` inicio-m${foco === 'm:' + s.n ? ' foco-m' : ''}` : '';
+      const ancora = k === 0 ? ` id="m${s.n}"` : '';
+      html += `<div class="col base ${u.tipo}${inicio}"${ancora}><div class="txt">${coluna(u.linhas, 'esq')}</div></div>
+        <div class="col agora ${u.tipo}${inicio}">${avisosDoBloco(u)}${u.tipo === 'sumiu'
           ? '<div class="vaziocol">— saiu do arquivo —</div>'
           : editavel(chave, u.linha, u.texto, coluna(u.linhas, 'dir'))}</div>
-        <div class="col acoes">${acoesDoBloco(u)}</div>`;
-    }
+        <div class="col acoes${inicio}">${k === 0 ? acoesDaMudanca(s) : ''}${acoesDoBloco(u)}</div>`;
+    });
   }
   $('doc').innerHTML = html;
   const campo = $('f-texto');
@@ -901,6 +938,67 @@ function marcaNoBloco(chave, marca){
   const s = getSelection(); s.removeAllRanges(); s.addRange(r);
   inserir(el, marca);
 }
+// ---- aprovar parte de um bloco ----------------------------------------------------
+// Como aceitar metade de um hunk numa revisão de código: selecione, na coluna do texto
+// de hoje, o pedaço cuja mudança você aceita. O resto do bloco continua pendente.
+function deslocamento(el, no, off){
+  // posição no texto do bloco (o mesmo texto que o servidor tem), pulando as fantasmas
+  if (no === el) {
+    let total = 0, primeiro = true;
+    for (const f of [...el.childNodes].slice(0, off)) {
+      if (f.nodeType === 1 && f.hasAttribute('data-g')) continue;
+      if (!primeiro) total += 1; primeiro = false;
+      total += (f.nodeType === 1 ? f.innerText : f.textContent).length;
+    }
+    return total;
+  }
+  let total = 0, primeiro = true;
+  for (const f of el.childNodes) {
+    if (f.nodeType === 1 && f.hasAttribute('data-g')) continue;
+    if (!primeiro) total += 1; primeiro = false;
+    if (f === no || f.contains(no)) {
+      const r = document.createRange(); r.selectNodeContents(f); r.setEnd(no, off);
+      return total + r.toString().length;
+    }
+    total += (f.nodeType === 1 ? f.innerText : f.textContent).length;
+  }
+  return total;
+}
+function selecaoAtual(){
+  const s = getSelection();
+  if (!s || s.isCollapsed || !s.rangeCount || !naChancela()) return null;
+  const r = s.getRangeAt(0);
+  const host = n => (n.nodeType === 1 ? n : n.parentElement)?.closest('.txt.edit[data-chave^="u:"]');
+  const a = host(r.startContainer), b = host(r.endContainer);
+  if (!a || !b) return null;
+  const todos = [...document.querySelectorAll('.txt.edit[data-chave^="u:"]')];
+  const ia = todos.indexOf(a), ib = todos.indexOf(b);
+  const partes = [];
+  for (let k = ia; k <= ib; k++) {
+    const el = todos[k], chave = el.dataset.chave;
+    if (sujos[chave] !== undefined) return {erro: 'salve ou descarte a edição deste bloco antes de aprovar parte dele'};
+    const texto = originais[chave] || '';
+    partes.push({sha: chave.slice(2),
+                 ini: k === ia ? deslocamento(el, r.startContainer, r.startOffset) : 0,
+                 fim: k === ib ? deslocamento(el, r.endContainer, r.endOffset) : texto.length});
+  }
+  return {partes, rect: r.getBoundingClientRect()};
+}
+document.addEventListener('selectionchange', () => {
+  const barra = $('selecao'), sel = selecaoAtual();
+  if (!sel || sel.erro) { barra.hidden = true; return; }
+  barra.hidden = false;
+  barra.style.top = Math.max(50, sel.rect.top - 40) + 'px';
+  barra.style.left = Math.min(innerWidth - 300, Math.max(10, sel.rect.left)) + 'px';
+});
+function naSelecao(acao){
+  const sel = selecaoAtual();
+  if (!sel) return;
+  if (sel.erro) { recado = '✕ ' + sel.erro; return desenhar(); }
+  $('selecao').hidden = true;
+  agir({acao, parciais: sel.partes});
+}
+
 function setVer(v){ ver = v; desenhar(); }
 function trocarBase(){ base = $('base').value; carregar(); }
 
@@ -920,7 +1018,7 @@ document.addEventListener('keydown', (e)=>{
   if (!ms.length) return;
   const atual = foco && foco.startsWith('m:') ? Number(foco.slice(2)) : 0;
   const pos = ms.findIndex(m => m.n === atual);
-  const ir = (m) => { foco = 'm:' + m.n; desenhar(); $('m' + m.n)?.scrollIntoView({block:'start'}); };
+  const ir = (m) => { foco = 'm:' + m.n; desenhar(); $('m' + m.n)?.scrollIntoView({block:'center'}); };
   if (e.key === 'j') ir(ms[Math.min(pos + 1, ms.length - 1)]);
   else if (e.key === 'k') ir(ms[Math.max(pos - 1, 0)]);
   else if (e.key === 'a' && pos >= 0 && naChancela()) aprovar(ms[pos].unidades.map(u => u.sha));

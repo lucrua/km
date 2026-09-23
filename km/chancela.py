@@ -369,6 +369,22 @@ class Mudanca:
                 sum(1 for u in self.unidades if u.depois))
 
 
+def _parecido(a: str, b: str, piso: float) -> float:
+    """How alike two blocks are, cheaply: the upper bounds first, and line by line when
+    the blocks are large — a table compared character by character costs seconds."""
+    if max(len(a), len(b)) <= 2000:
+        sm = SequenceMatcher(None, a, b, autojunk=False)
+    elif min(a.count("\n"), b.count("\n")) >= 10:
+        # muitas linhas — uma tabela: compara linha a linha
+        sm = SequenceMatcher(None, a.splitlines(), b.splitlines(), autojunk=False)
+    else:
+        # um parágrafo longo numa linha só: palavra a palavra, que é barato e diz o certo
+        sm = SequenceMatcher(None, PALAVRA.findall(a), PALAVRA.findall(b))
+    if sm.real_quick_ratio() < piso or sm.quick_ratio() < piso:
+        return 0.0
+    return sm.ratio()
+
+
 def _parear(velhos: list[Bloco], novos: list[Bloco], corte: float = 0.45) -> list[tuple]:
     """Which old block became which new one, in reading order.
 
@@ -384,7 +400,7 @@ def _parear(velhos: list[Bloco], novos: list[Bloco], corte: float = 0.45) -> lis
             # começam com a mesma palavra é um que saiu e outro que entrou.
             if i in usados or vb.tipo != nb.tipo:
                 continue
-            r = SequenceMatcher(None, vb.texto, nb.texto).ratio()
+            r = _parecido(vb.texto, nb.texto, nota)
             if r >= nota:
                 melhor, nota = i, r
         if melhor is not None:
@@ -450,7 +466,8 @@ def mudancas(antes: str, depois: str) -> list[Mudanca]:
     return out
 
 
-def aplicar(antes: str, depois: str, escolhidas: set[str]) -> str:
+def aplicar(antes: str, depois: str, escolhidas: set[str],
+            parciais: dict[str, tuple[int, int, bool]] | None = None) -> str:
     """The chancel you had, plus the blocks you accepted. `git add -p`, by block.
 
     `escolhidas` holds unit ids ("2.1") or whole changes ("2"). Unchanged blocks and
@@ -466,7 +483,17 @@ def aplicar(antes: str, depois: str, escolhidas: set[str]) -> str:
             continue
         n += 1
         for k, (tipo, vb, nb) in enumerate(_parear(ba[i1:i2], bd[j1:j2]), start=1):
-            aceita = f"{n}.{k}" in escolhidas or str(n) in escolhidas
+            uid = f"{n}.{k}"
+            if parciais and uid in parciais and nb is not None:
+                # Parte de um bloco: só as mudanças dentro da seleção — aceitas, se é a
+                # chancela que se escreve; desfeitas, se é o arquivo.
+                ini, fim, aceitar = parciais[uid]
+                texto = mesclar(vb.texto if vb else "", nb.texto, ini, fim, aceitar)
+                if texto.strip():
+                    resto = nb.cru[len(nb.texto):] if nb.cru.startswith(nb.texto) else "\n"
+                    partes.append(texto + resto)
+                continue
+            aceita = uid in escolhidas or str(n) in escolhidas
             escolhido = nb if aceita else vb
             if escolhido is not None:
                 partes.append(escolhido.cru)
@@ -476,6 +503,118 @@ def aplicar(antes: str, depois: str, escolhidas: set[str]) -> str:
             texto += "\n"           # nunca colar duas linhas ao misturar os dois lados
         texto += p
     return texto
+
+
+PALAVRA = re.compile(r"\d{4}-\d{2}-\d{2}|\s+|\w+|[^\w\s]")
+
+
+def mesclar(a: str, b: str, ini: int, fim: int, aceitar: bool = True) -> str:
+    """Take part of an edit: the changes that fall inside [ini, fim) of the new text.
+
+    Like staging half a hunk in a code review, at the grain of a word — a selection that
+    touches part of a word takes the whole word, because a word half-changed is not a
+    sentence anyone wrote. With `aceitar`, the selected changes are applied to the old
+    text (what goes into the chancel); without it, they are undone in the new text (what
+    goes back into the file).
+    """
+    pa, pb = PALAVRA.findall(a), PALAVRA.findall(b)
+    out, pos = [], 0
+    for tag, i1, i2, j1, j2 in SequenceMatcher(None, pa, pb, autojunk=False).get_opcodes():
+        ta = "".join(pa[i1:i2])
+        if tag == "equal":
+            tb = "".join(pb[j1:j2])
+            out.append(tb)
+            pos += len(tb)
+            continue
+        if j1 == j2:                                    # só saiu: decide pela posição
+            dentro = ini <= pos <= fim
+            out.append("" if dentro == aceitar else ta)
+            continue
+        # Uma troca é decidida palavra a palavra: o que saiu vai junto com a primeira palavra
+        # que entrou no lugar, e cada palavra seguinte é uma inclusão por si. Sem isso,
+        # "horas úteis" → "dias corridos, sempre" seria uma peça só, e aceitar "dias
+        # corridos" levaria ", sempre" junto.
+        for k, grupo in enumerate(_grupos(pb[j1:j2])):
+            dentro = pos < fim and pos + len(grupo) > ini
+            if k == 0:
+                out.append(grupo if dentro == aceitar else ta)
+            else:
+                out.append(grupo if dentro == aceitar else "")
+            pos += len(grupo)
+    return "".join(out)
+
+
+def _grupos(tokens: list[str]) -> list[str]:
+    """Words with the spaces around them: a space is never decided on its own, or taking
+    "vigente" would leave "vigentedo" behind."""
+    grupos: list[str] = []
+    for tok in tokens:
+        if tok.isspace() and grupos and not grupos[-1].isspace():
+            grupos[-1] += tok
+        elif grupos and grupos[-1].isspace():
+            grupos[-1] += tok
+        else:
+            grupos.append(tok)
+    return grupos
+
+
+def _conta(texto: str) -> int:
+    return sum(1 for c in texto if not c.isspace())
+
+
+def pendencia(antes: str, depois: str, ms: list["Mudanca"] | None = None) -> tuple[int, int]:
+    """How much of the file still needs you: (characters to decide, characters in the file).
+
+    Counted in characters that changed, not in blocks or changes — a one-word fix and a new
+    section are not "one change" each. The denominator is the file as it is today, which is
+    what the chancel would hold if everything were approved. Whitespace does not count.
+    """
+    ms = ms if ms is not None else mudancas(antes, depois)
+    pend = 0
+    for u in (u for m in ms for u in m.unidades):
+        if u.tipo == "novo":
+            pend += _conta(u.depois.texto)
+        elif u.tipo == "sumiu":
+            pend += _conta(u.antes.texto)
+        else:
+            pend += _mudou(u.antes.texto, u.depois.texto)
+    return pend, _conta(depois)
+
+
+def _mudou(a: str, b: str) -> int:
+    """Characters that differ between two versions of one block.
+
+    Line first, then words inside the lines that changed: a table is one block, and
+    comparing a thousand-row table word by word is quadratic — it took the page from half a
+    second to twenty.
+    """
+    la, lb = a.splitlines(), b.splitlines()
+    total = 0
+    for tag, i1, i2, j1, j2 in SequenceMatcher(None, la, lb, autojunk=False).get_opcodes():
+        if tag == "equal":
+            continue
+        va, vb = "\n".join(la[i1:i2]), "\n".join(lb[j1:j2])
+        if tag != "replace":
+            total += _conta(va) + _conta(vb)
+            continue
+        pa, pb = PALAVRA.findall(va), PALAVRA.findall(vb)
+        # Em textos longos, o espaço e a vírgula são "populares" e o difflib os põe de lado
+        # (autojunk) — para contar o que mudou isso não altera nada e evita o custo quadrático.
+        for t2, x1, x2, y1, y2 in SequenceMatcher(None, pa, pb,
+                                                  autojunk=len(pa) + len(pb) > 400).get_opcodes():
+            if t2 != "equal":
+                total += _conta("".join(pa[x1:x2])) + _conta("".join(pb[y1:y2]))
+    return total
+
+
+def percentual(pend: int, total: int) -> str:
+    """"12%", or "<1%" — a file with something to decide never reads as 0%."""
+    if not pend:
+        return "0%"
+    if not total:
+        return "100%"
+    v = min(100.0, 100.0 * pend / total)
+    return "<1%" if v < 1 else f"{v:.0f}%"
 
 
 def unidades_por_sha(ms: list[Mudanca], shas: set[str]) -> list[Unidade]:
@@ -569,44 +708,6 @@ def situacao(root: Path, rel: str, hoje: str | None = None,
     return Situacao(arquivo=rel, tem_chancela=antes is not None, antes=antes or "",
                     depois=depois, mudancas=mudancas(antes or "", depois),
                     vencidas=vencidas(depois, hoje))
-
-
-def estados(s: Situacao) -> list[dict]:
-    """Passage by passage, for a review surface: what stands, what moved, what is new.
-
-    Compared by heading path against the chancelled copy, at read time. Nothing is stored
-    per passage; the path is recomputed on both sides, exactly as `git log -L` delimits.
-    """
-    novos = trechos(s.depois)
-    velhos: dict[str, list[Trecho]] = {}
-    for t in trechos(s.antes) if s.tem_chancela else []:
-        velhos.setdefault(t.caminho, []).append(t)
-    vistos: dict[str, int] = {}
-
-    out = []
-    for t in novos:
-        i = vistos.get(t.caminho, 0)
-        vistos[t.caminho] = i + 1
-        iguais = velhos.get(t.caminho, [])
-        antigo = iguais[i] if i < len(iguais) else (iguais[0] if iguais else None)
-        if not s.tem_chancela or antigo is None:
-            estado = "sem chancela"
-        elif antigo.texto.strip() == t.texto.strip():
-            estado = "com chancela"
-        else:
-            estado = "mexido"
-        meus = [m for m in s.mudancas
-                if m.linha <= t.fim - 1 and max(m.fim, m.linha + 1) > t.linha]
-        out.append({
-            "file": s.arquivo, "heading": t.titulo, "path": t.caminho,
-            "line": t.linha, "lines": t.linhas, "state": estado,
-            "hunks": [m.n for m in meus],
-            "blocked": bloqueio_de(t.texto),
-            "caveats": [{"mark": m, "line": t.linha + n - 1, "text": l}
-                        for n, m, l in ressalvas(t.texto)],
-            "dropped": [l for m in meus for l in m.sumidas],
-        })
-    return out
 
 
 # ---- which files ---------------------------------------------------------------------

@@ -32,9 +32,15 @@ where it happened, in three columns:
 | **now** | the file today, with what arrived marked in place. Editable, like everything else in this column |
 | **what to do** | a verdict per block, and one for the whole change |
 
-**The unit you approve is a Markdown block** — a paragraph, a list item, a table, a heading,
-a quote, a code fence. An edit inside a paragraph is the whole paragraph; nobody needs to
-approve half of one. A change can be approved whole, or block by block.
+**The everyday unit is a Markdown block** — a paragraph, a list item, a table, a heading, a
+quote, a code fence — and a change can be approved whole or block by block. When you need
+less than a block, **select part of the text** in the second column: a bar offers *Aprovar
+seleção* and *Reverter seleção*, and only the changes inside the selection are taken — like
+staging half a hunk in a code review. A selection that touches part of a word takes the word.
+
+How much is left is a **percentage of the content**: the characters still to decide over the
+characters the file would have if everything were approved. Not a count of blocks or
+changes — a one-word fix and a new section are not "one" each.
 
 The middle column is Markdown **source**, highlighted, with the change marked the way a
 tracked-changes document does it, in the spirit of [pandiff](https://github.com/davidar/pandiff).

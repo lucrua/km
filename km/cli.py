@@ -98,14 +98,25 @@ def cmd_init(args) -> int:
     return 0
 
 
+def _pct(s: ch.Situacao) -> tuple[int, int]:
+    """(characters to decide, characters in the file). A file never chancelled is all of it."""
+    if not s.tem_chancela:
+        n = ch._conta(s.depois)
+        return n, n
+    return ch.pendencia(s.antes, s.depois, s.mudancas)
+
+
 def _resumo(situacoes: list[ch.Situacao]) -> str:
     em_dia = sum(1 for s in situacoes if s.em_dia)
-    mexidos = sum(len(s.mudancas) for s in situacoes if s.tem_chancela)
     nunca = sum(1 for s in situacoes if not s.tem_chancela)
     vencidas = sum(len(s.vencidas) for s in situacoes)
+    pend = total = 0
+    for s in situacoes:
+        a, b = _pct(s)
+        pend, total = pend + a, total + b
     bits = [f"{em_dia} arquivo(s) em dia com a chancela"]
-    if mexidos:
-        bits.append(f"{mexidos} mudança(s) pendente(s)")
+    if pend:
+        bits.append(f"{ch.percentual(pend, total)} do conteúdo a aprovar")
     if nunca:
         bits.append(f"{nunca} sem chancela")
     if vencidas:
@@ -127,7 +138,20 @@ def cmd_pendente(args) -> int:
     situacoes = [ch.situacao(root, rel, hoje) for rel in alvos]
 
     if args.json:
-        print(json.dumps([e for s in situacoes for e in ch.estados(s)], ensure_ascii=False))
+        # For the editor: where the pending changes are, and how much of the file they are.
+        # No per-heading states and no counts — the unit is the change, the measure is %.
+        saida = []
+        for s in situacoes:
+            pend, total = _pct(s)
+            saida.append({
+                "file": s.arquivo, "tem_chancela": s.tem_chancela,
+                "pct": ch.percentual(pend, total), "pendente": bool(s.mudancas),
+                "mudancas": [{"n": m.n, "titulo": m.titulo, "linha": m.linha,
+                              "fim": max(m.fim, m.linha + 1), "bloqueio": m.bloqueio,
+                              "sumidas": m.sumidas} for m in s.mudancas],
+                "vencidas": [{"linha": l, "prazo": p, "texto": x} for l, p, x in s.vencidas],
+            })
+        print(json.dumps(saida, ensure_ascii=False))
         return 0
     if args.short:
         print("km: " + _resumo(situacoes))
@@ -135,15 +159,13 @@ def cmd_pendente(args) -> int:
 
     total = 0
     for s in (x for x in situacoes if x.tem_chancela and x.mudancas):
-        # Numbers are the file's own: `km chancela <arquivo> --hunk 2` takes change 2,
-        # `--hunk 2.1` only its first block. A numbering across files would need a sidecar
-        # to be resolved again, and a sidecar is what this design removed.
-        print(f"\n{s.arquivo}")
+        # Numbers are addresses, not a score: `--hunk 2` takes change 2, `--hunk 2.1` only
+        # its first block. How much is left is the percentage, in characters.
+        print(f"\n{s.arquivo}  ·  {ch.percentual(*_pct(s))} a aprovar")
         for m in s.mudancas:
             total += 1
-            menos, mais = m.contagem()
             sinal = "🚫" if m.bloqueio else ("⚠️" if m.sumidas else "  ")
-            print(f"  {m.n:>3} {sinal} -{menos:<2} +{mais:<2} {m.titulo[:52]}")
+            print(f"  {m.n:>3} {sinal} {m.titulo[:60]}")
             for u in m.unidades:
                 print(f"       {u.id:<5} {u.tipo:<6} {u.resumo(56)}")
                 for l in u.sumidas:
@@ -204,15 +226,17 @@ def cmd_chancela(args) -> int:
         raise SystemExit("nada entrou: resolva o 🚫 (ou --force, que o deixa no texto)")
 
     commit = chancelar(root, rel, escolhidas, s, args.message, args.by)
-    print(f"{rel}  ·  {len(escolhidas)} bloco(s) na chancela  ·  {commit[:8]}")
+    print(f"{rel}  ·  na chancela  ·  {commit[:8]}")
     for u in escolhidas:
         print(f"   ✓ {u.id:<5} {u.tipo:<6} {u.resumo(50)}")
         for l in u.sumidas:
             print(f"     (a ressalva {l[:56]} saiu junto)")
     for u in barradas:
         print(f"   🚫 {u.id} {u.titulo} — ficou de fora: {u.bloqueio[:60]}")
-    resto = ch.situacao(root, rel).mudancas
-    print(f"faltam {len(resto)} mudança(s) neste arquivo")
+    depois = ch.situacao(root, rel)
+    resto = depois.mudancas
+    print(f"falta {ch.percentual(*_pct(depois))} deste arquivo" if resto
+          else "o arquivo está em dia com a chancela")
     if resto:
         # The numbers come from the diff, and the diff just moved. Acting on a number from
         # the previous listing would chancel a block you did not look at.
@@ -250,20 +274,26 @@ def _chancelar_de(root: Path, args) -> int:
     commit = ch.escrever(root, mudancas, mensagem)
     print(f"{len(mudancas)} arquivo(s) chancelados no conteúdo de {rev}  ·  {commit[:8]}")
     for rel in sorted(mudancas):
-        pendentes = len(ch.situacao(root, rel).mudancas)
-        print(f"   ✓ {rel}" + (f"  ·  {pendentes} mudança(s) desde então" if pendentes
+        s = ch.situacao(root, rel)
+        print(f"   ✓ {rel}" + (f"  ·  {ch.percentual(*_pct(s))} mudou desde então" if s.mudancas
                                else "  ·  igual ao que está no disco"))
     return 0
 
 
 def chancelar(root: Path, rel: str, escolhidas: list[ch.Unidade], s: ch.Situacao,
-              motivo: str | None, by: str) -> str:
-    """Shared by the command and the page: the ref advances in one place only."""
-    novo = ch.aplicar(s.antes, s.depois, {u.id for u in escolhidas})
+              motivo: str | None, by: str,
+              parciais: dict[str, tuple[int, int]] | None = None) -> str:
+    """Shared by the command and the page: the ref advances in one place only.
+
+    `parciais` maps a block id to the part of its new text you selected: only the changes
+    inside it enter the chancel.
+    """
+    parc = {k: (a, b, True) for k, (a, b) in (parciais or {}).items()}
+    novo = ch.aplicar(s.antes, s.depois, {u.id for u in escolhidas}, parc)
     titulos = ", ".join(dict.fromkeys(u.titulo for u in escolhidas if u.titulo))
-    inteiro = len(escolhidas) == len(s.unidades)
+    inteiro = not parc and len(escolhidas) == len(s.unidades)
     cabeca = (f"chancela: {rel} · arquivo inteiro" if inteiro
-              else f"chancela: {rel} · {len(escolhidas)} bloco(s)")
+              else f"chancela: {rel}" + (" · parte de um bloco" if parc else ""))
     mensagem = f"{cabeca}\n\n{titulos}\n"
     if motivo:
         mensagem += f"\n{motivo}\n"
@@ -286,7 +316,7 @@ def cmd_restore(args) -> int:
     if not alvos:
         raise SystemExit("diga o que volta: --hunk <n|n.m|título> ou --all")
     reverter(root, rel, alvos, s)
-    print(f"{rel}  ·  {len(alvos)} bloco(s) de volta ao texto chancelado")
+    print(f"{rel}  ·  de volta ao texto chancelado")
     for u in alvos:
         print(f"   ↩ {u.id:<5} {u.resumo(56)}")
     if args.message:
@@ -294,9 +324,12 @@ def cmd_restore(args) -> int:
     return 0
 
 
-def reverter(root: Path, rel: str, alvos: list[ch.Unidade], s: ch.Situacao) -> None:
+def reverter(root: Path, rel: str, alvos: list[ch.Unidade], s: ch.Situacao,
+             parciais: dict[str, tuple[int, int]] | None = None) -> None:
+    """Undo blocks in the file — or only the part of one block you selected."""
+    parc = {k: (a, b, False) for k, (a, b) in (parciais or {}).items()}
     manter = {u.id for u in s.unidades} - {u.id for u in alvos}
-    (root / rel).write_text(ch.aplicar(s.antes, s.depois, manter), encoding="utf-8")
+    (root / rel).write_text(ch.aplicar(s.antes, s.depois, manter, parc), encoding="utf-8")
 
 
 def cmd_lint(args) -> int:
