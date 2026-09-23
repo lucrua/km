@@ -2,13 +2,14 @@
 // file's text and nothing else; the page asks them for text, dirtiness and selection.
 import { EditorView, EditorState, MergeView, keymap, history, historyKeymap, defaultKeymap,
          drawSelection } from '../vendor/cm.js';
-import { vistaViva } from './preview.js';
+import { editorMarkdown, trocarModo } from './preview.js';
 import { emPontos } from './pontos.js';
 
 const vivos = new Map();
+let codigo = false;                    // o modo da página: Formatado ou Código
 
 function extensoes(editavel, aoMudar, aoSelecionar) {
-  const ext = [vistaViva({ editavel }), drawSelection()];
+  const ext = [editorMarkdown({ editavel, codigo }), drawSelection()];
   if (editavel) {
     ext.push(history(), keymap.of([...defaultKeymap, ...historyKeymap]),
       EditorView.updateListener.of((u) => {
@@ -24,7 +25,7 @@ export function destruirTodos() { for (const v of vivos.values()) v.destruir(); 
 export function editorSimples(lugar, chave, texto, editavel, aoMudar, aoSelecionar) {
   const view = new EditorView({ parent: lugar,
     state: EditorState.create({ doc: texto, extensions: extensoes(editavel, aoMudar, aoSelecionar) }) });
-  vivos.set(chave, { view, destruir: () => view.destroy() });
+  vivos.set(chave, { view, todas: [view], destruir: () => view.destroy() });
 }
 
 export function editorMudanca(lugar, chave, antes, agora, editavel, aoMudar, aoSelecionar) {
@@ -32,7 +33,13 @@ export function editorMudanca(lugar, chave, antes, agora, editavel, aoMudar, aoS
   const mv = new MergeView({ parent: lugar, gutter: false,
     a: { doc: antes, extensions: extensoes(false) },
     b: { doc: agora, extensions: extensoes(editavel && agora !== '', aoMudar, aoSelecionar) } });
-  vivos.set(chave, { view: mv.b, destruir: () => mv.destroy() });
+  vivos.set(chave, { view: mv.b, todas: [mv.a, mv.b], destruir: () => mv.destroy() });
+}
+
+// Troca o modo de todos os editores sem refazê-los; os que nascerem depois já nascem nele.
+export function modo(emCodigo) {
+  codigo = !!emCodigo;
+  for (const v of vivos.values()) for (const view of v.todas) view.dispatch({ effects: trocarModo(view.state, codigo) });
 }
 
 export const texto = (chave) => vivos.get(chave)?.view.state.doc.toString();
@@ -69,5 +76,5 @@ export function focarFim(chave) {
   v.focus();
 }
 
-window.km = { editorSimples, editorMudanca, destruirTodos, texto, selecao, focado, inserirMarca, focarFim };
+window.km = { editorSimples, editorMudanca, destruirTodos, modo, texto, selecao, focado, inserirMarca, focarFim };
 window.dispatchEvent(new Event('km-pronto'));

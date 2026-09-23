@@ -104,6 +104,10 @@ font-family:ui-monospace,Menlo,monospace;border-bottom:1px solid var(--rule)}
 .vistas{display:flex;border:1px solid var(--rule);border-radius:7px;overflow:hidden}
 .vistas button{border:0;border-radius:0;padding:4px 12px}
 .vistas button[aria-selected=true]{background:var(--ink);color:var(--bg)}
+.modo{display:inline-flex;vertical-align:middle}
+.topo .modo button{border-radius:0}.topo .modo button+button{border-left:0}
+.topo .modo button:first-child{border-radius:6px 0 0 6px}.topo .modo button:last-child{border-radius:0 6px 6px 0}
+.topo .modo button[aria-pressed=true]{background:var(--ink);color:var(--bg)}
 .arquivos{padding:12px 18px 60px;max-width:1100px}
 .arvore{font:13px/1.5 ui-monospace,Menlo,monospace}
 .arvore .no{display:flex;gap:8px;align-items:center;padding:3px 10px;border-radius:5px;outline:0}
@@ -183,6 +187,10 @@ background:var(--ok-bg);color:var(--ok)}
   <span class="q">comparar com</span><select id="base" onchange="trocarBase()"></select>
   <button onclick="setVer('tudo')" id="v-tudo">texto inteiro</button>
   <button onclick="setVer('mudou')" id="v-mudou">só as mudanças</button>
+  <span class="modo" title="Formatado: o documento como se lê · Código: o Markdown como está no arquivo">
+    <button onmousedown="event.preventDefault()" onclick="setModo(false)" id="m-formatado">Formatado</button>
+    <button onmousedown="event.preventDefault()" onclick="setModo(true)" id="m-codigo">Código</button>
+  </span>
 </span>
 <span id="so-arquivos" hidden>
   <span class="desfazer">
@@ -494,6 +502,18 @@ function naSelecao(acao){
 }
 
 function setVer(v){ ver = v; desenhar(); }
+// Formatado ou Código, lembrado neste navegador. Trocar não refaz os editores: o cursor, o
+// Ctrl+Z e o que você digitou continuam lá.
+let codigo = false;
+try { codigo = localStorage.getItem('km-modo') === 'codigo'; } catch (e) {}
+function setModo(c){
+  codigo = c;
+  try { localStorage.setItem('km-modo', c ? 'codigo' : 'formatado'); } catch (e) {}
+  $('m-formatado').setAttribute('aria-pressed', !c);
+  $('m-codigo').setAttribute('aria-pressed', c);
+  kmPronto.then(() => km.modo(c));
+}
+setModo(codigo);
 function trocarBase(){ base = $('base').value; carregar(); }
 
 document.addEventListener('keydown', (e)=>{
