@@ -142,10 +142,13 @@ export function decorar(state, editavel) {
   arvore.iterate({ enter: (n) => {
     const nome = n.name;
     if (nome === 'Table') return false;
+    // Sem URL não é link que o preview conheça — uma nota de rodapé `[^1]`, uma referência:
+    // fica como está no arquivo, com os colchetes.
+    if (nome === 'Link' && !n.node.getChild('URL')) return false;
     const pai = n.node.parent ? n.node.parent.name : '';
     const m = /^ATXHeading(\d)$/.exec(nome);
     if (m) linha(n.from, n.to, 'cm-h cm-h' + m[1]);
-    else if (nome === 'HeaderMark' && !ativa(n.from)) esconder(n.from, depoisEspaco(n.to));
+    else if (nome === 'HeaderMark' && pai.startsWith('ATXHeading') && !ativa(n.from)) esconder(n.from, depoisEspaco(n.to));
     else if (nome === 'CodeMark' && pai === 'FencedCode') { /* cercas: tratadas em FencedCode */ }
     else if (OCULTAVEIS.has(nome) && !ativa(n.from)) esconder(n.from, n.to);
     else if (nome === 'URL' && pai === 'Link' && !ativa(n.from)) esconder(n.from, n.to);
