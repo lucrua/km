@@ -3,7 +3,7 @@
 // become coloured boxes and tables become a grid with row and column controls. All of it
 // lives in one StateField: hidden line breaks and block widgets are decorations CodeMirror
 // accepts only from the state, never from a plugin.
-import { EditorView, Decoration, WidgetType, StateField, EditorState, syntaxTree,
+import { EditorView, Decoration, WidgetType, StateField, StateEffect, EditorState, syntaxTree,
          ensureSyntaxTree, markdown, markdownLanguage, syntaxHighlighting, HighlightStyle,
          tags } from '../vendor/cm.js';
 import { quebrasOcultas } from './paragrafo.js';
@@ -85,19 +85,28 @@ class Tabela extends WidgetType {
   }
 }
 
+// O foco entra no estado: todo editor nasce com o cursor em 0, e sem isto a primeira linha
+// de cada trecho apareceria crua numa página em que ninguém clicou.
+export const mudouFoco = StateEffect.define();
+const foco = StateField.define({
+  create: () => false,
+  update: (v, tr) => { for (const e of tr.effects) if (e.is(mudouFoco)) return e.value; return v; },
+});
+
 const OCULTAVEIS = new Set(['EmphasisMark', 'CodeMark', 'LinkMark', 'StrikethroughMark']);
 
 export function decorar(state, editavel) {
   const doc = state.doc;
   const arvore = ensureSyntaxTree(state, doc.length, 500) || syntaxTree(state);
+  const ativo = editavel && state.field(foco, false) === true;
   const ativas = new Set();
-  if (editavel) {
+  if (ativo) {
     for (const r of state.selection.ranges) {
       for (let n = doc.lineAt(r.from).number; n <= doc.lineAt(r.to).number; n++) ativas.add(n);
     }
   }
   const ativa = (pos) => ativas.has(doc.lineAt(pos).number);
-  const cursor = editavel ? state.selection.main.head : -1;
+  const cursor = ativo ? state.selection.main.head : -1;
 
   // 1ª passada: parágrafos e tabelas — o que decide as linhas que se juntam ou somem.
   const paragrafos = [], tabelas = [];
@@ -113,7 +122,7 @@ export function decorar(state, editavel) {
   }
   const blocos = [];                              // faixas que viraram grade
   for (const tb of tabelas) {
-    if (editavel && cursor >= tb.from && cursor <= tb.to) continue;
+    if (ativo && cursor >= tb.from && cursor <= tb.to) continue;
     const l1 = doc.lineAt(tb.from), l2 = doc.lineAt(tb.to);
     const linhas = doc.sliceString(l1.from, l2.to).split('\n');
     deco.push(Decoration.replace({ widget: new Tabela(linhas, l1.from, editavel), block: true }).range(l1.from, l2.to));
@@ -171,7 +180,8 @@ export function decorar(state, editavel) {
 
 const campo = (editavel) => StateField.define({
   create: (s) => decorar(s, editavel),
-  update: (valor, tr) => (tr.docChanged || tr.selection ? decorar(tr.state, editavel) : valor),
+  update: (valor, tr) => (tr.docChanged || tr.selection || tr.effects.some((e) => e.is(mudouFoco))
+    ? decorar(tr.state, editavel) : valor),
   provide: (f) => EditorView.decorations.from(f),
 });
 
@@ -189,7 +199,14 @@ const estilo = HighlightStyle.define([
   { tag: tags.processingInstruction, color: 'var(--mut)' },
 ]);
 
+// Texto de documento, não de código: o CodeMirror vem com fonte monoespaçada por padrão.
+const tema = EditorView.theme({
+  '.cm-scroller': { fontFamily: 'inherit', lineHeight: '1.62' },
+  '.cm-content': { fontFamily: 'inherit' },
+});
+
 export function vistaViva({ editavel = true } = {}) {
-  return [markdown({ base: markdownLanguage }), syntaxHighlighting(estilo), campo(editavel),
-          EditorView.lineWrapping, EditorState.readOnly.of(!editavel), EditorView.editable.of(editavel)];
+  return [markdown({ base: markdownLanguage }), syntaxHighlighting(estilo), foco,
+          EditorView.focusChangeEffect.of((s, focando) => mudouFoco.of(focando)), campo(editavel),
+          tema, EditorView.lineWrapping, EditorState.readOnly.of(!editavel), EditorView.editable.of(editavel)];
 }
