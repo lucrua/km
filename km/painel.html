@@ -39,6 +39,9 @@ letter-spacing:.08em;color:var(--mut)}
 align-items:stretch}
 .cabgrade{position:sticky;top:45px;background:var(--bg);border-bottom:1px solid var(--rule);
 padding:6px 14px;z-index:4}
+.cabgrade .abrir-code{font:inherit;margin-left:8px;padding:1px 7px;border-radius:5px;cursor:pointer;
+background:transparent;border:1px solid var(--rule);color:var(--mut)}
+.cabgrade .abrir-code:hover{color:var(--acc);border-color:var(--acc)}
 .tr{display:contents}
 .col{padding:10px 14px 14px;border-bottom:1px solid var(--rule);min-width:0}
 .col.base{border-right:1px solid var(--rule);background:color-mix(in srgb,var(--bg) 55%,#000)}
@@ -397,7 +400,8 @@ function desenhar(){
     return;
   }
   let html = `<div class="cabgrade rot">${naChancela() ? 'a chancela' : esc(D.base)}</div>
-    <div class="cabgrade rot">${esc(d.file)} — agora</div>
+    <div class="cabgrade rot">${esc(d.file)} — agora<button class="abrir-code" onclick="abrirNoCode()"
+      title="abre este arquivo no VS Code — na linha da mudança em foco, se houver">abrir no VS Code</button></div>
     <div class="cabgrade rot">${naChancela() ? 'o que fazer' : 'só leitura — os botões agem na chancela'}</div>`;
   if (!segs().some(s => s.tipo === 'mudanca'))
     html += `<div class="aviso-doc">${d.rastreado ? '✓ Em dia com a chancela' + (d.em ? ' de ' + esc(d.em) : '') + '. Nada a decidir neste arquivo.' : ''}</div>`;
@@ -428,6 +432,17 @@ function abrir(i){
   if (temSujo() && !confirm('Há texto editado e não salvo. Sair mesmo assim?')) return;
   sujos = {}; conflito = null; form = null; foco = null; scrollTo(0,0);
   carregar(D.docs[i].file);
+}
+// O VS Code abre no arquivo, na linha da mudança em foco (j/k) se houver uma.
+async function abrirNoCode(){
+  const m = foco && foco.startsWith('m:') ? achar(Number(foco.slice(2))) : null;
+  const r = await fetch('/api/abrir', {method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({file: D.docs[doc].file, ...(m ? {line: m.linha} : {})})});
+  const j = r.ok ? await r.json() : {ok: false, erro: await r.text()};
+  recado = j.ok ? '✓ ' + j.msg : '✕ ' + j.erro;
+  // Só o recado muda: redesenhar tiraria o cursor de quem está no meio de um texto.
+  const el = $('recado'); el.hidden = false; el.textContent = recado;
+  el.className = 'recado' + (j.ok ? '' : ' ruim');
 }
 function fechar(){ form = null; desenhar(); }
 function abrirForm(chave, tipo, shas){ form = {chave, tipo, shas}; desenhar(); }
