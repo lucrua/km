@@ -314,20 +314,57 @@ def segmentos(s: ch.Situacao) -> list[dict]:
             continue
         n += 1
         m = por_n[n]
-        unidades = []
-        for u in m.unidades:
-            a = u.antes.texto if u.antes else ""
-            d = u.depois.texto if u.depois else ""
-            unidades.append({
-                "id": u.id, "sha": u.sha, "tipo": u.tipo, "titulo": u.titulo,
-                "bloqueio": u.bloqueio, "sumidas": u.sumidas,
-                "texto": d, "linha": u.depois.linha if u.depois else m.linha,
-                "linhas": so_esquerda(a) if u.tipo == "sumiu" else marcar(a, d),
-            })
-        out.append({"tipo": "mudanca", "n": n, "titulo": m.titulo, "caminho": m.caminho,
-                    "linha": m.linha, "bloqueio": m.bloqueio, "sumidas": m.sumidas,
-                    "unidades": unidades})
+        out.append(_trecho_mudado(s, m))
     return out
+
+
+def _faixa(linhas: list[str], blocos: list) -> tuple[str, int]:
+    """The raw text from the first to the last of these blocks, blank lines included."""
+    if not blocos:
+        return "", 0
+    ini, fim = blocos[0].linha, blocos[-1].fim
+    return "\n".join(linhas[ini - 1:fim - 1]), ini
+
+
+def _trecho_mudado(s: ch.Situacao, m: ch.Mudanca) -> dict:
+    """A change as one thing to read: everything that moved between two unchanged stretches.
+
+    Blocks are how the engine finds and applies changes; they are not how you read them.
+    Three blocks in a row that changed are one passage, with one text on each side and one
+    set of verdicts. Less than the whole is a selection, not a pre-cut piece.
+    """
+    novos = [u.depois for u in m.unidades if u.depois]
+    velhos = [u.antes for u in m.unidades if u.antes]
+    agora, linha = _faixa(s.depois.splitlines(), novos)
+    antes, _ = _faixa(s.antes.splitlines(), velhos)
+
+    # Where each block sits inside the passage's text, so a selection over the passage can
+    # be turned into "this part of this block" — which is what the engine applies.
+    linhas = agora.split("\n") if agora else []
+    inicio = [0]
+    for l in linhas:
+        inicio.append(inicio[-1] + len(l) + 1)
+    def pos(b):
+        return inicio[b.linha - linha] if agora else 0
+    unidades = []
+    for k, u in enumerate(m.unidades):
+        if u.depois:
+            a = pos(u.depois)
+            unidades.append({"sha": u.sha, "tipo": u.tipo, "ini": a, "fim": a + len(u.depois.texto)})
+        else:
+            # O que saiu não tem texto do lado de cá: fica ancorado onde estaria, antes do
+            # próximo bloco que ficou.
+            prox = next((x.depois for x in m.unidades[k + 1:] if x.depois), None)
+            a = pos(prox) if prox else len(agora)
+            unidades.append({"sha": u.sha, "tipo": u.tipo, "ini": a, "fim": a})
+
+    tipos = {u.tipo for u in m.unidades}
+    geral = "novo" if tipos == {"novo"} else ("saiu" if tipos == {"sumiu"} else "editado")
+    return {"tipo": "mudanca", "n": m.n, "titulo": m.titulo, "geral": geral,
+            "linha": linha or m.linha, "texto": agora,
+            "chave": ch.sha_do(antes + "\x00" + agora),
+            "linhas": marcar(antes, agora) if agora else so_esquerda(antes),
+            "unidades": unidades, "bloqueio": m.bloqueio, "sumidas": m.sumidas}
 
 
 def estado(root: Path, by: str = "", base: str | None = None,
@@ -789,38 +826,31 @@ function formulario(chave, shas){
       :'o texto volta ao que você chancelou'}</div></div>`;
 }
 
-function acoesDoBloco(u){
-  const chave = 'u:' + u.sha;
-  if (sujos[chave] !== undefined) return salvarCel(chave);
-  if (form && form.chave === chave) return formulario(chave, [u.sha]);
-  if (!naChancela()) return `<span class="chip e-pendente">${TIPO[u.tipo]}</span>`;
-  const trava = u.bloqueio ? 'disabled title="resolva o 🚫 primeiro"' : '';
-  const marcas = u.tipo === 'sumiu' ? '' : `<div class="marcas">
-      <button onclick="marcaNoBloco('${chave}','⚠️')" title="ressalva: sem certeza">⚠️</button>
-      <button onclick="marcaNoBloco('${chave}','🚫')" title="discordo — bloqueia a chancela">🚫</button></div>`;
-  return `<span class="chip ${u.tipo==='sumiu'?'e-negado':(u.tipo==='novo'?'e-aprovado':'e-mexido')}">${TIPO[u.tipo]}</span>
-    <button class="pri" ${trava} onclick="aprovar(['${u.sha}'])">${u.tipo==='sumiu'?'Aprovar a remoção':'Aprovar'}</button>
-    <div class="par2">
-      <button onclick="abrirForm('${chave}','validar',['${u.sha}'])">A validar…</button>
-      <button onclick="abrirForm('${chave}','reverter',['${u.sha}'])">${u.tipo==='sumiu'?'Trazer de volta':'Reverter'}</button></div>
-    ${marcas}`;
-}
-
 function acoesDaMudanca(m){
-  if (m.unidades.length < 2 || !naChancela()) return '';
-  const shas = esc(JSON.stringify(m.unidades.map(u => u.sha)));
-  const chave = 'm:' + m.n;
-  if (form && form.chave === chave) return formulario(chave, m.unidades.map(u => u.sha));
-  return `<div class="tudo">
-    <button class="pri" ${m.bloqueio?'disabled':''} onclick="aprovar(${shas})">Aprovar tudo</button>
-    <button onclick="abrirForm('${chave}','reverter',${shas})">Reverter tudo</button></div>`;
+  const chave = 'c:' + m.chave;
+  if (sujos[chave] !== undefined) return salvarCel(chave);
+  const shas = m.unidades.map(u => u.sha);
+  if (form && form.chave === chave) return formulario(chave, shas);
+  const rotulo = {novo: 'novo', saiu: 'saiu', editado: 'editado'}[m.geral];
+  if (!naChancela()) return `<span class="chip e-pendente">${rotulo}</span>`;
+  const js = esc(JSON.stringify(shas));
+  const marcas = m.texto ? `<div class="marcas">
+      <button onclick="marcaNaMudanca('${chave}','⚠️')" title="ressalva: sem certeza">⚠️</button>
+      <button onclick="marcaNaMudanca('${chave}','🚫')" title="discordo — bloqueia a chancela">🚫</button></div>` : '';
+  return `<span class="chip ${m.geral==='saiu'?'e-negado':(m.geral==='novo'?'e-aprovado':'e-mexido')}">${rotulo}</span>
+    <button class="pri" ${m.bloqueio?'disabled title="resolva o 🚫 primeiro"':''} onclick="aprovar(${js})">${m.geral==='saiu'?'Aprovar a remoção':'Aprovar'}</button>
+    <div class="par2">
+      <button onclick="abrirForm('${chave}','validar',${js})">A validar…</button>
+      <button onclick="abrirForm('${chave}','reverter',${js})">${m.geral==='saiu'?'Trazer de volta':'Reverter'}</button></div>
+    ${marcas}
+    <div class="q">para aprovar só uma parte, selecione o texto</div>`;
 }
 
-function avisosDoBloco(u){
+function avisosDaMudanca(m){
   let out = '';
-  for (const s of (u.sumidas||[])) out += `<div class="nota"><b>ressalva removida</b> — ${neg(s.replace(/^\\s*>\\s*/,''))}
+  for (const s of (m.sumidas||[])) out += `<div class="nota"><b>ressalva removida</b> — ${neg(s.replace(/^\\s*>\\s*/,''))}
     <div class="q">estava na chancela; aprovar aqui aprova a remoção</div></div>`;
-  if (u.bloqueio) out += `<div class="nota"><b>🚫 bloqueado</b> — ${neg(u.bloqueio.replace(/^\\s*>\\s*/,''))}</div>`;
+  if (m.bloqueio) out += `<div class="nota"><b>🚫 bloqueado</b> — ${neg(m.bloqueio.replace(/^\\s*>\\s*/,''))}</div>`;
   return out;
 }
 
@@ -858,16 +888,13 @@ function desenhar(){
         <div class="col acoes">${salvarCel(chave)}</div>`;
       continue;
     }
-    s.unidades.forEach((u, k) => {
-      const chave = 'u:' + u.sha;
-      const inicio = k === 0 ? ` inicio-m${foco === 'm:' + s.n ? ' foco-m' : ''}` : '';
-      const ancora = k === 0 ? ` id="m${s.n}"` : '';
-      html += `<div class="col base ${u.tipo}${inicio}"${ancora}><div class="txt">${coluna(u.linhas, 'esq')}</div></div>
-        <div class="col agora ${u.tipo}${inicio}">${avisosDoBloco(u)}${u.tipo === 'sumiu'
-          ? '<div class="vaziocol">— saiu do arquivo —</div>'
-          : editavel(chave, u.linha, u.texto, coluna(u.linhas, 'dir'))}</div>
-        <div class="col acoes${inicio}">${k === 0 ? acoesDaMudanca(s) : ''}${acoesDoBloco(u)}</div>`;
-    });
+    const chave = 'c:' + s.chave;
+    const inicio = ` inicio-m${foco === 'm:' + s.n ? ' foco-m' : ''}`;
+    html += `<div class="col base ${s.geral}${inicio}" id="m${s.n}"><div class="txt">${coluna(s.linhas, 'esq')}</div></div>
+      <div class="col agora ${s.geral}${inicio}">${avisosDaMudanca(s)}${s.texto
+        ? editavel(chave, s.linha, s.texto, coluna(s.linhas, 'dir'))
+        : '<div class="vaziocol">— saiu do arquivo —</div>'}</div>
+      <div class="col acoes${inicio}">${acoesDaMudanca(s)}</div>`;
   }
   $('doc').innerHTML = html;
   const campo = $('f-texto');
@@ -897,9 +924,9 @@ function mexeu(el){
   // Só a coluna das ações muda; o texto que você está digitando fica onde está.
   const cel = el.closest('.col').nextElementSibling;
   if (cel && cel.classList.contains('acoes')) {
-    if (chave.startsWith('u:')) {
-      const u = mudancas().flatMap(m => m.unidades).find(x => 'u:' + x.sha === chave);
-      cel.innerHTML = u ? acoesDoBloco(u) : salvarCel(chave);
+    if (chave.startsWith('c:')) {
+      const m = mudancas().find(x => 'c:' + x.chave === chave);
+      cel.innerHTML = m ? acoesDaMudanca(m) : salvarCel(chave);
     } else cel.innerHTML = salvarCel(chave);
   }
 }
@@ -931,7 +958,7 @@ function noCursor(marca){
   if (!el) { recado = '✕ clique no texto, onde a marca deve entrar, e depois no botão'; return desenhar(); }
   inserir(el, marca);
 }
-function marcaNoBloco(chave, marca){
+function marcaNaMudanca(chave, marca){
   const el = celula(chave); if (!el) return;
   el.focus();
   const r = document.createRange(); r.selectNodeContents(el); r.collapse(false);
@@ -968,21 +995,25 @@ function selecaoAtual(){
   const s = getSelection();
   if (!s || s.isCollapsed || !s.rangeCount || !naChancela()) return null;
   const r = s.getRangeAt(0);
-  const host = n => (n.nodeType === 1 ? n : n.parentElement)?.closest('.txt.edit[data-chave^="u:"]');
-  const a = host(r.startContainer), b = host(r.endContainer);
-  if (!a || !b) return null;
-  const todos = [...document.querySelectorAll('.txt.edit[data-chave^="u:"]')];
-  const ia = todos.indexOf(a), ib = todos.indexOf(b);
-  const partes = [];
-  for (let k = ia; k <= ib; k++) {
-    const el = todos[k], chave = el.dataset.chave;
-    if (sujos[chave] !== undefined) return {erro: 'salve ou descarte a edição deste bloco antes de aprovar parte dele'};
-    const texto = originais[chave] || '';
-    partes.push({sha: chave.slice(2),
-                 ini: k === ia ? deslocamento(el, r.startContainer, r.startOffset) : 0,
-                 fim: k === ib ? deslocamento(el, r.endContainer, r.endOffset) : texto.length});
+  const host = n => (n.nodeType === 1 ? n : n.parentElement)?.closest('.txt.edit[data-chave^="c:"]');
+  const el = host(r.startContainer);
+  if (!el || el !== host(r.endContainer)) return null;       // um trecho de cada vez
+  const chave = el.dataset.chave;
+  if (sujos[chave] !== undefined) return {erro: 'salve ou descarte a edição deste trecho antes de aprovar parte dele'};
+  const m = mudancas().find(x => 'c:' + x.chave === chave);
+  if (!m) return null;
+  const a = deslocamento(el, r.startContainer, r.startOffset);
+  const b = deslocamento(el, r.endContainer, r.endOffset);
+  // O motor aplica por bloco; a tela converte a seleção no trecho em "esta parte deste bloco".
+  const shas = [], parciais = [];
+  for (const u of m.unidades) {
+    if (u.ini === u.fim) { if (a <= u.ini && u.ini <= b) shas.push(u.sha); continue; }
+    if (b <= u.ini || a >= u.fim) continue;
+    if (a <= u.ini && b >= u.fim) shas.push(u.sha);
+    else parciais.push({sha: u.sha, ini: Math.max(a, u.ini) - u.ini, fim: Math.min(b, u.fim) - u.ini});
   }
-  return {partes, rect: r.getBoundingClientRect()};
+  if (!shas.length && !parciais.length) return null;
+  return {shas, parciais, rect: r.getBoundingClientRect()};
 }
 document.addEventListener('selectionchange', () => {
   const barra = $('selecao'), sel = selecaoAtual();
@@ -996,7 +1027,7 @@ function naSelecao(acao){
   if (!sel) return;
   if (sel.erro) { recado = '✕ ' + sel.erro; return desenhar(); }
   $('selecao').hidden = true;
-  agir({acao, parciais: sel.partes});
+  agir({acao, shas: sel.shas, parciais: sel.parciais});
 }
 
 function setVer(v){ ver = v; desenhar(); }

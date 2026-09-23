@@ -23,20 +23,21 @@ km serve          # binds 127.0.0.1:8431 — Ctrl-C ends it
 ```
 
 The document, whole, from top to bottom. **Text that did not change is just text**: one
-column, full width, no buttons — headings cut nothing. **Each change is one row**, placed
-where it happened, in three columns:
+column, full width, no buttons — headings cut nothing. **Each change is one passage**:
+everything that moved between two unchanged stretches — a heading, a table and a
+paragraph in a row are one thing to read — placed where it happened, in three columns:
 
 | | |
 |---|---|
 | **the chancel** | the blocks as you endorsed them, with what left struck through. A selector swaps it for any branch or commit |
 | **now** | the file today, with what arrived marked in place. Editable, like everything else in this column |
-| **what to do** | a verdict per block, and one for the whole change |
+| **what to do** | one set of verdicts for the passage |
 
-**The everyday unit is a Markdown block** — a paragraph, a list item, a table, a heading, a
-quote, a code fence — and a change can be approved whole or block by block. When you need
-less than a block, **select part of the text** in the second column: a bar offers *Aprovar
-seleção* and *Reverter seleção*, and only the changes inside the selection are taken — like
-staging half a hunk in a code review. A selection that touches part of a word takes the word.
+**To approve less than the passage, select it.** In the second column, select a paragraph,
+a table row, or a few words: a bar offers *Aprovar seleção* and *Reverter seleção*, and only
+the changes inside the selection are taken — like staging half a hunk in a code review. A
+selection that touches part of a word takes the word. Underneath, the engine still works in
+Markdown blocks; the page turns a selection over the passage into "this part of this block".
 
 How much is left is a **percentage of the content**: the characters still to decide over the
 characters the file would have if everything were approved. Not a count of blocks or
@@ -50,10 +51,10 @@ instead of wrapping.
 
 | | |
 |---|---|
-| **Aprovar** | the block goes into the chancel |
-| **A validar…** | writes `> ❓ **a confirmar até …**` right after the block, and chancels both: the half-chancel is a visible line, not a hidden state |
+| **Aprovar** | the passage goes into the chancel |
+| **A validar…** | writes `> ❓ **a confirmar até …**` right after the passage, and chancels both: the half-chancel is a visible line, not a hidden state |
 | **Reverter** | puts the chancel's text back in the file |
-| **⚠️ · 🚫** | start a reservation after the block, in the agreed form, for you to finish |
+| **⚠️ · 🚫** | start a reservation after the passage, in the agreed form, for you to finish |
 
 The whole second column is always editable — click and type. The action column offers
 **Salvar no arquivo** when there is something to save; Ctrl+S saves, Esc discards. A save is

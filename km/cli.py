@@ -163,13 +163,13 @@ def cmd_pendente(args) -> int:
         # its first block. How much is left is the percentage, in characters.
         print(f"\n{s.arquivo}  ·  {ch.percentual(*_pct(s))} a aprovar")
         for m in s.mudancas:
+            # Um trecho mudado é uma coisa só para ler: blocos seguidos que mudaram não se
+            # listam um a um. `--hunk 2.1` continua valendo para quem precisa endereçar menos.
             total += 1
             sinal = "🚫" if m.bloqueio else ("⚠️" if m.sumidas else "  ")
-            print(f"  {m.n:>3} {sinal} {m.titulo[:60]}")
-            for u in m.unidades:
-                print(f"       {u.id:<5} {u.tipo:<6} {u.resumo(56)}")
-                for l in u.sumidas:
-                    print(f"             ressalva removida: {l[:60]}")
+            print(f"  {m.n:>3} {sinal} {m.titulo[:40]:<40} {m.unidades[0].resumo(46)}")
+            for l in m.sumidas:
+                print(f"       ressalva removida: {l[:66]}")
             if m.bloqueio:
                 print(f"       trecho bloqueado: {m.bloqueio[:66]}")
 

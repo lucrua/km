@@ -54,9 +54,11 @@ same function, inverted, undoes only the selected part in the file.
 How much is pending is measured in characters, not in blocks: what is left to decide over
 what the file holds today, which is what the chancel would hold if everything were approved.
 
-A **change** is a run of blocks that differ between two runs that do not. It is one row on
-the page and one number in `km pendente` (`2`); its blocks are `2.1`, `2.2`. Headings
-do not cut anything: they are blocks like the rest, and label the change they sit in.
+A **change** is a run of blocks that differ between two runs that do not, and it is read as
+**one passage**: one text on each side and one set of verdicts, however many blocks it spans.
+Blocks are how the engine finds and applies changes, not how you read them; less than the
+passage is a selection. It is one number in `km pendente` (`2`); `--hunk 2.1` still addresses
+one of its blocks for a script. Headings cut nothing: they label the passage they sit in.
 
 Blocks are paired by similarity and only with blocks of the same kind, so a rewritten
 paragraph is an edit and an unrelated one in the same place is one that left and one that
