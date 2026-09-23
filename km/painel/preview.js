@@ -9,7 +9,11 @@ import { EditorView, Decoration, WidgetType, StateField, StateEffect, EditorStat
 import { quebrasOcultas } from './paragrafo.js';
 import * as tabela from './tabela.js';
 
-const hoje = () => new Date().toISOString().slice(0, 10);
+// A data de hoje no relógio de quem lê: em UTC, um ❓ que vence hoje apareceria vencido
+// depois das 21h no Brasil.
+const doisDigitos = (n) => String(n).padStart(2, '0');
+export const hoje = (d = new Date()) =>
+  `${d.getFullYear()}-${doisDigitos(d.getMonth() + 1)}-${doisDigitos(d.getDate())}`;
 const esc = (s) => s.replace(/[&<>"]/g, (m) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[m]));
 
 // Markdown inline, só para ler as células da tabela — nunca usado para escrever nada.

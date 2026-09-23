@@ -47,3 +47,11 @@ test('an editor without focus hides every marker and every paragraph flows', () 
   const quebras = ranges(s, true).filter(([f, t, sp]) => sp.widget && doc.slice(f, t) === '\n');
   assert.equal(quebras.length, 1);
 });
+
+test('today is the local date, not UTC', async () => {
+  process.env.TZ = 'America/Sao_Paulo';
+  const { hoje } = await import('../../km/painel/preview.js');
+  // 22:30 em Brasília já é o dia seguinte em UTC: um ❓ que vence hoje não está vencido.
+  assert.equal(hoje(new Date('2026-09-23T22:30:00-03:00')), '2026-09-23');
+  assert.equal(hoje(new Date('2026-09-24T00:10:00-03:00')), '2026-09-24');
+});
