@@ -84,6 +84,8 @@ block after the file moved gets a refusal, not a different block.
 
 Keyboard: `j` `k` move between changes, `a` approves the change in focus.
 
+**abrir no VS Code**, in the document header, runs `code <file>` (or `code -g <file>:<line>` at the change in focus) — under WSL, Windows VS Code in WSL mode; `code` must be on the PATH of whoever started `km serve`.
+
 The server does not stay up: you start it when you sit down to review. Inside VS Code, the
 command **km: abrir o painel da chancela** (`Ctrl+Alt+P`) starts it and opens it in the same
 window, and it dies with the window.

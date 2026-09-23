@@ -12,6 +12,9 @@ or a passage you edited here.
 from __future__ import annotations
 
 import json
+import shutil
+import subprocess
+import threading
 import webbrowser
 from datetime import date
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -281,6 +284,55 @@ def arquivos_trocar(root: Path, pedido: dict) -> dict:
     return {"ok": True, "arvore": ac.arvore(root)}
 
 
+# ---- open in VS Code ---------------------------------------------------------------
+
+def _lancar(argv: list[str]) -> None:
+    """Start VS Code and walk away: no shell, no pipes, its own session. A thread reaps the
+    wrapper when it exits, so clicks do not pile up zombies in a server that stays up."""
+    p = subprocess.Popen(argv, stdin=subprocess.DEVNULL, stdout=subprocess.DEVNULL,
+                         stderr=subprocess.DEVNULL, start_new_session=True)
+    threading.Thread(target=p.wait, daemon=True).start()
+
+
+def abrir_no_code(root: Path, pedido: dict) -> dict:
+    """`code <file>` (or `code -g <file>:<line>`) for a document the panel knows.
+
+    Under WSL, `code` is the wrapper that opens Windows VS Code in WSL mode. Only a Markdown
+    file git knows about — or one the chancel follows — that really lives inside the
+    repository: a path with `..`, an absolute path or a symlink that leads out is refused.
+    """
+    rel = pedido.get("file")
+    if not isinstance(rel, str) or not rel:
+        return {"ok": False, "erro": "nenhum arquivo pedido"}
+    partes = Path(rel).parts
+    if Path(rel).is_absolute() or "\\" in rel or ".." in partes:
+        return {"ok": False, "erro": f"{rel}: só um caminho relativo, dentro do repositório"}
+    try:
+        conhecidos = set(ac.documentos(root))
+    except ac.ConfigInvalida:
+        conhecidos = set()
+    conhecidos |= set(ac.candidatos(root))
+    base = root.resolve()
+    alvo = (base / rel).resolve()
+    if rel not in conhecidos or not alvo.is_file():
+        return {"ok": False, "erro": f"{rel} não é um documento deste repositório"}
+    if not alvo.is_relative_to(base):
+        return {"ok": False, "erro": f"{rel} aponta para fora do repositório"}
+    code = shutil.which("code")
+    if not code:
+        return {"ok": False, "erro": "o comando code não está no PATH do km serve"}
+    linha = pedido.get("line")
+    if isinstance(linha, int) and not isinstance(linha, bool) and linha > 0:
+        argv = [code, "-g", f"{alvo}:{linha}"]
+    else:
+        argv = [code, str(alvo)]
+    try:
+        _lancar(argv)
+    except OSError as e:
+        return {"ok": False, "erro": f"não consegui rodar o code: {e}"}
+    return {"ok": True, "msg": f"aberto no VS Code: {rel}" + (f":{linha}" if len(argv) == 3 else "")}
+
+
 # ---- the server ----------------------------------------------------------------------
 
 class Handler(BaseHTTPRequestHandler):
@@ -341,6 +393,9 @@ class Handler(BaseHTTPRequestHandler):
             return
         tamanho = int(self.headers.get("Content-Length", 0))
         pedido = json.loads(self.rfile.read(tamanho) or b"{}")
+        if self.path.startswith("/api/abrir"):
+            self._json(abrir_no_code(self.root, pedido))
+            return
         if self.path.startswith("/api/arquivos/desfazer"):
             self._json(arquivos_trocar(self.root, pedido))
             return
