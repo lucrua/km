@@ -300,7 +300,8 @@ function montarEditores(){
     originais[chave] = hojeTexto;
     const atual = sujos[chave] !== undefined ? sujos[chave] : hojeTexto;
     const mudou = (t) => mexeuTexto(chave, t);
-    if (chave.startsWith('c:')) km.editorMudanca(el, chave, s.antes, atual, naChancela(), mudou, mostrarBarraSelecao);
+    // Um trecho que só saiu não tem o que editar do lado de hoje.
+    if (chave.startsWith('c:')) km.editorMudanca(el, chave, s.antes, atual, naChancela() && s.geral !== 'saiu', mudou, mostrarBarraSelecao);
     else km.editorSimples(el, chave, atual, true, mudou, null);
   }
 }
