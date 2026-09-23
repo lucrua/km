@@ -200,10 +200,15 @@ const estilo = HighlightStyle.define([
 ]);
 
 // Texto de documento, não de código: o CodeMirror vem com fonte monoespaçada por padrão.
+// O painel é escuro: o cursor e a seleção vêm das cores da página, não do tema claro do
+// CodeMirror, que desenha um cursor preto e uma seleção quase branca.
 const tema = EditorView.theme({
   '.cm-scroller': { fontFamily: 'inherit', lineHeight: '1.62' },
-  '.cm-content': { fontFamily: 'inherit' },
-});
+  '.cm-content': { fontFamily: 'inherit', caretColor: 'var(--acc)' },
+  '.cm-cursor, .cm-dropCursor': { borderLeftColor: 'var(--acc)', borderLeftWidth: '2px' },
+  '&.cm-focused > .cm-scroller > .cm-selectionLayer .cm-selectionBackground, .cm-selectionBackground, .cm-content ::selection':
+    { background: 'color-mix(in srgb, var(--acc) 32%, transparent)' },
+}, { dark: true });
 
 export function vistaViva({ editavel = true } = {}) {
   return [markdown({ base: markdownLanguage }), syntaxHighlighting(estilo), foco,
