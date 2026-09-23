@@ -26,3 +26,23 @@ test('footnotes are left as text, neither hidden nor styled as links', () => {
     assert.deepEqual(decos().filter((d) => toca(d, a, b)).map((d) => fixture.slice(d.from, d.to)), []);
   }
 });
+
+test('the live preview never changes the fixture\'s bytes', () => {
+  const s = estado();
+  assert.equal(s.doc.toString(), fixture);
+  assert.equal(s.update({ selection: { anchor: 40 } }).state.doc.toString(), fixture);
+});
+
+test('only what the spec lists is replaced', () => {
+  // Marcadores, a URL de um link, bala, caixa de tarefa, régua e a tabela inteira como grade.
+  const permitido = /^(\*\*|_|`|\[|\]|\(|\)|> |-|\[[ x]\]|---|https:\/\/exemplo\.com)$/;
+  const tabela = faixa(fixture.slice(fixture.indexOf('| Campo'), fixture.indexOf('| só uma célula |') + 17));
+  const intocados = [faixa('================'), faixa('[^1]'), faixa('  \n'), faixa('\\\n'),
+                     faixa('<details>'), faixa('Conteúdo que o preview não conhece.'), faixa('[^1]: A nota.')];
+  for (const d of decos().filter((x) => x.to > x.from && !x.spec.class)) {
+    const texto = fixture.slice(d.from, d.to);
+    const ehTabela = d.from === tabela[0] && d.to === tabela[1];
+    assert.ok(ehTabela || permitido.test(texto), `substituído sem estar na spec: ${JSON.stringify(texto)}`);
+    for (const [a, b] of intocados) assert.ok(!toca(d, a, b), `mexeu em ${JSON.stringify(fixture.slice(a, b))}`);
+  }
+});
