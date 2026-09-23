@@ -37,9 +37,12 @@ def arquivo_estatico(caminho: str, raizes: dict | None = None) -> Path | None:
     partes = unquote(urlparse(caminho).path).split("/")
     if len(partes) != 4 or partes[1] != "static" or partes[2] not in raizes or not partes[3]:
         return None
-    base = raizes[partes[2]].resolve()
-    alvo = (base / partes[3]).resolve()
-    if alvo.parent != base or not alvo.is_file():
+    try:
+        base = raizes[partes[2]].resolve()
+        alvo = (base / partes[3]).resolve()
+        if alvo.parent != base or not alvo.is_file():
+            return None
+    except (OSError, ValueError):   # um byte nulo no nome, um nome longo demais
         return None
     return alvo
 

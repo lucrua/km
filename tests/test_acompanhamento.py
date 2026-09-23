@@ -434,3 +434,7 @@ class EstaticoTest(unittest.TestCase):
         for ruim in ("/static/painel/../segredo.py", "/static/outra/a.js", "/static/painel/nao.js",
                      "/static/painel/", "/static/painel/%2e%2e/segredo.py"):
             self.assertIsNone(serve.arquivo_estatico(ruim, self.raizes), ruim)
+
+    def test_a_null_byte_is_not_found_not_a_crash(self):
+        from km import serve
+        self.assertIsNone(serve.arquivo_estatico("/static/painel/a%00.js", self.raizes))
