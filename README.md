@@ -5,6 +5,41 @@ Your documents say what is true. This tells you **which of it you actually revie
 Code, CLI and documentation in English; the documents `km` reads, and everything it prints
 on screen, are in the language they were written in.
 
+## Getting started
+
+1. **Clone it and put `km` on your PATH** — in `~/.bashrc`, so every new terminal has it:
+
+   ```bash
+   git clone <this repo> ~/knowledge-manager
+   echo 'export PATH="$HOME/knowledge-manager/bin:$PATH"' >> ~/.bashrc
+   ```
+
+2. **Under WSL, put VS Code's `code` on the same PATH**, for the panel's *abrir no VS Code*
+   (adjust the Windows user name):
+
+   ```bash
+   echo 'export PATH="$PATH:/mnt/c/Users/<you>/AppData/Local/Programs/Microsoft VS Code/bin"' >> ~/.bashrc
+   ```
+
+   Open a new terminal after steps 1 and 2 — a `km serve` already running keeps the old PATH.
+
+3. **Install the VS Code extension** — a link to the folder, so it updates with the repo:
+
+   ```bash
+   ln -s ~/knowledge-manager/vscode ~/.vscode-server/extensions/km-review-0.1.0   # VS Code in WSL
+   # outside WSL: ~/.vscode/extensions/km-review-0.1.0
+   ```
+
+   Then *Developer: Reload Window*.
+
+4. **In the repository you want to review, once:** `km init` writes `.km/config.json` with
+   nothing tracked.
+
+5. **Open the panel** from inside that repository — `km serve`, then
+   <http://127.0.0.1:8431> — or, in VS Code, **km: abrir o painel da chancela**
+   (`Ctrl+Alt+P`). The first time, the **Arquivos** tab is where you tick the files and folders
+   to review; `km serve --port 8451` runs a second panel next to the first.
+
 ## The chancel
 
 **A copy of each file, as you last endorsed it, kept in `refs/km/chancela`.** Reviewing is
@@ -160,12 +195,7 @@ ones, and they write the marks into the text.
 
 Python 3.11+. No third-party Python dependencies. The panel's CodeMirror is bundled once
 into `km/vendor/cm.js` and served by `km serve` — no network and no npm at run time; the
-recipe to rebuild it is in [tools/build-cm/](tools/build-cm/README.md).
-
-```bash
-git clone <this repo> ~/knowledge-manager
-export PATH="$HOME/knowledge-manager/bin:$PATH"
-```
+recipe to rebuild it is in [tools/build-cm/](tools/build-cm/README.md). Installing: [Getting started](#getting-started).
 
 ## Documentation
 
