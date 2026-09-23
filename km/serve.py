@@ -65,6 +65,7 @@ def segmentos(s: ch.Situacao) -> list[dict]:
     pd, ba, bd, ops = ch._alinhar(s.antes, s.depois)
     por_n = {m.n: m for m in s.mudancas}
     out: list[dict] = []
+    vistas: dict[str, int] = {}
     n = 0
     for tag, i1, i2, j1, j2 in ops:
         if tag == "equal":
@@ -75,7 +76,13 @@ def segmentos(s: ch.Situacao) -> list[dict]:
             continue
         n += 1
         m = por_n[n]
-        out.append(_trecho_mudado(s, m))
+        t = _trecho_mudado(s, m)
+        # A chave vem do texto, para o que você digitou num trecho seguir com ele quando outro
+        # sai da tela; duas mudanças iguais no mesmo arquivo ganham cada uma a sua.
+        k = vistas[t["chave"]] = vistas.get(t["chave"], 0) + 1
+        if k > 1:
+            t["chave"] += f"-{k}"
+        out.append(t)
     return out
 
 

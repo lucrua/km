@@ -350,6 +350,16 @@ class RevisaoFinalTest(RepoTest):
         self.assertTrue(r["ok"], r)
         self.assertFalse(ch.situacao(self.dir, "design/v1.md").mudancas)
 
+    def test_two_identical_changes_have_different_keys(self):
+        from km import chancela as ch, serve
+        ac.gravar(self.dir, {"folders": ["design"], "files": [], "except": []})
+        ch.escrever(self.dir, {"design/v1.md": "# v1\n\num\n\ndois\n\ntrês\n"}, "chancela")
+        (self.dir / "design" / "v1.md").write_text("# v1\n\num\n\nnova\n\ndois\n\nnova\n\ntrês\n",
+                                                   encoding="utf-8")
+        ms = [x for x in serve.segmentos(ch.situacao(self.dir, "design/v1.md")) if x["tipo"] == "mudanca"]
+        self.assertEqual([(m["antes"], m["agora"]) for m in ms], [("", "nova"), ("", "nova")])
+        self.assertEqual(len({m["chave"] for m in ms}), 2)
+
     def test_a_listed_file_that_is_gone_can_be_unticked(self):
         ac.gravar(self.dir, {"folders": [], "files": ["sumiu.md"], "except": []})
         arv = ac.arvore(self.dir)
