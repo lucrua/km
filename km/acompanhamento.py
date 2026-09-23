@@ -139,3 +139,119 @@ def documentos(root: Path, cfg: dict | None = None) -> list[str]:
     achados = {c for c in candidatos(root) if decisao(c, cfg)}
     achados |= {f for f in cfg["files"] if (root / f).is_file() and decisao(f, cfg)}
     return sorted(achados)
+
+
+def _abaixo(caminho: str, outro: str) -> bool:
+    return caminho == "." or outro.startswith(caminho + "/")
+
+
+def _limpar_abaixo(cfg: dict, caminho: str) -> dict:
+    return {k: [p for p in cfg[k] if not _abaixo(caminho, p)] for k in CHAVES}
+
+
+def marcar(cfg: dict, caminho: str, pasta: bool) -> dict:
+    """Tick a file or folder, as a tri-state tree does."""
+    novo = {k: list(v) for k, v in cfg.items()}
+    novo["except"] = [e for e in novo["except"] if e != caminho]
+    if pasta:
+        novo = _limpar_abaixo(novo, caminho)
+        novo["folders"].append(caminho)
+    elif not decisao(caminho, novo):
+        novo["files"].append(caminho)
+    return normalizar(novo)
+
+
+def desmarcar(cfg: dict, caminho: str, pasta: bool) -> dict:
+    """Untick a file or folder. Under a rule it becomes an exception; the chancel is kept."""
+    novo = {k: list(v) for k, v in cfg.items()}
+    novo["files"] = [f for f in novo["files"] if f != caminho]
+    novo["folders"] = [f for f in novo["folders"] if f != caminho]
+    if pasta:
+        novo = _limpar_abaixo(novo, caminho)
+        if caminho != "." and herdado(caminho, novo):
+            novo["except"].append(caminho)
+    elif decisao(caminho, novo):
+        novo["except"].append(caminho)
+    return normalizar(novo)
+
+
+def rotulo(root: Path, antes: dict, depois: dict, caminho: str, pasta: bool, marcou: bool) -> str:
+    """One line saying what the click did, in terms of files."""
+    from . import chancela as ch
+
+    ja, agora = set(documentos(root, antes)), set(documentos(root, depois))
+    entraram, sairam = len(agora - ja), len(ja - agora)
+    nome = "o repositório inteiro" if caminho == "." else caminho + ("/" if pasta else "")
+    if pasta and marcou:
+        return f"{nome} passou a ser acompanhada (+ novos) · {entraram} arquivo(s) entraram"
+    if pasta:
+        return f"{nome} saiu do acompanhamento · {sairam} arquivo(s) saíram · as chancelas ficam guardadas"
+    if marcou:
+        return f"{nome} passou a ser acompanhado"
+    guardada = " · a chancela fica guardada" if caminho in ch.arquivos(root) else ""
+    return f"{nome} saiu do acompanhamento{guardada}"
+
+
+def arvore(root: Path) -> dict:
+    """The repository as a tree of Markdown files, with what each tick means."""
+    from . import chancela as ch
+
+    try:
+        cfg = carregar(root)
+        erro = ""
+    except ConfigInvalida as e:
+        cfg, erro = vazia(), str(e)
+    cands = set(candidatos(root))
+    na_chancela = set(ch.arquivos(root))
+    todos = sorted(cands | na_chancela | set(cfg["files"]))
+
+    raiz = {"nome": root.name, "caminho": ".", "tipo": "pasta", "filhos": []}
+    pastas = {".": raiz}
+
+    def pasta_de(caminho: str) -> dict:
+        if caminho in pastas:
+            return pastas[caminho]
+        pai = pasta_de(caminho.rsplit("/", 1)[0] if "/" in caminho else ".")
+        n = {"nome": caminho.rsplit("/", 1)[-1], "caminho": caminho, "tipo": "pasta", "filhos": []}
+        pai["filhos"].append(n)
+        pastas[caminho] = n
+        return n
+
+    for rel in todos:
+        existe = rel in cands or (root / rel).is_file()
+        acomp = existe and decisao(rel, cfg)
+        if not existe:
+            estado = "não existe mais"
+        elif acomp:
+            s = ch.situacao(root, rel)
+            estado = ("sem chancela" if not s.tem_chancela
+                      else f"{ch.percentual(*ch.pendencia_do_arquivo(s))} a aprovar" if s.mudancas
+                      else "em dia")
+        elif rel in na_chancela:
+            estado = "pausado · chancela guardada"
+        else:
+            estado = "—"
+        pai = pasta_de(rel.rsplit("/", 1)[0] if "/" in rel else ".")
+        pai["filhos"].append({"nome": rel.rsplit("/", 1)[-1], "caminho": rel, "tipo": "arquivo",
+                              "marcado": "sim" if acomp else "nao", "estado": estado,
+                              "existe": existe, "excecao": rel in cfg["except"]})
+
+    def completar(n: dict) -> tuple[int, int]:
+        acomp = total = 0
+        for f in n["filhos"]:
+            if f["tipo"] == "pasta":
+                a, t = completar(f)
+            else:
+                a, t = (1 if f["marcado"] == "sim" else 0), (1 if f["existe"] else 0)
+            acomp, total = acomp + a, total + t
+        n["filhos"].sort(key=lambda f: (f["tipo"] == "arquivo", f["nome"].lower()))
+        n["acompanhados"], n["total"] = acomp, total
+        n["marcado"] = "nao" if acomp == 0 else ("sim" if acomp == total else "misto")
+        # `+ novos`: would a Markdown file created here tomorrow be tracked?
+        n["novos"] = decisao(("" if n["caminho"] == "." else n["caminho"] + "/") + "\0novo.md", cfg)
+        n["regra_propria"] = n["caminho"] in cfg["folders"]
+        n["excecoes"] = sum(1 for e in cfg["except"] if _abaixo(n["caminho"], e))
+        return acomp, total
+
+    completar(raiz)
+    return {"raiz": raiz, "sha": sha_config(cfg), "config": cfg, "erro": erro}
