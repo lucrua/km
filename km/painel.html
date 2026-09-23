@@ -367,8 +367,13 @@ function avisosDaMudanca(m){
 }
 
 // ---- o documento ----------------------------------------------------------------
+let desenhado = null;   // o arquivo na tela: outro documento abre no topo
 function desenhar(){
   if (!D) return;
+  // Redesenhar o mesmo documento (depois de aprovar, salvar ou uma recarga) não tira você do
+  // lugar: destruir os editores encolhe a página e o navegador leva a rolagem para o topo.
+  // A posição é lida antes de qualquer coisa ser destruída.
+  const y = scrollY;
   $('repo').textContent = D.repo;
   const em = D.docs.filter(d => d.rastreado && !d.pendente).length;
   const sem = D.docs.filter(d => !d.rastreado).length;
@@ -418,6 +423,8 @@ function desenhar(){
   }
   $('doc').innerHTML = html;
   montarEditores();
+  if (desenhado === d.file) scrollTo(0, y);
+  desenhado = d.file;
   const campo = $('f-texto');
   if (campo) campo.focus();
 }
