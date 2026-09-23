@@ -237,88 +237,249 @@ def normalise_md(texto: str) -> str:
     return "\n".join(out) + ("\n" if texto.endswith("\n") else "")
 
 
-# ---- the diff, in passages -----------------------------------------------------------
+# ---- the diff, in Markdown blocks -----------------------------------------------------
+#
+# The unit you approve is a Markdown block: a paragraph, a list item, a table, a heading,
+# a quote, a code fence. Nobody needs to approve half a paragraph, and a line diff kept
+# offering exactly that. A *change* is a run of blocks that differ, between two runs that
+# do not; it is what the page shows as one row, and it can be approved whole or block by
+# block.
+
+CERCA_MD = re.compile(r"^\s*(```|~~~)")
+ITEM_MD = re.compile(r"^\s*(?:[-*+]|\d{1,3}[.)])\s+")
+REGUA_MD = re.compile(r"^\s*(?:-{3,}|\*{3,}|_{3,})\s*$")
+TABELA_MD = re.compile(r"^\s*\|")
+CITACAO_MD = re.compile(r"^\s*>")
+
+
+def _abre_bloco(linha: str) -> bool:
+    return bool(HEADING.match(linha) or CERCA_MD.match(linha) or ITEM_MD.match(linha)
+                or REGUA_MD.match(linha) or TABELA_MD.match(linha)
+                or CITACAO_MD.match(linha))
+
 
 @dataclass
-class Hunk:
-    """One change, as `git add -p` would offer it."""
+class Bloco:
+    """One Markdown block, with the blank lines that follow it kept apart."""
 
-    n: int
-    i1: int
-    i2: int
-    j1: int
-    j2: int
-    antes: list[str]
-    depois: list[str]
-    titulo: str = ""
-    caminho: str = ""
-    linha: int = 1
-    sumidas: list[str] = field(default_factory=list)   # caveats the change removes
-    bloqueio: str = ""                                 # the 🚫 line holding it back
+    tipo: str           # titulo · paragrafo · item · tabela · citacao · codigo · regua
+    texto: str          # the block's own lines, no trailing blank lines
+    cru: str            # the same plus the blank lines after it — for exact reassembly
+    linha: int          # 1-based
+    fim: int            # 1-based, exclusive, of `texto`
 
     @property
-    def novo(self) -> bool:
-        return not self.antes
+    def chave(self) -> str:
+        """What counts as the same block: a re-aligned table is the same table."""
+        return normalise_md(self.texto).strip()
+
+
+def blocos(texto: str) -> tuple[str, list[Bloco]]:
+    """Split a document into blocks. Returns the leading blank lines and the blocks."""
+    linhas = texto.splitlines(keepends=True)
+    n = len(linhas)
+    vazia = lambda i: not linhas[i].strip()
+    i = 0
+    while i < n and vazia(i):
+        i += 1
+    prefixo = "".join(linhas[:i])
+    out: list[Bloco] = []
+    while i < n:
+        ini, l = i, linhas[i]
+        if CERCA_MD.match(l):
+            tipo, i = "codigo", i + 1
+            while i < n and not CERCA_MD.match(linhas[i]):
+                i += 1
+            i = min(i + 1, n)
+        elif HEADING.match(l):
+            tipo, i = "titulo", i + 1
+        elif REGUA_MD.match(l):
+            tipo, i = "regua", i + 1
+        elif TABELA_MD.match(l):
+            tipo, i = "tabela", i + 1
+            while i < n and TABELA_MD.match(linhas[i]):
+                i += 1
+        elif CITACAO_MD.match(l):
+            tipo, i = "citacao", i + 1
+            while i < n and CITACAO_MD.match(linhas[i]):
+                i += 1
+        elif ITEM_MD.match(l):
+            tipo, i = "item", i + 1
+            while i < n and not vazia(i) and not _abre_bloco(linhas[i]):
+                i += 1
+        else:
+            tipo, i = "paragrafo", i + 1
+            while i < n and not vazia(i) and not _abre_bloco(linhas[i]):
+                i += 1
+        fim = i
+        while i < n and vazia(i):
+            i += 1
+        out.append(Bloco(tipo=tipo, texto="".join(linhas[ini:fim]).rstrip("\n"),
+                         cru="".join(linhas[ini:i]), linha=ini + 1, fim=fim + 1))
+    return prefixo, out
+
+
+@dataclass
+class Unidade:
+    """One block that changed: new, gone, or edited. The smallest thing you approve."""
+
+    id: str                     # "2.1": change 2, block 1
+    tipo: str                   # novo · sumiu · mexido
+    antes: Bloco | None
+    depois: Bloco | None
+    titulo: str = ""
+    sumidas: list[str] = field(default_factory=list)
+    bloqueio: str = ""
+
+    @property
+    def sha(self) -> str:
+        """Identifies this change by its content, not its position: a page that asks to
+        approve "2.1" after the file moved would approve something else."""
+        a = self.antes.texto if self.antes else ""
+        d = self.depois.texto if self.depois else ""
+        return sha_do(a + "\x00" + d)
 
     def resumo(self, largura: int = 60) -> str:
-        alvo = self.depois or self.antes
-        for l in alvo:
-            t = " ".join(l.split())
-            if t and not HEADING.match(l):
-                return t[:largura - 1] + "…" if len(t) > largura else t
-        return " ".join((alvo[0] if alvo else "").split())[:largura]
+        b = self.depois or self.antes
+        t = " ".join(b.texto.split()) if b else ""
+        return t[:largura - 1] + "…" if len(t) > largura else t
 
 
-def hunks(antes: str, depois: str, juntar: int = 2) -> list[Hunk]:
-    """The changes between the chancel and the file, grouped the way a reviewer reads them.
+@dataclass
+class Mudanca:
+    """A run of changed blocks between two runs of unchanged ones: one row on the page."""
 
-    Two changes separated by at most `juntar` untouched lines become one: asking twice about
-    the same sentence is the fragmentation that made blocks-by-hunk unusable (measured:
-    1.7 lines per hunk on a real repository).
+    n: int
+    unidades: list[Unidade]
+    titulo: str
+    caminho: str
+    linha: int                  # where it sits in the file today, 1-based
+    fim: int
+
+    @property
+    def sumidas(self) -> list[str]:
+        return [s for u in self.unidades for s in u.sumidas]
+
+    @property
+    def bloqueio(self) -> str:
+        return next((u.bloqueio for u in self.unidades if u.bloqueio), "")
+
+    def contagem(self) -> tuple[int, int]:
+        return (sum(1 for u in self.unidades if u.antes),
+                sum(1 for u in self.unidades if u.depois))
+
+
+def _parear(velhos: list[Bloco], novos: list[Bloco], corte: float = 0.45) -> list[tuple]:
+    """Which old block became which new one, in reading order.
+
+    Pairing by similarity, not position: two unrelated paragraphs in the same place are one
+    that left and one that arrived, not an "edit" to be read word by word.
     """
-    a, b = antes.splitlines(), depois.splitlines()
-    grupos: list[list[int]] = []
-    for tag, i1, i2, j1, j2 in SequenceMatcher(None, a, b, autojunk=False).get_opcodes():
+    usados: set[int] = set()
+    casos: dict[int, int] = {}
+    for j, nb in enumerate(novos):
+        melhor, nota = None, corte
+        for i, vb in enumerate(velhos):
+            # Só se casa bloco do mesmo tipo: um parágrafo que "virou" título porque os dois
+            # começam com a mesma palavra é um que saiu e outro que entrou.
+            if i in usados or vb.tipo != nb.tipo:
+                continue
+            r = SequenceMatcher(None, vb.texto, nb.texto).ratio()
+            if r >= nota:
+                melhor, nota = i, r
+        if melhor is not None:
+            usados.add(melhor)
+            casos[j] = melhor
+    saida, pos = [], 0
+    for j, nb in enumerate(novos):
+        alvo = casos.get(j)
+        limite = alvo if alvo is not None else len(velhos)
+        while pos < limite:
+            if pos not in usados:
+                saida.append(("sumiu", velhos[pos], None))
+            pos += 1
+        if alvo is not None:
+            saida.append(("mexido", velhos[alvo], nb))
+            pos = alvo + 1
+        else:
+            saida.append(("novo", None, nb))
+    while pos < len(velhos):
+        if pos not in usados:
+            saida.append(("sumiu", velhos[pos], None))
+        pos += 1
+    return saida
+
+
+def _alinhar(antes: str, depois: str):
+    """The block-level alignment both `mudancas` and `aplicar` walk — computed once, the
+    same way, so an id means the same block to both."""
+    pa, ba = blocos(antes)
+    pd, bd = blocos(depois)
+    sm = SequenceMatcher(None, [b.chave for b in ba], [b.chave for b in bd], autojunk=False)
+    return pd, ba, bd, sm.get_opcodes()
+
+
+def mudancas(antes: str, depois: str) -> list[Mudanca]:
+    pd, ba, bd, ops = _alinhar(antes, depois)
+    ts = trechos(depois) or trechos(antes)
+    out: list[Mudanca] = []
+    for tag, i1, i2, j1, j2 in ops:
         if tag == "equal":
             continue
-        if grupos and i1 - grupos[-1][1] <= juntar and j1 - grupos[-1][3] <= juntar:
-            grupos[-1][1], grupos[-1][3] = i2, j2
-        else:
-            grupos.append([i1, i2, j1, j2])
-
-    ts = trechos(depois) or trechos(antes)
-    out: list[Hunk] = []
-    for n, (i1, i2, j1, j2) in enumerate(grupos, start=1):
-        h = Hunk(n=n, i1=i1, i2=i2, j1=j1, j2=j2,
-                 antes=a[i1:i2], depois=b[j1:j2], linha=j1 + 1)
-        # A change that brings its own heading names itself; anything else belongs to the
-        # passage it lands in. Without this an appended section is filed under the section
-        # above it, which is where it starts but not what it is.
-        proprio = next((m.group(2).strip() for l in h.depois if (m := HEADING.match(l))), "")
-        t = trecho_da_linha(ts, j1 + 1)
-        if proprio:
-            t = next((x for x in ts if x.titulo == proprio and x.linha >= j1), t)
-        if t:
-            h.titulo, h.caminho = t.titulo, t.caminho
-            h.bloqueio = bloqueio_de(t.texto)
-        h.sumidas = sumidas(h.antes, h.depois)
-        out.append(h)
+        n = len(out) + 1
+        linha = bd[j1].linha if j1 < len(bd) else (bd[-1].fim if bd else 1)
+        fim = bd[j2 - 1].fim if j2 > j1 else linha
+        t = trecho_da_linha(ts, linha) if ts else None
+        unidades = []
+        for k, (tipo, vb, nb) in enumerate(_parear(ba[i1:i2], bd[j1:j2]), start=1):
+            u = Unidade(id=f"{n}.{k}", tipo=tipo, antes=vb, depois=nb)
+            onde = trecho_da_linha(ts, nb.linha if nb else linha) if ts else None
+            u.titulo = onde.titulo if onde else ""
+            u.bloqueio = bloqueio_de(onde.texto) if onde else ""
+            u.sumidas = sumidas(vb.texto.splitlines() if vb else [],
+                                nb.texto.splitlines() if nb else [])
+            unidades.append(u)
+        # A change that opens with its own heading names itself; otherwise it is named by
+        # the section it starts in, even if it runs on into the next one.
+        primeiro = unidades[0].depois if unidades else None
+        proprio = (primeiro.texto.lstrip("# ").strip()
+                   if primeiro is not None and primeiro.tipo == "titulo" else "")
+        out.append(Mudanca(n=n, unidades=unidades,
+                           titulo=proprio or (t.titulo if t else ""),
+                           caminho=t.caminho if t else "", linha=linha, fim=fim))
     return out
 
 
-def aplicar(antes: str, depois: str, escolhidos: set[int], hs: list[Hunk] | None = None) -> str:
-    """The chancel you had, plus the changes you accepted. `git add -p`, in one function."""
-    a, b = antes.splitlines(), depois.splitlines()
-    hs = hs if hs is not None else hunks(antes, depois)
-    out: list[str] = []
-    i = 0
-    for h in hs:
-        out.extend(a[i:h.i1])
-        out.extend(b[h.j1:h.j2] if h.n in escolhidos else a[h.i1:h.i2])
-        i = h.i2
-    out.extend(a[i:])
-    texto = "\n".join(out)
-    return texto + "\n" if texto and (depois.endswith("\n") or antes.endswith("\n")) else texto
+def aplicar(antes: str, depois: str, escolhidas: set[str]) -> str:
+    """The chancel you had, plus the blocks you accepted. `git add -p`, by block.
+
+    `escolhidas` holds unit ids ("2.1") or whole changes ("2"). Unchanged blocks and
+    accepted ones come from today's file byte for byte, so accepting everything gives
+    exactly the file; refused ones keep the chancel's text.
+    """
+    pd, ba, bd, ops = _alinhar(antes, depois)
+    partes = [pd]
+    n = 0
+    for tag, i1, i2, j1, j2 in ops:
+        if tag == "equal":
+            partes += [b.cru for b in bd[j1:j2]]
+            continue
+        n += 1
+        for k, (tipo, vb, nb) in enumerate(_parear(ba[i1:i2], bd[j1:j2]), start=1):
+            aceita = f"{n}.{k}" in escolhidas or str(n) in escolhidas
+            escolhido = nb if aceita else vb
+            if escolhido is not None:
+                partes.append(escolhido.cru)
+    texto = ""
+    for p in partes:
+        if texto and p and not texto.endswith("\n"):
+            texto += "\n"           # nunca colar duas linhas ao misturar os dois lados
+        texto += p
+    return texto
+
+
+def unidades_por_sha(ms: list[Mudanca], shas: set[str]) -> list[Unidade]:
+    return [u for m in ms for u in m.unidades if u.sha in shas]
 
 
 # ---- the convention ------------------------------------------------------------------
@@ -374,18 +535,27 @@ def vencidas(texto: str, hoje: str | None = None) -> list[tuple[int, str, str]]:
 
 @dataclass
 class Situacao:
-    """One file, against its chancel."""
+    """One file, against its chancel.
+
+    `antes` and `depois` are the texts as they are — the chancel's and the file's. The
+    canonical form that makes a re-aligned table the same table is used to decide what
+    moved, and never to write: writing it would reformat the author's file.
+    """
 
     arquivo: str
     tem_chancela: bool
     antes: str
     depois: str
-    hunks: list[Hunk]
+    mudancas: list[Mudanca]
     vencidas: list[tuple[int, str, str]]
 
     @property
     def em_dia(self) -> bool:
-        return self.tem_chancela and not self.hunks
+        return self.tem_chancela and not self.mudancas
+
+    @property
+    def unidades(self) -> list[Unidade]:
+        return [u for m in self.mudancas for u in m.unidades]
 
 
 def situacao(root: Path, rel: str, hoje: str | None = None,
@@ -396,10 +566,9 @@ def situacao(root: Path, rel: str, hoje: str | None = None,
     """
     antes = chancelado(root, rel) if base in (None, REF) else conteudo_em(root, base, rel)
     depois = atual(root, rel) or ""
-    base = normalise_md(antes) if antes is not None else ""
-    agora = normalise_md(depois)
-    return Situacao(arquivo=rel, tem_chancela=antes is not None, antes=base, depois=agora,
-                    hunks=hunks(base, agora), vencidas=vencidas(depois, hoje))
+    return Situacao(arquivo=rel, tem_chancela=antes is not None, antes=antes or "",
+                    depois=depois, mudancas=mudancas(antes or "", depois),
+                    vencidas=vencidas(depois, hoje))
 
 
 def estados(s: Situacao) -> list[dict]:
@@ -426,16 +595,16 @@ def estados(s: Situacao) -> list[dict]:
             estado = "com chancela"
         else:
             estado = "mexido"
-        meus = [h for h in s.hunks
-                if h.j1 <= t.fim - 1 and max(h.j2, h.j1 + 1) > t.linha - 1]
+        meus = [m for m in s.mudancas
+                if m.linha <= t.fim - 1 and max(m.fim, m.linha + 1) > t.linha]
         out.append({
             "file": s.arquivo, "heading": t.titulo, "path": t.caminho,
             "line": t.linha, "lines": t.linhas, "state": estado,
-            "hunks": [h.n for h in meus],
+            "hunks": [m.n for m in meus],
             "blocked": bloqueio_de(t.texto),
             "caveats": [{"mark": m, "line": t.linha + n - 1, "text": l}
                         for n, m, l in ressalvas(t.texto)],
-            "dropped": [l for h in meus for l in h.sumidas],
+            "dropped": [l for m in meus for l in m.sumidas],
         })
     return out
 
@@ -479,26 +648,29 @@ def marca_da(marca: str) -> str:
             "🚫": "🚫 **discordo** — "}.get(marca, "")
 
 
-def inserir_marca(root: Path, rel: str, caminho: str, marca: str, texto: str,
-                  prazo: str | None = None) -> bool:
-    """Write the reservation as a blockquote, right under the passage's heading.
+def linha_de_marca(marca: str, texto: str, prazo: str | None = None) -> str:
+    """The reservation, in the agreed form. The surface writes it so nobody has to remember
+    it — the only reason a convention survives contact with a Tuesday."""
+    return "> " + marca_da(marca).format(prazo=prazo or "") + texto.strip()
 
-    The form is not the author's to remember: the surface writes it, which is the only
-    reason a convention survives contact with a Tuesday.
+
+def inserir_apos(root: Path, rel: str, linha: int, bloco: str) -> bool:
+    """Insert a block after line `linha` (1-based; 0 is the top), as a block of its own.
+
+    Blank lines on both sides, always: a reservation glued to a quote above it would become
+    part of that quote, and the change it annotates would no longer be the same change.
     """
-    modelo = marca_da(marca)
-    if not modelo:
+    texto = atual(root, rel)
+    if texto is None:
         return False
-    atual_texto = atual(root, rel)
-    if atual_texto is None:
-        return False
-    linhas = atual_texto.splitlines()
-    alvo = next((t for t in trechos(atual_texto) if t.caminho == caminho), None)
-    if alvo is None:
-        return False
-    corpo = "> " + modelo.format(prazo=prazo or "") + texto.strip()
-    i = alvo.linha if alvo.titulo_bruto else alvo.linha - 1
-    novas = linhas[:i] + ["", corpo] + linhas[i:]
+    linhas = texto.splitlines()
+    linha = max(0, min(linha, len(linhas)))
+    antes, depois = linhas[:linha], linhas[linha:]
+    while antes and not antes[-1].strip():
+        antes.pop()
+    while depois and not depois[0].strip():
+        depois.pop(0)
+    novas = antes + ([""] if antes else []) + bloco.splitlines() + ([""] + depois if depois else [])
     (root / rel).write_text("\n".join(novas) + "\n", encoding="utf-8")
     return True
 
@@ -508,28 +680,31 @@ def sha_do(texto: str) -> str:
 
 
 class Conflito(Exception):
-    """The file moved under you: someone else's editor, or an agent, got there first."""
+    """The text you edited is no longer in the file: someone else got there first."""
 
     def __init__(self, atual: str):
         super().__init__("o texto mudou desde que você abriu")
         self.atual = atual
 
 
-def substituir_trecho(root: Path, rel: str, caminho: str, novo: str, sha_base: str) -> str:
-    """Save an edited passage, refusing to overwrite what changed meanwhile.
+def substituir_texto(root: Path, rel: str, original: str, novo: str, linha: int) -> None:
+    """Save an edited stretch of the file, located by what it said, not where it was.
 
-    Optimistic concurrency, which is what the situation asks for: three sessions and an
-    editor write the same files, and a lock nobody can see is worse than a refusal you can.
+    An agent inserting a line at the top moves every line below; anchoring by position
+    would then write your paragraph over someone else's. The original text is searched
+    for, the occurrence nearest to where you saw it wins, and if it is not there any more
+    the save is refused and both versions are shown. There is no blind overwrite.
     """
-    atual_texto = atual(root, rel)
-    if atual_texto is None:
+    texto = atual(root, rel)
+    if texto is None:
         raise FileNotFoundError(rel)
-    alvo = next((t for t in trechos(atual_texto) if t.caminho == caminho), None)
-    if alvo is None:
-        raise Conflito(atual_texto)
-    if sha_base and sha_do(alvo.texto) != sha_base:
-        raise Conflito(alvo.texto)
-    linhas = atual_texto.splitlines()
-    novas = linhas[:alvo.linha - 1] + novo.rstrip("\n").splitlines() + linhas[alvo.fim - 1:]
+    linhas = texto.splitlines()
+    alvo = original.rstrip("\n").splitlines()
+    k = len(alvo)
+    achados = [i for i in range(len(linhas) - k + 1) if linhas[i:i + k] == alvo] if k else []
+    if not achados:
+        ini = max(0, linha - 1)
+        raise Conflito("\n".join(linhas[ini:ini + max(k, 1)]))
+    i = min(achados, key=lambda x: abs(x - (linha - 1)))
+    novas = linhas[:i] + novo.rstrip("\n").splitlines() + linhas[i + k:]
     (root / rel).write_text("\n".join(novas) + "\n", encoding="utf-8")
-    return sha_do(novo)

@@ -8,8 +8,8 @@ same day, with every number below measured on a real repository.
 
 **A copy of each tracked file, as you last endorsed it, stored in `refs/km/chancela`.**
 
-Reviewing is comparing that copy with the file on disk. Approving a passage means writing
-that passage into the copy. There is nothing else: no identity per block, no anchors, no
+Reviewing is comparing that copy with the file on disk. Approving a block means writing
+that block into the copy. There is nothing else: no identity per block, no anchors, no
 hashes to maintain.
 
 Blocks were a storage decision wearing the costume of a model decision. In practice a
@@ -40,11 +40,25 @@ with no merge, and disappears with one command.
 All verified. The `-L` form is the important one: it answers a per-passage question with no
 per-passage storage, delimiting by the text of the heading rather than by any identifier.
 
-## The act is per passage
+## The act is per block
 
-The ref holds whole files; the gesture is per hunk. What lands in the ref is *the previous
-chancel plus the hunks you accepted* — `git add -p` semantics. Accepting everything and
-accepting one paragraph are the same operation at different scales.
+The ref holds whole files; the gesture is per **Markdown block** — a paragraph, a list item,
+a table, a heading, a quote, a code fence. What lands in the ref is *the previous chancel plus
+the blocks you accepted* — `git add -p` semantics, at the grain prose actually has. Nobody
+needs to approve half a paragraph, and a line diff kept offering exactly that.
+
+A **change** is a run of blocks that differ between two runs that do not. It is one row on
+the page and one number in `km pendente` (`2`); its blocks are `2.1`, `2.2`. Headings
+do not cut anything: they are blocks like the rest, and label the change they sit in.
+
+Blocks are paired by similarity and only with blocks of the same kind, so a rewritten
+paragraph is an edit and an unrelated one in the same place is one that left and one that
+arrived. A re-aligned table has the same key as before and is not a change. Accepting every
+block reproduces the file byte for byte; accepting none reproduces the chancel.
+
+On the page a block is named by the hash of its content, not its position: a page that
+asks to approve a block after the file moved underneath it is refused rather than served a
+different block.
 
 ## Caveats live in the document
 
@@ -92,8 +106,8 @@ cosmetic re-alignment.
 | | |
 |---|---|
 | `km pendente [<arquivo>]` | what changed since the chancel, and what never had one. `--json` feeds the editor |
-| `km chancela <arquivo> --hunk <n\|título>` | write that passage into the ref. Repeatable; `--all` takes the file as it is |
-| `km restore <arquivo> --hunk <n\|título>` | put the chancelled text back on disk — the only command that writes a document |
+| `km chancela <arquivo> --hunk <n\|n.m\|título>` | write a change (`2`), one of its blocks (`2.1`) or every change in a section into the ref. Repeatable; `--all` takes the file as it is |
+| `km restore <arquivo> --hunk <n\|n.m\|título>` | put the chancelled text back on disk |
 | `km lint [<arquivo>]` | the convention: a `🚫` pending, a `❓` past its date, a caveat that vanished |
 | `km quando <arquivo> --trecho <título>` | when this passage last had a chancel (`git log -L`) |
 | `km baseline <arquivo>` | the chancelled copy, for a diff's left-hand column |
@@ -107,12 +121,13 @@ listing. The `🚫` refusal is enforced here — the passage is left out and nam
 `--force` overrides it.
 
 `km serve` is where reviewing happens: a local page, started when you sit down and stopped
-with Ctrl-C. It shows the document whole, in three columns — the chancel (or any branch or
-commit), the file today, the verdicts — with the change marked inside the text as a
-tracked-changes document does it, in the spirit of pandiff. The middle column is Markdown
-source, highlighted and editable, saved back per passage under optimistic concurrency; the
-canonical form that lets a re-aligned table count as unchanged decides what moved and never
-touches what is shown or written. Inside VS Code, one command starts it and opens it in the
+with Ctrl-C. Unchanged text reads as one column at full width; each change is a row in three
+columns — the chancel (or any branch or commit) with what left struck, the file today with
+what arrived marked, and a verdict per block. The middle column is Markdown source,
+highlighted and always editable; a save is located by the text it replaces rather than by
+line number, and is refused, showing what is there now, if that text is gone. The canonical
+form that lets a re-aligned table count as unchanged decides what moved and never touches
+what is shown or written. Inside VS Code, one command starts it and opens it in the
 same window, bound to the window's lifetime.
 
 Both surfaces read the ref, not a ledger, and both **write the marks**: approving, deferring

@@ -22,41 +22,44 @@ outside it never appears.
 km serve          # binds 127.0.0.1:8431 — Ctrl-C ends it
 ```
 
-The document, whole, from top to bottom — not a stack of cards. Three columns, one row per
-passage:
+The document, whole, from top to bottom. **Text that did not change is just text**: one
+column, full width, no buttons — headings cut nothing. **Each change is one row**, placed
+where it happened, in three columns:
 
 | | |
 |---|---|
-| **the chancel** | the passage as you endorsed it. A selector swaps it for any branch or commit |
-| **now** | the file today, with what is new, gone or edited marked in place, and editable |
-| **what to do** | the verdicts for that passage |
+| **the chancel** | the blocks as you endorsed them, with what left struck through. A selector swaps it for any branch or commit |
+| **now** | the file today, with what arrived marked in place. Editable, like everything else in this column |
+| **what to do** | a verdict per block, and one for the whole change |
 
-The middle column is Markdown **source**, highlighted — headings, emphasis, code, links,
-quotes — with the change marked inside the text the way a tracked-changes document does it:
-a rewritten line shows word by word, a line that left stays visible and struck through, a new
-one arrives green. The idea is [pandiff](https://github.com/davidar/pandiff)'s: you read the
-text, not a report about the text. It is source and not rendered prose on purpose — the
-column is editable, and editing rendered Markdown means a serialiser rewrites the whole file
-on save.
+**The unit you approve is a Markdown block** — a paragraph, a list item, a table, a heading,
+a quote, a code fence. An edit inside a paragraph is the whole paragraph; nobody needs to
+approve half of one. A change can be approved whole, or block by block.
 
-Where nothing changed, the text spans both columns and reads at full width; the two columns
-appear exactly where there is something to compare.
+The middle column is Markdown **source**, highlighted, with the change marked the way a
+tracked-changes document does it, in the spirit of [pandiff](https://github.com/davidar/pandiff).
+Source and not rendered prose on purpose: the column is editable, and editing rendered
+Markdown means a serialiser rewrites the whole file on save. Wide tables scroll sideways
+instead of wrapping.
 
 | | |
 |---|---|
-| **Aprovar** | the passage goes into the chancel |
-| **A validar…** | writes `> ❓ **a confirmar até …**` into the text and chancels it: the half-chancel is a visible line, not a hidden state |
-| **Reverter…** | puts the text back to what you had chancelled |
-| **⚠️ · 🚫 · ❓** | write the reservation into the file, in the agreed form |
-| **✎** | edit the passage in place and save it to the file |
+| **Aprovar** | the block goes into the chancel |
+| **A validar…** | writes `> ❓ **a confirmar até …**` right after the block, and chancels both: the half-chancel is a visible line, not a hidden state |
+| **Reverter** | puts the chancel's text back in the file |
+| **⚠️ · 🚫** | start a reservation after the block, in the agreed form, for you to finish |
 
-Saving is optimistically concurrent: if the file moved while the box was open — another
-agent, the editor — the page shows both texts and overwrites nothing until you say so. What
-the box holds is the file's own text: the canonical form that lets a re-aligned table count
-as unchanged is used to decide what moved, never to display or to save.
+The whole second column is always editable — click and type. The action column offers
+**Salvar no arquivo** when there is something to save; Ctrl+S saves, Esc discards. A save is
+located by what the text said, not by line number, so a line an agent inserted above does not
+make you write over someone else's paragraph; if your text is no longer in the file, the save
+is refused and the page shows what is there now. **⚠️ ❓ 🚫 at the top** insert a
+reservation at the cursor, on its own line.
 
-Keyboard: `j` `k` move, `a` approve, `v` defer with a date, `r` revert, `e` edit, `Esc`
-closes. Only the document you are reading is built in full; the rail on the left is counts.
+A block is identified by its content, never its position: a page that asks to approve a
+block after the file moved gets a refusal, not a different block.
+
+Keyboard: `j` `k` move between changes, `a` approves the change in focus.
 
 The server does not stay up: you start it when you sit down to review. Inside VS Code, the
 command **km: abrir o painel da chancela** (`Ctrl+Alt+P`) starts it and opens it in the same
@@ -86,9 +89,9 @@ script or an agent reads the state.
 km init                          # creates .km/config.json — the include list is the opt-in
 km pendente                      # what changed since the chancel, and what never had one
 km pendente --novos              # the list of files with no chancel
-km chancela regras.md --hunk 2   # that passage into the ref — `git add -p` semantics
+km chancela regras.md --hunk 2   # change 2 into the ref; `--hunk 2.1` only its first block
 km chancela regras.md --all      # the file as it stands today
-km restore  regras.md --hunk 2   # put the chancelled text back on disk
+km restore  regras.md --hunk 2.1 # put the chancelled text of that block back on disk
 km lint                          # 🚫 pending · ❓ past its date · ⚠️ caveat that vanished
 km quando   regras.md --trecho "colunas"   # when that passage last had a chancel
 km baseline regras.md            # the chancelled copy, for a diff's left-hand column

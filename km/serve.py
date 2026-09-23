@@ -280,15 +280,6 @@ def so_esquerda(texto: str) -> list[dict]:
     return [{"tipo": "sumiu", "dir": None, "esq": l["dir"]} for l in realcar(texto)]
 
 
-def _corpo(trecho) -> str:
-    """The passage without its own heading — the heading is already the card's title."""
-    if trecho is None:
-        return ""
-    if trecho.titulo_bruto:
-        return trecho.texto.split("\n", 1)[1] if "\n" in trecho.texto else ""
-    return trecho.texto
-
-
 def _vencida(linha: str, hoje: str) -> bool:
     m = ch.PRAZO.search(linha)
     return bool(m and m.group(1) < hoje)
@@ -302,32 +293,49 @@ def _ultima(root: Path, rel: str) -> str:
     return partes[1] if len(partes) > 1 else ""
 
 
-def _ordem(base: list[str], atual: list[str]) -> list[tuple[str, bool]]:
-    """The passages of a file in reading order, including the ones that left.
+def segmentos(s: ch.Situacao) -> list[dict]:
+    """The document in reading order: stretches that did not change, and changes.
 
-    Both sides are lists of heading paths; the same matching that produces a diff puts a
-    removed passage back between the two it used to live between.
+    A stretch that did not change is just text — one editable column, full width, no
+    buttons. A change is one row, made of the blocks that changed in it, each with its
+    own verdict. Headings are text like any other; they cut nothing.
     """
-    fora = set(base) - set(atual)
-    if not fora:
-        return [(c, True) for c in atual]
-    saida: list[tuple[str, bool]] = []
-    for tag, i1, i2, j1, j2 in difflib.SequenceMatcher(None, base, atual,
-                                                       autojunk=False).get_opcodes():
-        if tag in ("delete", "replace"):
-            saida += [(c, False) for c in base[i1:i2] if c in fora]
-        if tag != "delete":
-            saida += [(c, True) for c in atual[j1:j2]]
-    return saida
+    pd, ba, bd, ops = ch._alinhar(s.antes, s.depois)
+    por_n = {m.n: m for m in s.mudancas}
+    out: list[dict] = []
+    n = 0
+    for tag, i1, i2, j1, j2 in ops:
+        if tag == "equal":
+            if j2 > j1:
+                texto = "".join(b.cru for b in bd[j1:j2]).rstrip("\n")
+                out.append({"tipo": "igual", "linha": bd[j1].linha, "texto": texto,
+                            "linhas": realcar(texto),
+                            "n_linhas": len(texto.splitlines())})
+            continue
+        n += 1
+        m = por_n[n]
+        unidades = []
+        for u in m.unidades:
+            a = u.antes.texto if u.antes else ""
+            d = u.depois.texto if u.depois else ""
+            unidades.append({
+                "id": u.id, "sha": u.sha, "tipo": u.tipo, "titulo": u.titulo,
+                "bloqueio": u.bloqueio, "sumidas": u.sumidas,
+                "texto": d, "linha": u.depois.linha if u.depois else m.linha,
+                "linhas": so_esquerda(a) if u.tipo == "sumiu" else marcar(a, d),
+            })
+        out.append({"tipo": "mudanca", "n": n, "titulo": m.titulo, "caminho": m.caminho,
+                    "linha": m.linha, "bloqueio": m.bloqueio, "sumidas": m.sumidas,
+                    "unidades": unidades})
+    return out
 
 
 def estado(root: Path, by: str = "", base: str | None = None,
            arquivo: str | None = None) -> dict:
     """The state for the page.
 
-    The heavy part — every line of every passage, highlighted and marked — is built only
-    for the document being read. Building it for the whole repository was 4.7 MB and 1.3 s
-    per request, and the page asks again every eight seconds.
+    The heavy part — every line of the document, highlighted and marked — is built only
+    for the document being read. The rail on the left is counts.
     """
     hoje = date.today().isoformat()
     docs = []
@@ -336,65 +344,15 @@ def estado(root: Path, by: str = "", base: str | None = None,
         if not s.depois.strip():
             continue
         cheio = rel == arquivo
-        # O texto que a tela mostra e a caixa edita é o do arquivo, cru. A versão
-        # canonizada (tabela re-alinhada vira a mesma tabela) serve só para decidir o que
-        # mudou de verdade — mostrar ou salvar o texto canonizado reescreveria o arquivo
-        # do autor por conta própria.
-        base_cru = ""
-        antes: dict = {}
-        agora: dict = {}
+        d = {"file": rel, "rastreado": s.tem_chancela, "cheio": cheio,
+             "mudancas": len(s.mudancas), "blocos": len(s.unidades),
+             "bloqueado": any(u.bloqueio for u in s.unidades),
+             "vencidas": len(s.vencidas), "linhas": len(s.depois.splitlines())}
         if cheio:
-            base_cru = (ch.chancelado(root, rel) if base in (None, ch.REF)
-                        else ch.conteudo_em(root, base, rel)) or ""
-            antes = {x.caminho: x for x in ch.trechos(base_cru)}
-            agora = {x.caminho: x for x in ch.trechos(ch.atual(root, rel) or "")}
-
-        vivos = {e["path"]: e for e in ch.estados(s)}
-        ordem = (_ordem(list(antes), list(vivos)) if cheio
-                 else [(c, True) for c in vivos])
-
-        trechos = []
-        for caminho, vivo in ordem:
-            if not vivo:
-                # Um trecho que saiu do arquivo aparece onde ele estava, não empurrado
-                # para o fim: é lá que você lembra dele, e é lá que a decisão faz sentido.
-                velho_tr = antes[caminho]
-                trechos.append({
-                    "heading": velho_tr.titulo, "path": caminho, "line": velho_tr.linha,
-                    "lines": velho_tr.linhas, "estado": "apagado", "bloqueado": "",
-                    "ressalvas": [], "sumidas": [], "texto": "", "sha": "",
-                    "linhas": so_esquerda(velho_tr.texto),
-                })
-                continue
-            e = vivos[caminho]
-            tr = {
-                "heading": e["heading"], "path": e["path"], "line": e["line"],
-                "lines": e["lines"], "estado": e["state"], "bloqueado": e["blocked"],
-                "ressalvas": [{"mark": c["mark"], "text": c["text"].lstrip("> ").strip(),
-                               "vencida": c["mark"] == "❓" and _vencida(c["text"], hoje)}
-                              for c in e["caveats"]],
-            }
-            if cheio:
-                atual_txt = agora[e["path"]].texto if e["path"] in agora else ""
-                base_txt = antes[e["path"]].texto if e["path"] in antes else ""
-                tr.update({
-                    "texto": atual_txt,
-                    # The sha of what the page is showing: saving sends it back, and the
-                    # server refuses if the passage moved meanwhile.
-                    "sha": ch.sha_do(atual_txt),
-                    "sumidas": ch.sumidas(base_txt.splitlines(), atual_txt.splitlines()),
-                    # De pé é de pé: se a única diferença for cosmética — uma tabela
-                    # re-alinhada —, o texto aparece limpo, sem marcas que não pedem nada.
-                    "linhas": (realcar(atual_txt) if e["state"] == "com chancela"
-                               else marcar(base_txt, atual_txt)),
-                })
-            else:
-                tr["sumidas"] = e["dropped"]
-            trechos.append(tr)
-
-        docs.append({"file": rel, "trechos": trechos, "rastreado": s.tem_chancela,
-                     "cheio": cheio, "em": _ultima(root, rel) if cheio else "",
-                     "linhas": len(s.depois.splitlines())})
+            d["em"] = _ultima(root, rel)
+            d["segmentos"] = segmentos(s)
+            d["vencidas_txt"] = [{"linha": l, "prazo": p, "texto": x} for l, p, x in s.vencidas]
+        docs.append(d)
     docs.sort(key=lambda d: (not d["rastreado"], d["file"]))
     return {"repo": root.name, "root": str(root), "docs": docs, "hoje": hoje, "by": by,
             "base": base or ch.REF, "revisoes": ch.revisoes(root)}
@@ -402,64 +360,66 @@ def estado(root: Path, by: str = "", base: str | None = None,
 
 # ---- the actions ---------------------------------------------------------------------
 
-def _alvos(root: Path, rel: str, caminho: str) -> tuple[ch.Situacao, list, list[str]]:
+def _unidades(root: Path, rel: str, shas: list[str]) -> tuple[ch.Situacao, list[ch.Unidade]]:
+    """The blocks the page asked for, found by content. If any is missing the file moved
+    under the page, and acting on the rest would be acting on something you did not see."""
     s = ch.situacao(root, rel)
-    est = next((e for e in ch.estados(s) if e["path"] == caminho), None)
-    if est is None:
-        raise KeyError(caminho)
-    alvos = [h for h in s.hunks if h.n in est["hunks"]]
-    titulos = list(dict.fromkeys(h.titulo for h in alvos))
-    return s, alvos, titulos
+    achadas = ch.unidades_por_sha(s.mudancas, set(shas))
+    if len(achadas) != len(set(shas)):
+        raise LookupError("o arquivo mudou enquanto você olhava — a tela foi atualizada")
+    return s, achadas
 
 
 def agir(root: Path, pedido: dict, by: str) -> dict:
     """One place for every verdict, so the page and the CLI cannot drift apart."""
     acao = pedido.get("acao")
     rel = pedido.get("file", "")
-    caminho = pedido.get("path", "")
-    texto = (pedido.get("texto") or "").strip()
+    if rel not in ch.documentos(root):
+        return {"ok": False, "erro": f"{rel} está fora do include do .km/config.json"}
 
     if acao == "salvar":
         try:
-            ch.substituir_trecho(root, rel, caminho, pedido.get("texto", ""),
-                                 pedido.get("sha", ""))
+            ch.substituir_texto(root, rel, pedido.get("original", ""),
+                                pedido.get("texto", ""), int(pedido.get("linha") or 1))
         except ch.Conflito as e:
-            return {"ok": False, "erro": "o texto mudou desde que você abriu",
+            return {"ok": False, "erro": "o texto mudou no arquivo desde que você abriu",
                     "conflito": {"atual": e.atual}}
         return {"ok": True, "msg": "salvo no arquivo"}
 
-    if acao == "marca":
-        if not ch.inserir_marca(root, rel, caminho, pedido.get("marca", "⚠️"), texto,
-                                pedido.get("prazo")):
-            return {"ok": False, "erro": "não consegui escrever a marca"}
-        return {"ok": True, "msg": "escrito no texto"}
-
     try:
-        s, alvos, titulos = _alvos(root, rel, caminho)
-    except KeyError:
-        return {"ok": False, "erro": "esse trecho não está mais no arquivo"}
+        s, alvos = _unidades(root, rel, pedido.get("shas") or [])
+    except LookupError as e:
+        return {"ok": False, "erro": str(e)}
+    if not alvos:
+        return {"ok": False, "erro": "nada escolhido"}
 
     if acao == "reverter":
-        if not alvos:
-            return {"ok": False, "erro": "nada mudou aqui desde a chancela"}
         cli.reverter(root, rel, alvos, s)
-        return {"ok": True, "msg": "de volta ao texto chancelado: " + ", ".join(titulos)}
+        return {"ok": True, "msg": f"{len(alvos)} bloco(s) de volta ao texto chancelado"}
 
-    if acao in ("aprovar", "validar"):
-        if acao == "validar":
-            if not ch.inserir_marca(root, rel, caminho, "❓", texto, pedido.get("prazo")):
-                return {"ok": False, "erro": "não consegui escrever o prazo no texto"}
-            s, alvos, titulos = _alvos(root, rel, caminho)   # o arquivo acabou de mudar
-        if not alvos:
-            return {"ok": False, "erro": "nada pendente neste trecho"}
-        barrados = [h for h in alvos if h.bloqueio]
-        if barrados and not pedido.get("force"):
-            return {"ok": False, "erro": "🚫 " + barrados[0].bloqueio.lstrip("> ")}
+    if acao == "validar":
+        # O ❓ entra logo depois do último bloco escolhido, como bloco próprio, e entra na
+        # chancela junto: a meia-chancela é uma linha que qualquer leitor vê.
+        linha = max((u.depois.fim - 1 for u in alvos if u.depois),
+                    default=min(u.antes.linha for u in alvos) - 1)
+        marca = ch.linha_de_marca("❓", pedido.get("texto") or "", pedido.get("prazo"))
+        shas = {u.sha for u in alvos}
+        if not ch.inserir_apos(root, rel, linha, marca):
+            return {"ok": False, "erro": "não consegui escrever o prazo no texto"}
+        s = ch.situacao(root, rel)
+        alvos = [u for u in s.unidades
+                 if u.sha in shas or (u.depois and u.depois.texto == marca)]
+        acao = "aprovar"
+
+    if acao == "aprovar":
+        barradas = [u for u in alvos if u.bloqueio]
+        if barradas and not pedido.get("force"):
+            return {"ok": False, "erro": "🚫 " + barradas[0].bloqueio.lstrip("> ")}
         commit = cli.chancelar(root, rel, alvos, s, pedido.get("motivo"), by)
-        extra = [l for h in alvos for l in h.sumidas]
-        msg = f"na chancela ({commit[:8]}): " + ", ".join(titulos)
-        if extra:
-            msg += f" · {len(extra)} ressalva(s) saíram junto"
+        saiu = sum(len(u.sumidas) for u in alvos)
+        msg = f"{len(alvos)} bloco(s) na chancela ({commit[:8]})"
+        if saiu:
+            msg += f" · {saiu} ressalva(s) removida(s) aprovada(s) junto"
         return {"ok": True, "msg": msg}
 
     return {"ok": False, "erro": f"ação desconhecida: {acao}"}
@@ -541,7 +501,7 @@ PAGE = """<!doctype html><html lang="pt-br"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>km · chancela</title><style>
 /* Escuro por decisao, nao por preferencia do sistema: e onde o autor trabalha. */
-:root{--bg:#0F1419;--card:#141B22;--ink:#DCE3EA;--mut:#8695A2;--rule:#232D36;--acc:#6EA8D8;
+:root{color-scheme:dark;--bg:#0F1419;--card:#141B22;--ink:#DCE3EA;--mut:#8695A2;--rule:#232D36;--acc:#6EA8D8;
 --ok:#7BC49A;--ok-bg:#16301F;--ace:#E0B463;--ace-bg:#2E2513;--neg:#E09A9A;--neg-bg:#331F1F;
 --val:#6EA8D8;--val-bg:#152433;--pend:#8695A2;--pend-bg:#1C242B}
 *{box-sizing:border-box}
@@ -572,7 +532,7 @@ letter-spacing:.08em;color:var(--mut)}
 
 /* A grade: uma linha por trecho, tres colunas alinhadas. O texto corre de cima a baixo;
    o que separa um trecho do outro e uma regua fina, nao um cartao. */
-.doc{flex:1;min-width:0;display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr) 168px;
+.doc{flex:1;min-width:0;display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr) 196px;
 align-items:stretch}
 .cabgrade{position:sticky;top:45px;background:var(--bg);border-bottom:1px solid var(--rule);
 padding:6px 14px;z-index:4}
@@ -599,6 +559,10 @@ ins{background:var(--ok-bg);color:var(--ok);text-decoration:none;padding:0 2px;b
 .l-t1{font-size:16.5px}.l-t2{font-size:15px}.l-t3{font-size:13.8px}
 .l-cit{color:#B9C6D2}.l-marca{color:var(--ace)}
 .l-cod{color:#9FD3B8}.l-tab{color:#B9C6D2}
+/* Tabela não quebra linha: quebrada, uma linha de separadores vira vinte linhas de traços.
+   Ela rola na horizontal, dentro da própria coluna. */
+.ln.l-tab{white-space:pre;width:max-content;min-width:100%}
+.col.base,.col.agora{overflow-x:auto}
 .m-cerquilha{color:#54626E}.m-forte{color:#EDF2F7}.m-enfase{color:#CBD5DE;font-style:italic}
 .m-cod{color:#9FD3B8}.m-link{color:var(--acc)}.m-url{color:#54626E}
 .m-riscado{color:var(--mut)}
@@ -631,184 +595,207 @@ border:1px solid var(--rule);background:var(--bg);color:var(--ink)}
 .vazio{padding:24px;color:var(--mut)}
 @media(max-width:1200px){.doc{grid-template-columns:minmax(0,1fr) 150px}
 .col.base{display:none}.col.agora.inteiro{grid-column:auto}.lado{width:170px;flex-basis:170px}}
+
+/* uma mudança: cabeçalho de largura inteira, depois um bloco por linha */
+.cab-m{grid-column:1 / 4;display:flex;flex-wrap:wrap;gap:6px 12px;align-items:center;
+padding:10px 14px 8px;border-top:1px solid var(--ace);background:color-mix(in srgb,var(--ace-bg) 45%,transparent)}
+.cab-m.foco{box-shadow:inset 3px 0 0 var(--acc)}
+.cab-m .titulo-m{font-weight:600;color:#EDF2F7}
+.cab-m .botoes-m{margin-left:auto;display:flex;gap:6px;align-items:center}
+.cab-m .botoes-m button{font:inherit;font-size:12.5px;padding:3px 10px;border-radius:6px;cursor:pointer;
+border:1px solid var(--rule);background:var(--bg);color:var(--ink)}
+.cab-m .botoes-m button.pri{background:var(--ok-bg);border-color:var(--ok-bg);color:var(--ok)}
+.cab-m .botoes-m button[disabled]{opacity:.35;cursor:not-allowed}
+.cab-m .nota{flex-basis:100%;margin:2px 0 0}
+.cab-m .form{flex-direction:row;flex-wrap:wrap;align-items:center}
+.col.base.novo,.col.agora.sumiu{background:color-mix(in srgb,var(--bg) 70%,#000)}
+.dobra{grid-column:1 / 4;padding:4px 14px;color:var(--mut);font-size:11.5px;cursor:pointer;
+font-family:ui-monospace,Menlo,monospace;border-bottom:1px solid var(--rule)}
+.dobra:hover{color:var(--ink)}
+.aviso-doc{grid-column:1 / 4;padding:12px 14px;color:var(--ok);font-size:13px;border-bottom:1px solid var(--rule)}
+.bolinha{display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:6px;vertical-align:1px}
+.txt.mini{font-size:11.5px;max-height:160px;overflow:auto;margin-top:4px;opacity:.85}
+.topo .dir button{padding:3px 8px}
 </style></head><body>
 <div class="topo"><b id="repo">km</b><span class="n" id="resumo"></span>
 <div class="dir">
+  <span class="q">no cursor:</span>
+  <button onmousedown="event.preventDefault()" onclick="noCursor('⚠️')" title="ressalva: sem certeza">⚠️</button>
+  <button onmousedown="event.preventDefault()" onclick="noCursor('❓')" title="a confirmar, com prazo">❓</button>
+  <button onmousedown="event.preventDefault()" onclick="noCursor('🚫')" title="discordo — bloqueia a chancela">🚫</button>
+  <span style="width:10px"></span>
   <span class="q">comparar com</span><select id="base" onchange="trocarBase()"></select>
-  <button onclick="setVer('tudo')" id="v-tudo" aria-pressed="true">texto inteiro</button>
-  <button onclick="setVer('mudou')" id="v-mudou">só o que mudou</button>
+  <button onclick="setVer('tudo')" id="v-tudo">texto inteiro</button>
+  <button onclick="setVer('mudou')" id="v-mudou">só as mudanças</button>
 </div></div>
 <div class="recado" id="recado" hidden></div>
 <div class="corpo"><nav class="lado" id="lado"></nav><main class="doc" id="doc"></main></div>
 <script>
 const $ = (id) => document.getElementById(id);
-const esc = s => (s==null?'':String(s)).replace(/[&<>]/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;'}[m]));
+const esc = s => (s==null?'':String(s)).replace(/[&<>"]/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[m]));
 const neg = s => esc(s).replace(/\\*\\*(.+?)\\*\\*/g, '<b>$1</b>');
-const CH = {'com chancela':'e-aprovado','mexido':'e-mexido','sem chancela':'e-pendente',
-            'apagado':'e-negado'};
 const emDias = n => new Date(Date.now()+n*864e5).toISOString().slice(0,10);
-const pedeVoce = t => t.estado !== 'com chancela' || !!t.bloqueado
-  || (t.sumidas||[]).length > 0 || (t.ressalvas||[]).some(r => r.vencida);
+const MODELO = {'⚠️': '> ⚠️ **sem certeza** — ', '🚫': '> 🚫 **discordo** — ',
+                '❓': () => '> ❓ **a confirmar até ' + emDias(14) + '** — '};
+const TIPO = {novo: 'novo', sumiu: 'saiu', mexido: 'editado'};
 
-let D = null, doc = 0, foco = 0, ver = 'tudo', base = null;
+let D = null, doc = 0, ver = 'tudo', base = null, foco = null;
 let form = null, recado = '', conflito = null;
-// O texto que você escreveu e ainda não salvou, por trecho. Enquanto houver algo aqui a
-// tela não se recarrega sozinha: recarregar apagaria o que você digitou.
-let sujos = {};
+// O texto que você escreveu e ainda não salvou, por pedaço da tela. Enquanto houver algo
+// aqui a tela não se recarrega sozinha: recarregar apagaria o que você digitou.
+let sujos = {}, originais = {};
 const temSujo = () => Object.keys(sujos).length > 0;
+const naChancela = () => !D || D.base === 'refs/km/chancela';
+// O texto do arquivo termina em quebra de linha e o da tela não; comparar sem isso evita
+// marcar como editado um pedaço em que você só clicou.
+const mesmo = (a, b) => (a||'').replace(/\\s+$/, '') === (b||'').replace(/\\s+$/, '');
 
 async function carregar(arquivo){
-  // Só o documento aberto vem com o texto inteiro marcado; o resto é a régua lateral.
+  // Só o documento aberto vem com o texto; o resto é a régua lateral.
   const q = new URLSearchParams();
   if (base) q.set('base', base);
-  const alvoArq = arquivo || (D && D.docs[doc] ? D.docs[doc].file : '');
-  if (alvoArq) q.set('file', alvoArq);
+  const alvo = arquivo || (D && D.docs[doc] ? D.docs[doc].file : '');
+  if (alvo) q.set('file', alvo);
   const nova = await (await fetch('/api/state?' + q)).json();
   base = nova.base;
-  const i = nova.docs.findIndex(d => d.file === alvoArq);
-  D = nova;
-  doc = i >= 0 ? i : 0;
-  if (!D.docs[doc] || !D.docs[doc].cheio) return carregar(D.docs[doc] ? D.docs[doc].file : '');
+  const i = nova.docs.findIndex(d => d.file === alvo);
+  D = nova; doc = i >= 0 ? i : 0;
+  if (D.docs[doc] && !D.docs[doc].cheio) return carregar(D.docs[doc].file);
   desenhar();
 }
 
 async function agir(corpo){
-  const r = await fetch('/api/act', {method:'POST',
-    headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({...corpo, base: base === 'refs/km/chancela' ? '' : base})});
+  const r = await fetch('/api/act', {method:'POST', headers:{'Content-Type':'application/json'},
+    body: JSON.stringify({...corpo, file: D.docs[doc].file,
+                          base: naChancela() ? '' : base})});
   const j = await r.json();
-  if (j.estado) { D = j.estado; }
+  if (j.estado) D = j.estado;
   recado = j.ok ? '✓ ' + (j.msg || 'feito') : '✕ ' + (j.erro || 'não deu');
-  if (j.conflito) {
-    conflito = {path: corpo.path, atual: j.conflito.atual};
-  } else {
-    conflito = null;
-    form = null;
-    if (j.ok && corpo.acao === 'salvar') delete sujos[corpo.path];
-  }
+  if (j.conflito) conflito = {chave: corpo.chave, atual: j.conflito.atual};
+  else { conflito = null; form = null; if (j.ok && corpo.chave) delete sujos[corpo.chave]; }
   desenhar();
   if (j.ok && !temSujo()) setTimeout(() => carregar(), 50);
 }
 
-const trechos = () => (D && D.docs[doc] ? D.docs[doc].trechos : []);
-const trecho = (i) => trechos()[i];
-const alvo = (i) => ({file: D.docs[doc].file, path: trecho(i).path});
-const visiveis = () => trechos().map((t,i)=>[t,i]).filter(([t])=> ver === 'tudo' || pedeVoce(t));
+const segs = () => (D && D.docs[doc] && D.docs[doc].segmentos) || [];
+const mudancas = () => segs().filter(s => s.tipo === 'mudanca');
+const achar = (n) => mudancas().find(m => m.n === n);
 
-function contar(d){
-  const c = {pe:0, mex:0, pend:0, neg:0};
-  for (const t of d.trechos){
-    if (t.bloqueado || t.estado === 'apagado') c.neg++;
-    else if (t.estado === 'mexido') c.mex++;
-    else if (t.estado === 'sem chancela') c.pend++;
-    else c.pe++;
-  }
-  return c;
-}
-
+// ---- a régua da esquerda ----------------------------------------------------------
 function lado(){
   let divisor = false;
   $('lado').innerHTML = D.docs.map((d,i)=>{
     let antes = '';
     if (!d.rastreado && !divisor) { divisor = true;
       antes = '<div class="rot" style="padding:11px 8px 5px">sem chancela ainda</div>'; }
-    const c = contar(d), t = d.trechos.length || 1;
-    const seg = [[c.pe,'var(--ok)'],[c.mex,'var(--ace)'],[c.neg,'var(--neg)'],[c.pend,'var(--rule)']]
-      .map(([n,cor])=>n?`<i style="width:${100*n/t}%;background:${cor}"></i>`:'').join('');
+    const estado = !d.rastreado ? `${d.blocos} blocos`
+      : (d.mudancas ? `${d.mudancas} mudança${d.mudancas>1?'s':''} · ${d.blocos} bloco${d.blocos>1?'s':''}` : 'em dia');
+    const cor = !d.rastreado ? 'var(--rule)' : (d.bloqueado ? 'var(--neg)' : (d.mudancas ? 'var(--ace)' : 'var(--ok)'));
     return antes + `<button aria-current="${i===doc}" onclick="abrir(${i})">
       <div class="f">${esc(d.file)}</div>
-      <div class="q">${c.pe}/${d.trechos.length} de pé${c.mex?' · '+c.mex+' mexidos':''}</div>
-      <div class="barra">${seg}</div></button>`;}).join('');
-}
-
-// Uma linha de cada lado, sempre no mesmo número: onde um lado não tem nada, entra uma
-// linha fantasma, que não é texto — ela é pulada na hora de ler o que você escreveu.
-function fantasma(){ return '<span class="ln g" data-g contenteditable="false">&nbsp;</span>'; }
-
-function coluna(ls, lado, marcaTipo){
-  if (!ls || !ls.length) return '<div class="vaziocol">— nada aqui —</div>';
-  return ls.map(l => {
-    const c = l[lado];
-    if (!c) return fantasma();
-    const tipo = marcaTipo ? (l.tipo === 'igual' ? '' : l.tipo) : '';
-    return `<span class="ln ${tipo} ${c.classe}">${c.html}</span>`;
+      <div class="q"><i class="bolinha" style="background:${cor}"></i>${estado}${d.vencidas?' · ❓ vencida':''}</div></button>`;
   }).join('');
 }
 
+// ---- as linhas, dos dois lados ----------------------------------------------------
+// Uma linha de cada lado, sempre no mesmo número: onde um lado não tem nada entra uma linha
+// fantasma, que não é texto — ela é pulada na hora de ler o que você escreveu.
+const fantasma = () => '<span class="ln g" data-g contenteditable="false"></span>';
+function coluna(ls, lado){
+  return (ls||[]).map(l => {
+    const c = l[lado];
+    if (!c) return fantasma();
+    return `<span class="ln ${l.tipo === 'igual' ? '' : l.tipo} ${c.classe}">${c.html}</span>`;
+  }).join('');
+}
 function textoDaColuna(el){
   const partes = [];
   for (const n of el.childNodes){
-    if (n.nodeType === 1 && n.hasAttribute && n.hasAttribute('data-g')) continue;
+    if (n.nodeType === 1 && n.hasAttribute('data-g')) continue;
     partes.push(n.nodeType === 1 ? n.innerText : n.textContent);
   }
   return partes.join('\\n').replace(/ /g, '');
 }
+function editavel(chave, linha, texto, html){
+  originais[chave] = texto;
+  const corpo = sujos[chave] !== undefined
+    ? esc(sujos[chave]).split('\\n').map(l => `<span class="ln">${l}</span>`).join('')
+    : html;
+  return `<div class="txt edit" contenteditable="plaintext-only" spellcheck="false"
+    data-chave="${esc(chave)}" data-linha="${linha}"
+    oninput="mexeu(this)" onfocus="foco=this.dataset.chave">${corpo}</div>`;
+}
 
-function avisos(t){
-  let out = '';
-  for (const s of (t.sumidas||[])) {
-    out += `<div class="nota"><b>ressalva removida</b> — ${neg(s.replace(/^\\s*>\\s*/,''))}
-      <div class="q">estava na chancela. Aprovar aqui aprova a remoção.</div></div>`;
-  }
-  if (t.bloqueado) out += `<div class="nota"><b>🚫 bloqueado</b> — ${neg(t.bloqueado.replace(/^\\s*>\\s*/,''))}</div>`;
-  for (const r of (t.ressalvas||[])) {
-    if (r.vencida) out += `<div class="nota aviso"><b>❓ prazo vencido</b> — ${neg(r.text)}</div>`;
+// ---- o que fazer, por bloco e por mudança -----------------------------------------
+function salvarCel(chave){
+  if (sujos[chave] === undefined) return '';
+  let out = `<span class="chip e-mexido">editado aqui</span>
+    <button class="pri" onclick="salvar('${chave}')">Salvar no arquivo</button>
+    <button onclick="descartar('${chave}')">Descartar</button>
+    <div class="q">Ctrl+S salva · Esc descarta</div>`;
+  if (conflito && conflito.chave === chave) {
+    out += `<div class="nota"><b>esse texto mudou no arquivo</b>
+      <div class="q">outro agente ou o editor chegaram primeiro. Nada foi sobrescrito.
+      No arquivo agora:</div><div class="txt mini">${esc(conflito.atual)}</div></div>
+      <button onclick="copiar('${chave}')">Copiar o meu texto</button>`;
   }
   return out;
 }
 
-function acoes(t, i){
-  const sujo = sujos[t.path] !== undefined;
-  if (sujo) {
-    return `<span class="chip e-mexido">editado aqui</span>
-      <button class="pri" onclick="salvar(${i})">Salvar no arquivo</button>
-      <button onclick="descartar(${i})">Descartar</button>
-      <div class="q">⌘S / Ctrl+S salva · Esc descarta</div>
-      ${conflito && conflito.path === t.path ? `<div class="nota">
-        <b>o arquivo mudou enquanto você escrevia</b>
-        <div class="q">nada foi sobrescrito. “Salvar por cima” grava o seu texto.</div></div>
-        <button onclick="salvar(${i}, true)">Salvar por cima</button>` : ''}`;
-  }
-  if (form && form.i === i) {
-    const rot = {validar:['o que falta confirmar','prazo'], reverter:['por que não serve',''],
-                 '⚠️':['a dúvida, como vai para o texto',''], '🚫':['o que está errado','']}[form.tipo];
-    return `<div class="form">
-      <input id="f-texto" placeholder="${esc(rot[0])}" autofocus
-        onkeydown="if(event.key==='Enter')enviar(${i});if(event.key==='Escape')fechar()">
-      ${rot[1]==='prazo'?`<input id="f-prazo" value="${emDias(14)}">`:''}
-      <button class="pri" onclick="enviar(${i})">${form.tipo==='reverter'?'Reverter':'Escrever'}</button>
-      <button onclick="fechar()">cancelar</button></div>`;
-  }
-  if (t.estado === 'apagado') {
-    return `<span class="chip e-negado">apagado</span>
-      <div class="q">saiu do arquivo depois da chancela</div>
-      <button onclick="agir({...alvo(${i}), acao:'aprovar', motivo:'trecho removido'})">Aprovar a remoção</button>`;
-  }
-  const trava = t.bloqueado ? 'disabled title="resolva o 🚫 primeiro"' : '';
-  const marcas = `<div class="marcas">
-      <button onclick="abrirForm(${i},'⚠️')" title="ressalva: sem certeza">⚠️</button>
-      <button onclick="abrirForm(${i},'🚫')" title="discordo — bloqueia a chancela">🚫</button>
-      <button onclick="abrirForm(${i},'validar')" title="a validar, com prazo">❓</button>
-      <button onclick="editar(${i})" title="editar este trecho">✎</button></div>`;
-  // Um trecho que esta de pe nao precisa de tres botoes ocupando a altura do texto: ele
-  // precisa de uma marca dizendo que esta de pe, e das marcas se voce quiser escrever algo.
-  if (t.estado === 'com chancela' && !t.bloqueado && !(t.sumidas||[]).length) {
-    return `<span class="chip e-aprovado">de pé</span>${marcas}
-      <div class="q">linha ${t.line} · ${t.lines}l</div>`;
-  }
-  return `<span class="chip ${CH[t.estado]||'e-pendente'}">${esc(t.estado)}</span>
-    <button class="pri" ${trava} onclick="agir({...alvo(${i}), acao:'aprovar'})">Aprovar</button>
-    <button onclick="abrirForm(${i},'validar')">A validar…</button>
-    <button onclick="abrirForm(${i},'reverter')">Reverter…</button>
-    ${marcas}<div class="q">linha ${t.line} · ${t.lines}l</div>`;
+function formulario(chave, shas){
+  const rot = {validar:['o que falta confirmar','prazo'], reverter:['por que não serve (opcional)','']}[form.tipo];
+  return `<div class="form">
+    <input id="f-texto" placeholder="${esc(rot[0])}"
+      onkeydown="if(event.key==='Enter')enviar();if(event.key==='Escape')fechar()">
+    ${rot[1]==='prazo'?`<input id="f-prazo" value="${emDias(14)}">`:''}
+    <button class="pri" onclick="enviar()">${form.tipo==='reverter'?'Reverter':'Escrever e chancelar'}</button>
+    <button onclick="fechar()">cancelar</button>
+    <div class="q">${form.tipo==='validar'?'o ❓ e o prazo entram no texto, logo depois do bloco'
+      :'o texto volta ao que você chancelou'}</div></div>`;
 }
 
+function acoesDoBloco(u){
+  const chave = 'u:' + u.sha;
+  if (sujos[chave] !== undefined) return salvarCel(chave);
+  if (form && form.chave === chave) return formulario(chave, [u.sha]);
+  if (!naChancela()) return `<span class="chip e-pendente">${TIPO[u.tipo]}</span>`;
+  const trava = u.bloqueio ? 'disabled title="resolva o 🚫 primeiro"' : '';
+  const marcas = u.tipo === 'sumiu' ? '' : `<div class="marcas">
+      <button onclick="marcaNoBloco('${chave}','⚠️')" title="ressalva: sem certeza">⚠️</button>
+      <button onclick="marcaNoBloco('${chave}','🚫')" title="discordo — bloqueia a chancela">🚫</button></div>`;
+  return `<span class="chip ${u.tipo==='sumiu'?'e-negado':(u.tipo==='novo'?'e-aprovado':'e-mexido')}">${u.id} · ${TIPO[u.tipo]}</span>
+    <button class="pri" ${trava} onclick="aprovar(['${u.sha}'])">${u.tipo==='sumiu'?'Aprovar a remoção':'Aprovar'}</button>
+    <button onclick="abrirForm('${chave}','validar',['${u.sha}'])">A validar…</button>
+    <button onclick="abrirForm('${chave}','reverter',['${u.sha}'])">${u.tipo==='sumiu'?'Trazer de volta':'Reverter'}</button>
+    ${marcas}`;
+}
+
+function cabecaDaMudanca(m){
+  const shas = m.unidades.map(u => u.sha);
+  const k = m.unidades.length;
+  const chave = 'm:' + m.n;
+  let notas = '';
+  for (const s of (m.sumidas||[])) notas += `<div class="nota"><b>ressalva removida</b> — ${neg(s.replace(/^\\s*>\\s*/,''))}
+    <span class="q">· estava na chancela; aprovar o bloco aprova a remoção</span></div>`;
+  if (m.bloqueio) notas += `<div class="nota"><b>🚫 bloqueado</b> — ${neg(m.bloqueio.replace(/^\\s*>\\s*/,''))}</div>`;
+  const botoes = !naChancela() ? '' : (form && form.chave === chave ? formulario(chave, shas) : `
+    <button class="pri" ${m.bloqueio?'disabled':''} onclick="aprovar(${esc(JSON.stringify(shas))})">Aprovar ${k>1?'os '+k+' blocos':'o bloco'}</button>
+    <button onclick="abrirForm('${chave}','reverter',${esc(JSON.stringify(shas))})">Reverter ${k>1?'tudo':''}</button>`);
+  return `<div class="cab-m ${foco===chave?'foco':''}" id="m${m.n}" data-n="${m.n}">
+    <span class="rot">mudança ${m.n}</span>
+    <span class="titulo-m">${esc(m.titulo || '(início do arquivo)')}</span>
+    <span class="q">${k} bloco${k>1?'s':''}</span>
+    <span class="botoes-m">${botoes}</span>${notas}</div>`;
+}
+
+// ---- o documento ----------------------------------------------------------------
 function desenhar(){
   if (!D) return;
   $('repo').textContent = D.repo;
-  const c = D.docs.reduce((a,d)=>{const x=contar(d);
-    return {pe:a.pe+x.pe, mex:a.mex+x.mex, pend:a.pend+x.pend};},{pe:0,mex:0,pend:0});
-  $('resumo').textContent = `${D.docs.length} arquivos · ${c.pe} de pé · ${c.mex} mexidos · ${c.pend} sem chancela`;
+  const em = D.docs.filter(d => d.rastreado && !d.mudancas).length;
+  const mud = D.docs.reduce((a,d)=>a+(d.rastreado?d.mudancas:0),0);
+  const sem = D.docs.filter(d => !d.rastreado).length;
+  $('resumo').textContent = `${D.docs.length} arquivos · ${em} em dia · ${mud} mudanças pendentes · ${sem} sem chancela`;
   const r = $('recado'); r.hidden = !recado; r.textContent = recado;
   r.className = 'recado' + (recado.startsWith('✕') ? ' ruim' : '');
   $('base').innerHTML = D.revisoes.map(v =>
@@ -818,109 +805,129 @@ function desenhar(){
   lado();
 
   const d = D.docs[doc];
-  const vis = visiveis();
-  const cabecalho = `<div class="cabgrade rot">${D.base === 'refs/km/chancela' ? 'a chancela' : esc(D.base)}</div>
-    <div class="cabgrade rot">${esc(d.file)} — agora${D.base === 'refs/km/chancela' ? '' : ' (os botões continuam escrevendo na chancela)'}</div>
-    <div class="cabgrade rot">o que fazer</div>`;
-  $('doc').innerHTML = cabecalho + (vis.length ? vis.map(([t,i]) => {
-    // Trecho de pé tem as duas colunas iguais. Em vez de repetir o texto, ele ocupa a
-    // largura inteira: o que se lê a maior parte do tempo é o documento, não o diff.
-    const igual = t.estado === 'com chancela' && !t.bloqueado && !(t.sumidas||[]).length;
-    const sujo = sujos[t.path];
-    const corpo = sujo !== undefined
-      ? esc(sujo).split('\\n').map(l => `<span class="ln">${l || '&nbsp;'}</span>`).join('')
-      : coluna(t.linhas, 'dir', true);
-    const meio = t.estado === 'apagado'
-      ? `<div class="col agora sumida"><div class="vaziocol">— saiu do arquivo —</div></div>`
-      : `<div class="col agora ${igual?'inteiro':''}">${avisos(t)}
-          <div class="txt edit" contenteditable="plaintext-only" spellcheck="false"
-            data-path="${esc(t.path)}" data-i="${i}"
-            oninput="mexeu(${i}, this)" onfocus="focar(${i})">${corpo}</div></div>`;
-    return `<div class="tr ${foco===i?'foco':''}" id="t${i}">
-      ${igual ? '' : `<div class="col base"><div class="txt">${coluna(t.linhas, 'esq', true)}</div></div>`}
-      ${meio}
-      <div class="col acoes">${acoes(t, i)}</div>
-    </div>`; }).join('') : '<div class="vazio">Nada mudou neste arquivo.</div>');
+  originais = {};
+  let html = `<div class="cabgrade rot">${naChancela() ? 'a chancela' : esc(D.base)}</div>
+    <div class="cabgrade rot">${esc(d.file)} — agora</div>
+    <div class="cabgrade rot">${naChancela() ? 'o que fazer' : 'só leitura — os botões agem na chancela'}</div>`;
+  if (!segs().some(s => s.tipo === 'mudanca'))
+    html += `<div class="aviso-doc">${d.rastreado ? '✓ Em dia com a chancela' + (d.em ? ' de ' + esc(d.em) : '') + '. Nada a decidir neste arquivo.' : ''}</div>`;
+  for (const s of segs()){
+    if (s.tipo === 'igual') {
+      const chave = 'g:' + s.linha;
+      if (ver === 'mudou' && sujos[chave] === undefined) {
+        html += `<div class="dobra" onclick="setVer('tudo')">⋯ ${s.n_linhas} linhas sem mudança</div>`;
+        continue;
+      }
+      html += `<div class="col agora inteiro">${editavel(chave, s.linha, s.texto, coluna(s.linhas, 'dir'))}</div>
+        <div class="col acoes">${salvarCel(chave)}</div>`;
+      continue;
+    }
+    html += cabecaDaMudanca(s);
+    for (const u of s.unidades){
+      const chave = 'u:' + u.sha;
+      html += `<div class="col base ${u.tipo}"><div class="txt">${coluna(u.linhas, 'esq')}</div></div>
+        <div class="col agora ${u.tipo}">${u.tipo === 'sumiu'
+          ? '<div class="vaziocol">— saiu do arquivo —</div>'
+          : editavel(chave, u.linha, u.texto, coluna(u.linhas, 'dir'))}</div>
+        <div class="col acoes">${acoesDoBloco(u)}</div>`;
+    }
+  }
+  $('doc').innerHTML = html;
   const campo = $('f-texto');
   if (campo) campo.focus();
 }
 
+// ---- gestos -----------------------------------------------------------------------
 function abrir(i){
   if (temSujo() && !confirm('Há texto editado e não salvo. Sair mesmo assim?')) return;
-  sujos = {}; foco = 0; form = null; scrollTo(0,0); carregar(D.docs[i].file);
-}
-function focar(i){ if (foco === i) return; foco = i; pintarFoco(); }
-// Mudar o foco não redesenha: redesenhar no meio da digitação tiraria o cursor do lugar.
-function pintarFoco(){
-  document.querySelectorAll('.tr').forEach(e => e.classList.remove('foco'));
-  $('t'+foco)?.classList.add('foco');
+  sujos = {}; conflito = null; form = null; foco = null; scrollTo(0,0);
+  carregar(D.docs[i].file);
 }
 function fechar(){ form = null; desenhar(); }
-function abrirForm(i, tipo){ form = {i, tipo}; foco = i; desenhar(); }
-// O texto do arquivo termina em quebra de linha e o da tela não; comparar sem isso evita
-// marcar como editado um trecho em que você só clicou.
-const mesmo = (a, b) => (a||'').replace(/\\s+$/, '') === (b||'').replace(/\\s+$/, '');
-
-function mexeu(i, el){
-  const t = trecho(i);
-  const texto = textoDaColuna(el);
-  if (mesmo(texto, t.texto)) { delete sujos[t.path]; } else { sujos[t.path] = texto; }
-  // Só a coluna das ações muda; o texto que você está digitando fica onde está.
-  const cel = $('t'+i)?.querySelector('.col.acoes');
-  if (cel) cel.innerHTML = acoes(t, i);
-}
-function descartar(i){ delete sujos[trecho(i).path]; conflito = null; desenhar(); }
-function enviar(i){
+function abrirForm(chave, tipo, shas){ form = {chave, tipo, shas}; desenhar(); }
+function aprovar(shas){ agir({acao:'aprovar', shas}); }
+function enviar(){
   const texto = ($('f-texto')||{}).value || '';
   const prazo = ($('f-prazo')||{}).value || '';
-  if (form.tipo === 'validar') return agir({...alvo(i), acao:'validar', texto, prazo});
-  if (form.tipo === 'reverter') return agir({...alvo(i), acao:'reverter', motivo: texto});
-  return agir({...alvo(i), acao:'marca', marca: form.tipo, texto});
+  if (form.tipo === 'validar') return agir({acao:'validar', shas: form.shas, texto, prazo});
+  return agir({acao:'reverter', shas: form.shas, motivo: texto});
 }
-function salvar(i, porCima){
-  const t = trecho(i);
-  const texto = t && sujos[t.path];
-  if (texto === undefined) {
-    // Acontece quando o título do trecho muda no arquivo enquanto você escreve: o
-    // endereço do que você editou deixou de existir. Falhar calado seria pior.
-    const perdido = Object.keys(sujos)[0];
-    recado = perdido
-      ? '✕ o trecho que você editava mudou de título no arquivo — copie o seu texto antes de recarregar'
-      : '✕ nada editado aqui';
-    return desenhar();
+function celula(chave){ return document.querySelector(`.txt.edit[data-chave="${CSS.escape(chave)}"]`); }
+function mexeu(el){
+  const chave = el.dataset.chave;
+  const texto = textoDaColuna(el);
+  if (mesmo(texto, originais[chave])) delete sujos[chave]; else sujos[chave] = texto;
+  // Só a coluna das ações muda; o texto que você está digitando fica onde está.
+  const cel = el.closest('.col').nextElementSibling;
+  if (cel && cel.classList.contains('acoes')) {
+    if (chave.startsWith('u:')) {
+      const u = mudancas().flatMap(m => m.unidades).find(x => 'u:' + x.sha === chave);
+      cel.innerHTML = u ? acoesDoBloco(u) : salvarCel(chave);
+    } else cel.innerHTML = salvarCel(chave);
   }
-  agir({...alvo(i), acao:'salvar', texto, sha: porCima ? '' : t.sha});
 }
-function setVer(v){ ver = v; foco = 0; desenhar(); }
+function salvar(chave){
+  if (sujos[chave] === undefined) return;
+  const el = celula(chave);
+  agir({acao:'salvar', chave, original: originais[chave], texto: sujos[chave],
+        linha: el ? Number(el.dataset.linha) : 1});
+}
+function descartar(chave){ delete sujos[chave]; if (conflito && conflito.chave === chave) conflito = null; desenhar(); }
+function copiar(chave){ navigator.clipboard?.writeText(sujos[chave] || ''); recado = '✓ seu texto está na área de transferência'; desenhar(); }
+
+// A marca entra onde está o cursor, no formato combinado, e vira texto seu: você completa
+// e salva como qualquer outra edição.
+function inserir(el, marca){
+  el.focus();
+  const modelo = typeof MODELO[marca] === 'function' ? MODELO[marca]() : MODELO[marca];
+  // A marca é um bloco próprio: vai para o fim da linha onde está o cursor, com linha em
+  // branco antes e depois. Colada no meio da linha, ela viraria parte do parágrafo — e
+  // sem a linha em branco depois, o parágrafo seguinte viraria parte da citação.
+  const s = getSelection();
+  s.modify('move', 'forward', 'lineboundary');
+  document.execCommand('insertText', false, '\\n\\n' + modelo + '\\n');
+  s.modify('move', 'backward', 'character');
+}
+function noCursor(marca){
+  const s = getSelection();
+  const el = s && s.anchorNode && (s.anchorNode.nodeType === 1 ? s.anchorNode : s.anchorNode.parentElement)?.closest('.txt.edit');
+  if (!el) { recado = '✕ clique no texto, onde a marca deve entrar, e depois no botão'; return desenhar(); }
+  inserir(el, marca);
+}
+function marcaNoBloco(chave, marca){
+  const el = celula(chave); if (!el) return;
+  el.focus();
+  const r = document.createRange(); r.selectNodeContents(el); r.collapse(false);
+  const s = getSelection(); s.removeAllRanges(); s.addRange(r);
+  inserir(el, marca);
+}
+function setVer(v){ ver = v; desenhar(); }
 function trocarBase(){ base = $('base').value; carregar(); }
 
 document.addEventListener('keydown', (e)=>{
-  const escrevendo = e.target.isContentEditable;
+  const el = e.target;
   if ((e.ctrlKey || e.metaKey) && e.key === 's') {
     e.preventDefault();
-    const i = escrevendo ? Number(e.target.dataset.i) : foco;
-    return salvar(i);
-  }
-  if (escrevendo) {
-    if (e.key === 'Escape') { e.target.blur(); descartar(Number(e.target.dataset.i)); }
-    return;   // dentro do texto, letra é letra
-  }
-  if (e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT') {
-    if (e.key === 'Escape') fechar();
+    if (el.isContentEditable) salvar(el.dataset.chave);
     return;
   }
-  const vis = visiveis().map(([,i])=>i);
-  const pos = vis.indexOf(foco);
-  if (e.key === 'j' && pos < vis.length-1) { focar(vis[pos+1]); $('t'+foco)?.scrollIntoView({block:'center'}); }
-  else if (e.key === 'k' && pos > 0) { focar(vis[pos-1]); $('t'+foco)?.scrollIntoView({block:'center'}); }
-  else if (e.key === 'a') agir({...alvo(foco), acao:'aprovar'});
-  else if (e.key === 'v') abrirForm(foco,'validar');
-  else if (e.key === 'r') abrirForm(foco,'reverter');
-  else if (e.key === 'Escape') fechar();
+  if (el.isContentEditable) {
+    if (e.key === 'Escape') { el.blur(); descartar(el.dataset.chave); }
+    return;   // dentro do texto, letra é letra
+  }
+  if (el.tagName === 'INPUT' || el.tagName === 'SELECT') { if (e.key === 'Escape') fechar(); return; }
+  const ms = mudancas();
+  if (!ms.length) return;
+  const atual = foco && foco.startsWith('m:') ? Number(foco.slice(2)) : 0;
+  const pos = ms.findIndex(m => m.n === atual);
+  const ir = (m) => { foco = 'm:' + m.n; desenhar(); $('m' + m.n)?.scrollIntoView({block:'start'}); };
+  if (e.key === 'j') ir(ms[Math.min(pos + 1, ms.length - 1)]);
+  else if (e.key === 'k') ir(ms[Math.max(pos - 1, 0)]);
+  else if (e.key === 'a' && pos >= 0 && naChancela()) aprovar(ms[pos].unidades.map(u => u.sha));
 });
 
 // O arquivo muda por fora: um agente escreve, o editor salva. A tela se atualiza sozinha
-// quando voce nao esta no meio de escrever nada.
+// quando você não está no meio de escrever nada.
 setInterval(()=>{ if (!form && !temSujo()) carregar(); }, 8000);
 carregar();
 </script></body></html>"""

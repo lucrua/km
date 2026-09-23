@@ -10,6 +10,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import subprocess
 import unicodedata
 from datetime import date
@@ -53,23 +54,32 @@ def _arquivos(root: Path, arg: str | None) -> list[str]:
     return [arg] if arg in cobertos else []
 
 
-def _hunks_por_ref(rel: str, ref: str, hs: list[ch.Hunk]) -> list[ch.Hunk]:
-    """`--hunk` takes the number printed by `km pendente`, or part of a heading.
+def _escolher(rel: str, refs: list[str], s: ch.Situacao) -> list[ch.Unidade]:
+    """`--hunk` takes a change ("2"), one block of it ("2.1"), or part of a heading.
 
-    A heading takes every pending change under it, not the first one: endorsing a passage
-    is endorsing the passage, and picking one of its changes is what the number is for.
+    A heading takes every change in that section, not the first one: endorsing a section
+    is endorsing the section, and picking one block is what "2.1" is for.
     """
-    if ref.isdigit():
-        achados = [h for h in hs if h.n == int(ref)]
-        if not achados:
-            raise SystemExit(f"{rel}: não há trecho {ref} — rode `km pendente {rel}`")
-        return achados
-    alvo = _sem_acento(ref)
-    achados = ([h for h in hs if alvo in _sem_acento(h.titulo)]
-               or [h for h in hs if alvo in _sem_acento(h.caminho)])
-    if not achados:
-        raise SystemExit(f"{rel}: nenhuma mudança pendente em um título com {ref!r}")
-    return achados
+    escolhidas: list[ch.Unidade] = []
+    for ref in refs:
+        if re.fullmatch(r"\d+", ref):
+            m = next((m for m in s.mudancas if m.n == int(ref)), None)
+            if m is None:
+                raise SystemExit(f"{rel}: não há mudança {ref} — rode `km pendente {rel}`")
+            achadas = m.unidades
+        elif re.fullmatch(r"\d+\.\d+", ref):
+            achadas = [u for u in s.unidades if u.id == ref]
+            if not achadas:
+                raise SystemExit(f"{rel}: não há bloco {ref} — rode `km pendente {rel}`")
+        else:
+            alvo = _sem_acento(ref)
+            achadas = [u for m in s.mudancas for u in m.unidades
+                       if alvo in _sem_acento(u.titulo) or alvo in _sem_acento(m.titulo)
+                       or alvo in _sem_acento(m.caminho)]
+            if not achadas:
+                raise SystemExit(f"{rel}: nenhuma mudança pendente em um título com {ref!r}")
+        escolhidas += [u for u in achadas if u not in escolhidas]
+    return escolhidas
 
 
 def cmd_init(args) -> int:
@@ -90,12 +100,12 @@ def cmd_init(args) -> int:
 
 def _resumo(situacoes: list[ch.Situacao]) -> str:
     em_dia = sum(1 for s in situacoes if s.em_dia)
-    mexidos = sum(len(s.hunks) for s in situacoes if s.tem_chancela)
+    mexidos = sum(len(s.mudancas) for s in situacoes if s.tem_chancela)
     nunca = sum(1 for s in situacoes if not s.tem_chancela)
     vencidas = sum(len(s.vencidas) for s in situacoes)
     bits = [f"{em_dia} arquivo(s) em dia com a chancela"]
     if mexidos:
-        bits.append(f"{mexidos} trechos mexidos")
+        bits.append(f"{mexidos} mudança(s) pendente(s)")
     if nunca:
         bits.append(f"{nunca} sem chancela")
     if vencidas:
@@ -124,20 +134,22 @@ def cmd_pendente(args) -> int:
         return 0
 
     total = 0
-    for s in (x for x in situacoes if x.tem_chancela and x.hunks):
-        # The number is the hunk's own, inside its file: `km chancela <arquivo> --hunk 2`.
-        # A list numbered across files would need a sidecar to be resolved again, and a
-        # sidecar is what this design removed.
+    for s in (x for x in situacoes if x.tem_chancela and x.mudancas):
+        # Numbers are the file's own: `km chancela <arquivo> --hunk 2` takes change 2,
+        # `--hunk 2.1` only its first block. A numbering across files would need a sidecar
+        # to be resolved again, and a sidecar is what this design removed.
         print(f"\n{s.arquivo}")
-        for h in s.hunks:
+        for m in s.mudancas:
             total += 1
-            sinal = "🚫" if h.bloqueio else ("⚠️" if h.sumidas else "  ")
-            print(f"  {h.n:>3} {sinal} -{len(h.antes):<3} +{len(h.depois):<3}"
-                  f" {h.titulo[:40]:<40} {h.resumo(38)}")
-            for l in h.sumidas:
-                print(f"       ressalva removida: {l[:70]}")
-            if h.bloqueio:
-                print(f"       trecho bloqueado: {h.bloqueio[:70]}")
+            menos, mais = m.contagem()
+            sinal = "🚫" if m.bloqueio else ("⚠️" if m.sumidas else "  ")
+            print(f"  {m.n:>3} {sinal} -{menos:<2} +{mais:<2} {m.titulo[:52]}")
+            for u in m.unidades:
+                print(f"       {u.id:<5} {u.tipo:<6} {u.resumo(56)}")
+                for l in u.sumidas:
+                    print(f"             ressalva removida: {l[:60]}")
+            if m.bloqueio:
+                print(f"       trecho bloqueado: {m.bloqueio[:66]}")
 
     novos = [s for s in situacoes if not s.tem_chancela]
     if args.novos:
@@ -155,7 +167,7 @@ def cmd_pendente(args) -> int:
     if novos and not args.novos:
         print("a lista dos sem chancela: km pendente --novos")
     if total:
-        print("chancelar: km chancela <arquivo> --hunk <n|título>   ·   tudo: --all")
+        print("chancelar: km chancela <arquivo> --hunk <n|n.m|título>   ·   tudo: --all")
     return 0
 
 
@@ -173,41 +185,37 @@ def cmd_chancela(args) -> int:
         raise SystemExit(f"{rel} está fora do `include` do .km/config.json — "
                          f"inclua-o lá antes de chancelar")
     s = ch.situacao(root, rel)
-    if not s.hunks:
+    if not s.mudancas:
         print(f"{rel}: nada pendente — a chancela já é o arquivo de hoje")
         return 0
 
     if args.all:
-        escolhidos = list(s.hunks)
+        escolhidas = list(s.unidades)
     elif args.hunk:
-        escolhidos = [h for r in args.hunk for h in _hunks_por_ref(rel, r, s.hunks)]
+        escolhidas = _escolher(rel, args.hunk, s)
     else:
-        raise SystemExit("diga o que entra: --hunk <n|título> (um ou mais) ou --all")
+        raise SystemExit("diga o que entra: --hunk <n|n.m|título> (um ou mais) ou --all")
 
-    barrados = [h for h in escolhidos if h.bloqueio and not args.force]
-    escolhidos = [h for h in escolhidos if h not in barrados]
-    if not escolhidos:
-        for h in barrados:
-            print(f"🚫 {h.titulo}: {h.bloqueio}")
+    barradas = [u for u in escolhidas if u.bloqueio and not args.force]
+    escolhidas = [u for u in escolhidas if u not in barradas]
+    if not escolhidas:
+        for u in barradas:
+            print(f"🚫 {u.titulo}: {u.bloqueio}")
         raise SystemExit("nada entrou: resolva o 🚫 (ou --force, que o deixa no texto)")
 
-    commit = chancelar(root, rel, escolhidos, s, args.message, args.by)
-    print(f"{rel}  ·  {len(escolhidos)} trecho(s) na chancela  ·  {commit[:8]}")
-    por_titulo: dict[str, list[ch.Hunk]] = {}
-    for h in escolhidos:
-        por_titulo.setdefault(h.titulo, []).append(h)
-    for titulo, dela in por_titulo.items():
-        quantos = f"  ({len(dela)} mudanças)" if len(dela) > 1 else ""
-        print(f"   ✓ {titulo}{quantos}")
-        for l in (x for h in dela for x in h.sumidas):
+    commit = chancelar(root, rel, escolhidas, s, args.message, args.by)
+    print(f"{rel}  ·  {len(escolhidas)} bloco(s) na chancela  ·  {commit[:8]}")
+    for u in escolhidas:
+        print(f"   ✓ {u.id:<5} {u.tipo:<6} {u.resumo(50)}")
+        for l in u.sumidas:
             print(f"     (a ressalva {l[:56]} saiu junto)")
-    for h in barrados:
-        print(f"   🚫 {h.titulo} — ficou de fora: {h.bloqueio[:60]}")
-    resto = ch.situacao(root, rel).hunks
-    print(f"faltam {len(resto)} trecho(s) neste arquivo")
+    for u in barradas:
+        print(f"   🚫 {u.id} {u.titulo} — ficou de fora: {u.bloqueio[:60]}")
+    resto = ch.situacao(root, rel).mudancas
+    print(f"faltam {len(resto)} mudança(s) neste arquivo")
     if resto:
         # The numbers come from the diff, and the diff just moved. Acting on a number from
-        # the previous listing would chancel a passage you did not look at.
+        # the previous listing would chancel a block you did not look at.
         print("os números mudaram — rode `km pendente` de novo"
               " (ou passe vários --hunk de uma vez)")
     return 0
@@ -242,20 +250,20 @@ def _chancelar_de(root: Path, args) -> int:
     commit = ch.escrever(root, mudancas, mensagem)
     print(f"{len(mudancas)} arquivo(s) chancelados no conteúdo de {rev}  ·  {commit[:8]}")
     for rel in sorted(mudancas):
-        pendentes = len(ch.situacao(root, rel).hunks)
-        print(f"   ✓ {rel}" + (f"  ·  {pendentes} trecho(s) mudaram desde então" if pendentes
+        pendentes = len(ch.situacao(root, rel).mudancas)
+        print(f"   ✓ {rel}" + (f"  ·  {pendentes} mudança(s) desde então" if pendentes
                                else "  ·  igual ao que está no disco"))
     return 0
 
 
-def chancelar(root: Path, rel: str, escolhidos: list[ch.Hunk], s: ch.Situacao,
+def chancelar(root: Path, rel: str, escolhidas: list[ch.Unidade], s: ch.Situacao,
               motivo: str | None, by: str) -> str:
     """Shared by the command and the page: the ref advances in one place only."""
-    novo = ch.aplicar(s.antes, s.depois, {h.n for h in escolhidos}, s.hunks)
-    titulos = ", ".join(dict.fromkeys(h.titulo for h in escolhidos))
-    inteiro = len(escolhidos) == len(s.hunks)
+    novo = ch.aplicar(s.antes, s.depois, {u.id for u in escolhidas})
+    titulos = ", ".join(dict.fromkeys(u.titulo for u in escolhidas if u.titulo))
+    inteiro = len(escolhidas) == len(s.unidades)
     cabeca = (f"chancela: {rel} · arquivo inteiro" if inteiro
-              else f"chancela: {rel} · {len(escolhidos)} trecho(s)")
+              else f"chancela: {rel} · {len(escolhidas)} bloco(s)")
     mensagem = f"{cabeca}\n\n{titulos}\n"
     if motivo:
         mensagem += f"\n{motivo}\n"
@@ -264,32 +272,31 @@ def chancelar(root: Path, rel: str, escolhidos: list[ch.Hunk], s: ch.Situacao,
 
 
 def cmd_restore(args) -> int:
-    """Put back the chancelled text of a passage — refusing a change and leaving it in
-    place would keep in the document exactly what you just rejected."""
+    """Put back the chancelled text of a block — refusing a change and leaving it in place
+    would keep in the document exactly what you just rejected."""
     root = _root(args)
     rel = args.file
     s = ch.situacao(root, rel)
     if not s.tem_chancela:
         raise SystemExit(f"{rel} nunca teve chancela — não há texto para devolver")
-    if not s.hunks:
+    if not s.mudancas:
         print(f"{rel}: nada mudou desde a chancela")
         return 0
-    alvos = (list(s.hunks) if args.all
-             else [h for r in args.hunk for h in _hunks_por_ref(rel, r, s.hunks)])
+    alvos = list(s.unidades) if args.all else _escolher(rel, args.hunk, s)
     if not alvos:
-        raise SystemExit("diga o que volta: --hunk <n|título> ou --all")
+        raise SystemExit("diga o que volta: --hunk <n|n.m|título> ou --all")
     reverter(root, rel, alvos, s)
-    print(f"{rel}  ·  {len(alvos)} trecho(s) de volta ao texto chancelado")
-    for titulo in dict.fromkeys(h.titulo for h in alvos):
-        print(f"   ↩ {titulo}")
+    print(f"{rel}  ·  {len(alvos)} bloco(s) de volta ao texto chancelado")
+    for u in alvos:
+        print(f"   ↩ {u.id:<5} {u.resumo(56)}")
     if args.message:
         print(f"   motivo: {args.message}  (escreva-o no commit, ou como ⚠️ no texto)")
     return 0
 
 
-def reverter(root: Path, rel: str, alvos: list[ch.Hunk], s: ch.Situacao) -> None:
-    manter = {h.n for h in s.hunks} - {h.n for h in alvos}
-    (root / rel).write_text(ch.aplicar(s.antes, s.depois, manter, s.hunks), encoding="utf-8")
+def reverter(root: Path, rel: str, alvos: list[ch.Unidade], s: ch.Situacao) -> None:
+    manter = {u.id for u in s.unidades} - {u.id for u in alvos}
+    (root / rel).write_text(ch.aplicar(s.antes, s.depois, manter), encoding="utf-8")
 
 
 def cmd_lint(args) -> int:
@@ -307,8 +314,8 @@ def cmd_lint(args) -> int:
         linhas = [f"  ❓ :{n} venceu em {prazo} — {txt[:60]}" for n, prazo, txt in s.vencidas]
         linhas += [f"  🚫 bloqueia a chancela do trecho — {txt[:60]}"
                    for _, marca, txt in ch.ressalvas(texto) if marca == "🚫"]
-        linhas += [f"  ⚠️ ressalva removida em {h.titulo[:30]} — {l[:50]}"
-                   for h in s.hunks for l in h.sumidas]
+        linhas += [f"  ⚠️ ressalva removida em {u.titulo[:30]} — {l[:50]}"
+                   for u in s.unidades for l in u.sumidas]
         if linhas:
             print(f"\n{rel}")
             print("\n".join(linhas))

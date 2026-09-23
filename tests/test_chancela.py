@@ -98,41 +98,73 @@ class TrechoTest(unittest.TestCase):
         self.assertEqual(c.linha, 9)
 
 
-class HunkTest(unittest.TestCase):
-    def test_nearby_changes_become_one_hunk(self):
-        antes = "a\nb\nc\nd\ne\n"
-        depois = "a\nB\nc\nD\ne\n"
-        self.assertEqual(len(ch.hunks(antes, depois)), 1)
+class BlocoTest(unittest.TestCase):
+    """The unit you approve is a Markdown block — never half a paragraph."""
 
-    def test_far_apart_changes_stay_apart(self):
-        antes = "a\nb\nc\nd\ne\nf\ng\nh\n"
-        depois = "A\nb\nc\nd\ne\nf\ng\nH\n"
-        self.assertEqual(len(ch.hunks(antes, depois)), 2)
+    def test_paragraphs_items_tables_headings_quotes_and_code_are_blocks(self):
+        texto = ("# T\n\num parágrafo\nem duas linhas\n\n- item um\n- item dois\n\n"
+                 "| a | b |\n|---|---|\n| 1 | 2 |\n\n> citação\n> continua\n\n"
+                 "```\ncódigo\n\ncom linha vazia\n```\n")
+        _, bs = ch.blocos(texto)
+        self.assertEqual([b.tipo for b in bs],
+                         ["titulo", "paragrafo", "item", "item", "tabela", "citacao", "codigo"])
+        self.assertEqual(bs[1].texto, "um parágrafo\nem duas linhas")
 
-    def test_a_hunk_knows_its_passage(self):
-        antes = DOC
+    def test_a_heading_glued_to_its_paragraph_is_still_two_blocks(self):
+        _, bs = ch.blocos("## Prazo\nO prazo conta.\n")
+        self.assertEqual([b.tipo for b in bs], ["titulo", "paragrafo"])
+
+
+class MudancaTest(unittest.TestCase):
+    def test_an_edit_inside_a_paragraph_is_the_whole_paragraph(self):
+        ms = ch.mudancas(DOC, DOC.replace("horas úteis", "horas corridas"))
+        self.assertEqual(len(ms), 1)
+        [u] = ms[0].unidades
+        self.assertEqual((u.tipo, u.depois.texto), ("mexido", "O prazo conta em horas corridas."))
+        self.assertEqual(ms[0].titulo, "Prazo")
+
+    def test_neighbouring_blocks_that_changed_are_one_change(self):
+        depois = DOC.replace("Onze", "Doze").replace("> ⚠️ **sem certeza** — a ordem veio de um print, não do export.",
+                                                     "> ⚠️ **sem certeza** — outra dúvida, bem diferente da primeira.")
+        ms = ch.mudancas(DOC, depois)
+        self.assertEqual(len(ms), 1)
+        self.assertEqual(len(ms[0].unidades), 2)
+
+    def test_changes_apart_are_separate_rows(self):
+        depois = DOC.replace("Onze", "Doze").replace("horas úteis", "horas corridas")
+        self.assertEqual(len(ch.mudancas(DOC, depois)), 2)
+
+    def test_realigning_a_table_is_not_a_change(self):
+        antes = "# T\n\n| a | b |\n|---|---|\n| 1 | 2 |\n"
+        depois = "# T\n\n| a   | b   |\n| --- | --- |\n| 1   | 2   |\n"
+        self.assertEqual(ch.mudancas(antes, depois), [])
+
+    def test_accepting_everything_is_the_file_byte_for_byte(self):
+        depois = DOC.replace("Onze", "Doze") + "\n## Nova\n\nx\n"
+        ms = ch.mudancas(DOC, depois)
+        self.assertEqual(ch.aplicar(DOC, depois, {str(m.n) for m in ms}), depois)
+
+    def test_accepting_nothing_is_the_chancel(self):
+        depois = DOC.replace("Onze", "Doze") + "\n## Nova\n\nx\n"
+        self.assertEqual(ch.mudancas(ch.aplicar(DOC, depois, set()), DOC), [])
+
+    def test_accepting_one_block_of_a_change_leaves_the_rest_pending(self):
+        depois = DOC.replace("Onze", "Doze").replace(
+            "> ⚠️ **sem certeza** — a ordem veio de um print, não do export.",
+            "> ⚠️ **sem certeza** — outra dúvida, bem diferente da primeira.")
+        [m] = ch.mudancas(DOC, depois)
+        primeiro = m.unidades[0]
+        novo = ch.aplicar(DOC, depois, {primeiro.id})
+        self.assertIn("Doze colunas", novo)
+        self.assertIn("a ordem veio de um print", novo)
+        [resto] = ch.mudancas(novo, depois)
+        self.assertEqual(len(resto.unidades), 1)
+
+    def test_a_block_is_identified_by_content_not_position(self):
         depois = DOC.replace("horas úteis", "horas corridas")
-        h = ch.hunks(antes, depois)[0]
-        self.assertEqual(h.titulo, "Prazo")
-
-    def test_accepting_one_hunk_leaves_the_other_as_it_was(self):
-        antes = "# A\n\num\n\n# B\n\ndois\n"
-        depois = "# A\n\nUM\n\n# B\n\nDOIS\n"
-        hs = ch.hunks(antes, depois)
-        self.assertEqual(len(hs), 2)
-        saida = ch.aplicar(antes, depois, {hs[0].n}, hs)
-        self.assertIn("UM", saida)
-        self.assertIn("dois", saida)
-        self.assertNotIn("DOIS", saida)
-
-    def test_accepting_everything_is_the_file_itself(self):
-        antes, depois = DOC, DOC.replace("Onze", "Doze") + "\n## Nova\n\nx\n"
-        hs = ch.hunks(antes, depois)
-        self.assertEqual(ch.aplicar(antes, depois, {h.n for h in hs}, hs), depois)
-
-    def test_accepting_nothing_is_the_chancel_itself(self):
-        antes, depois = DOC, DOC.replace("Onze", "Doze")
-        self.assertEqual(ch.aplicar(antes, depois, set()), antes)
+        sha = ch.mudancas(DOC, depois)[0].unidades[0].sha
+        empurrado = "Linha nova no topo.\n\n" + depois
+        self.assertTrue(ch.unidades_por_sha(ch.mudancas(DOC, empurrado), {sha}))
 
 
 class RessalvaTest(unittest.TestCase):
@@ -143,11 +175,10 @@ class RessalvaTest(unittest.TestCase):
         self.assertEqual([m for _, m, _ in ch.ressalvas(texto)], ["⚠", "❓", "🚫"])
 
     def test_a_removed_caveat_is_flagged_on_its_own(self):
-        antes = DOC
         depois = DOC.replace("> ⚠️ **sem certeza** — a ordem veio de um print, não do export.\n\n", "")
-        h = ch.hunks(antes, depois)[0]
-        self.assertTrue(h.sumidas)
-        self.assertIn("sem certeza", h.sumidas[0])
+        m = ch.mudancas(DOC, depois)[0]
+        self.assertTrue(m.sumidas)
+        self.assertIn("sem certeza", m.sumidas[0])
 
     def test_rewriting_a_caveat_is_not_removing_it(self):
         antes = ["> ❓ **a confirmar até 2026-09-15** — com quem assina"]
@@ -156,16 +187,14 @@ class RessalvaTest(unittest.TestCase):
         self.assertEqual(ch.sumidas(antes, []), [antes[0]])
 
     def test_an_ordinary_edit_flags_nothing(self):
-        h = ch.hunks(DOC, DOC.replace("horas úteis", "horas corridas"))[0]
-        self.assertEqual(h.sumidas, [])
+        m = ch.mudancas(DOC, DOC.replace("horas úteis", "horas corridas"))[0]
+        self.assertEqual(m.sumidas, [])
 
     def test_a_refusal_blocks_its_passage_only(self):
         depois = DOC.replace("O prazo conta em horas úteis.",
                              "O prazo conta em dias.\n\n> 🚫 **discordo** — não é o que vale.")
-        hs = ch.hunks(DOC, depois)
-        self.assertTrue(hs[0].bloqueio)
-        outro = ch.hunks(DOC, DOC.replace("Onze", "Doze"))[0]
-        self.assertFalse(outro.bloqueio)
+        self.assertTrue(ch.mudancas(DOC, depois)[0].bloqueio)
+        self.assertFalse(ch.mudancas(DOC, DOC.replace("Onze", "Doze"))[0].bloqueio)
 
     def test_a_question_past_its_date_is_reported(self):
         texto = "> ❓ **a confirmar até 2020-01-01** — y\n> ❓ **a confirmar até 2999-01-01** — z\n"
@@ -191,7 +220,7 @@ class EstadoTest(RepoTest):
         tabela = "# T\n\n| a | b |\n|---|---|\n| 1 | 2 |\n"
         ch.escrever(self.dir, {"regras.md": tabela}, "chancela")
         self.escrever("# T\n\n| a   | b   |\n| --- | --- |\n| 1   | 2   |\n")
-        self.assertEqual(ch.situacao(self.dir, "regras.md").hunks, [])
+        self.assertEqual(ch.situacao(self.dir, "regras.md").mudancas, [])
 
 
 
@@ -261,137 +290,128 @@ class PainelTest(RepoTest):
         super().setUp()
         from km import serve
         self.serve = serve
-
-    def caminho(self, titulo):
-        atual = ch.atual(self.dir, "regras.md")
-        return next(t.caminho for t in ch.trechos(atual) if t.titulo == titulo)
+        ch.escrever(self.dir, {"regras.md": DOC}, "chancela")
 
     def agir(self, **pedido):
         pedido.setdefault("file", "regras.md")
         return self.serve.agir(self.dir, pedido, by="teste")
 
-    def trecho(self, d, titulo):
-        return next(t for t in d["trechos"] if t["heading"].startswith(titulo))
+    def doc(self, **kw):
+        return self.serve.estado(self.dir, arquivo="regras.md", **kw)["docs"][0]
 
-    def test_state_carries_the_marked_text_and_the_caveats(self):
-        self.serve.agir(self.dir, {"acao": "aprovar", "file": "regras.md",
-                                   "path": self.caminho("Regras")}, by="t")
+    def mudancas(self, **kw):
+        return [s for s in self.doc(**kw)["segmentos"] if s["tipo"] == "mudanca"]
+
+    def texto(self):
+        return (self.dir / "regras.md").read_text(encoding="utf-8")
+
+    def test_a_file_in_step_is_one_run_of_text_with_nothing_to_decide(self):
+        segs = self.doc()["segmentos"]
+        self.assertEqual([s["tipo"] for s in segs], ["igual"])
+        self.assertEqual(segs[0]["texto"], DOC.rstrip("\n"))
+
+    def test_changes_are_rows_and_headings_cut_nothing(self):
+        self.escrever(DOC.replace("Onze", "Doze").replace("horas úteis", "horas corridas"))
+        segs = self.doc()["segmentos"]
+        self.assertEqual([s["tipo"] for s in segs],
+                         ["igual", "mudanca", "igual", "mudanca", "igual"][:len(segs)])
+        self.assertEqual(len([s for s in segs if s["tipo"] == "mudanca"]), 2)
+
+    def test_what_left_is_cut_on_the_left_and_the_right_is_the_file(self):
         self.escrever(DOC.replace("horas úteis", "horas corridas"))
-        d = self.serve.estado(self.dir, arquivo="regras.md")["docs"][0]
-        prazo = self.trecho(d, "Prazo")
-        self.assertEqual(prazo["estado"], "mexido")
-        # a linha mexida vem marcada palavra a palavra, no meio do texto corrido
-        mexidas = [l for l in prazo["linhas"] if l["tipo"] == "mexido"]
-        self.assertTrue(mexidas)
-        # o que saiu fica na coluna da esquerda; a da direita é o texto do arquivo
-        self.assertIn("<del>", mexidas[0]["esq"]["html"])
-        self.assertNotIn("<del>", mexidas[0]["dir"]["html"])
-        self.assertIn("<ins>", mexidas[0]["dir"]["html"])
-        self.assertTrue(any(l["tipo"] == "igual" and "Prazo" in l["dir"]["html"]
-                            for l in prazo["linhas"]))
-        self.assertEqual(self.trecho(d, "A lista")["ressalvas"][0]["mark"], "⚠")
+        [m] = self.mudancas()
+        [u] = m["unidades"]
+        mexida = [l for l in u["linhas"] if l["tipo"] == "mexido"][0]
+        self.assertIn("<del>", mexida["esq"]["html"])
+        self.assertNotIn("<del>", mexida["dir"]["html"])
+        self.assertEqual(u["texto"], "O prazo conta em horas corridas.")
+
+    def test_approving_one_block_leaves_its_neighbour_pending(self):
+        self.escrever(DOC.replace("Onze", "Doze").replace(
+            "> ⚠️ **sem certeza** — a ordem veio de um print, não do export.",
+            "> ⚠️ **sem certeza** — outra dúvida, bem diferente da primeira."))
+        [m] = self.mudancas()
+        r = self.agir(acao="aprovar", shas=[m["unidades"][0]["sha"]])
+        self.assertTrue(r["ok"], r)
+        self.assertIn("Doze colunas", ch.chancelado(self.dir, "regras.md"))
+        self.assertIn("a ordem veio de um print", ch.chancelado(self.dir, "regras.md"))
+        [resto] = self.mudancas()
+        self.assertEqual(len(resto["unidades"]), 1)
+
+    def test_a_stale_page_cannot_approve_something_else(self):
+        self.escrever(DOC.replace("horas úteis", "horas corridas"))
+        sha = self.mudancas()[0]["unidades"][0]["sha"]
+        self.escrever(DOC.replace("horas úteis", "dias corridos"))    # mudou de novo
+        r = self.agir(acao="aprovar", shas=[sha])
+        self.assertFalse(r["ok"])
+        self.assertIn("horas úteis", ch.chancelado(self.dir, "regras.md"))
+
+    def test_validar_writes_the_deadline_after_the_block_and_chancels_both(self):
+        self.escrever(DOC.replace("horas úteis", "horas corridas"))
+        sha = self.mudancas()[0]["unidades"][0]["sha"]
+        r = self.agir(acao="validar", shas=[sha], texto="confirmar com quem assina",
+                      prazo="2026-10-15")
+        self.assertTrue(r["ok"], r)
+        linha = "> ❓ **a confirmar até 2026-10-15** — confirmar com quem assina"
+        self.assertIn("horas corridas.\n\n" + linha, self.texto())
+        self.assertIn(linha, ch.chancelado(self.dir, "regras.md"))
+        self.assertEqual(self.mudancas(), [])
+
+    def test_reverter_puts_the_block_back(self):
+        self.escrever(DOC.replace("horas úteis", "dias corridos"))
+        sha = self.mudancas()[0]["unidades"][0]["sha"]
+        r = self.agir(acao="reverter", shas=[sha])
+        self.assertTrue(r["ok"], r)
+        self.assertEqual(self.texto(), DOC)
+
+    def test_a_refusal_keeps_its_section_out(self):
+        self.escrever(DOC.replace("O prazo conta em horas úteis.",
+                                  "O prazo conta em dias.\n\n> 🚫 **discordo** — não é isso."))
+        shas = [u["sha"] for u in self.mudancas()[0]["unidades"]]
+        r = self.agir(acao="aprovar", shas=shas)
+        self.assertFalse(r["ok"])
+        self.assertIn("🚫", r["erro"])
+        self.assertIn("horas úteis", ch.chancelado(self.dir, "regras.md"))
+
+    def test_saving_finds_the_text_even_if_the_file_moved(self):
+        self.escrever(DOC.replace("horas úteis", "horas corridas"))
+        u = self.mudancas()[0]["unidades"][0]
+        self.escrever("Linha nova no topo.\n\n" + self.texto())       # um agente empurrou tudo
+        r = self.agir(acao="salvar", original=u["texto"], linha=u["linha"],
+                      texto="O prazo conta em horas úteis, sempre.")
+        self.assertTrue(r["ok"], r)
+        self.assertIn("Linha nova no topo.", self.texto())
+        self.assertIn("horas úteis, sempre.", self.texto())
+
+    def test_saving_over_someone_else_is_refused_and_shows_theirs(self):
+        self.escrever(DOC.replace("horas úteis", "horas corridas"))
+        u = self.mudancas()[0]["unidades"][0]
+        self.escrever(DOC.replace("horas úteis", "dias corridos"))    # outro agente reescreveu
+        r = self.agir(acao="salvar", original=u["texto"], linha=u["linha"], texto="minha versão")
+        self.assertFalse(r["ok"])
+        self.assertIn("dias corridos", r["conflito"]["atual"])
+        self.assertNotIn("minha versão", self.texto())
+
+    def test_the_editable_text_is_the_file_itself(self):
+        """A re-aligned table does not count as a change, but what the page shows and saves
+        is the file's text — showing the canonical form would reformat the author's file."""
+        tabela = DOC + "\n## Tabela\n\n| coluna | origem |\n| ------ | ------ |\n| Delta  | Tasks  |\n"
+        self.escrever(tabela)
+        ch.escrever(self.dir, {"regras.md": tabela}, "chancela")
+        [s] = self.doc()["segmentos"]
+        self.assertIn("| coluna | origem |", s["texto"])
 
     def test_the_ruler_is_light_and_the_open_document_is_not(self):
-        """A régua lateral não carrega o texto: era 4,7 MB por requisição, de 8 em 8s."""
-        self.agir(acao="aprovar", path=self.caminho("Regras"))
         leve = self.serve.estado(self.dir)["docs"][0]
-        self.assertFalse(leve["cheio"])
-        self.assertNotIn("linhas", leve["trechos"][0])
-        cheio = self.serve.estado(self.dir, arquivo="regras.md")["docs"][0]
-        self.assertTrue(cheio["cheio"])
-        self.assertIn("linhas", cheio["trechos"][0])
-
-    def test_a_deleted_passage_still_shows_up(self):
-        self.serve.agir(self.dir, {"acao": "aprovar", "file": "regras.md",
-                                   "path": self.caminho("Regras")}, by="t")
-        self.escrever(DOC.split("## Prazo")[0])          # a seção Prazo sai do arquivo
-        d = self.serve.estado(self.dir, arquivo="regras.md")["docs"][0]
-        sumido = self.trecho(d, "Prazo")
-        self.assertEqual(sumido["estado"], "apagado")
-        # só tem coluna da esquerda, e aparece onde estava: entre os dois trechos vizinhos
-        self.assertTrue(all(l["esq"] and not l["dir"] for l in sumido["linhas"]))
-        titulos = [x["heading"] for x in d["trechos"]]
-        self.assertEqual(titulos.index("Prazo"), titulos.index("A lista fechada de colunas") + 1)
+        self.assertNotIn("segmentos", leve)
+        self.assertIn("segmentos", self.doc())
 
     def test_comparing_against_another_revision(self):
         import subprocess
         sha = subprocess.run(["git", "rev-parse", "HEAD"], cwd=self.dir,
                              capture_output=True, text=True).stdout.strip()
         self.escrever(DOC.replace("horas úteis", "horas corridas"))
-        d = self.serve.estado(self.dir, base=sha, arquivo="regras.md")["docs"][0]
-        self.assertTrue(any(l["tipo"] == "mexido" for l in self.trecho(d, "Prazo")["linhas"]))
-
-    def test_aprovar_advances_the_ref(self):
-        r = self.agir(acao="aprovar", path=self.caminho("Regras"))
-        self.assertTrue(r["ok"], r)
-        self.assertEqual(ch.chancelado(self.dir, "regras.md"), DOC)
-
-    def test_validar_writes_the_deadline_in_the_text_and_chancels(self):
-        self.agir(acao="aprovar", path=self.caminho("Regras"))
-        self.escrever(DOC.replace("horas úteis", "horas corridas"))
-        r = self.agir(acao="validar", path=self.caminho("Prazo"),
-                      texto="confirmar com quem assina", prazo="2026-10-15")
-        self.assertTrue(r["ok"], r)
-        texto = (self.dir / "regras.md").read_text(encoding="utf-8")
-        self.assertIn("> ❓ **a confirmar até 2026-10-15** — confirmar com quem assina", texto)
-        self.assertIn("a confirmar até 2026-10-15", ch.chancelado(self.dir, "regras.md"))
-
-    def test_reverter_puts_the_text_back(self):
-        self.agir(acao="aprovar", path=self.caminho("Regras"))
-        self.escrever(DOC.replace("horas úteis", "dias corridos"))
-        r = self.agir(acao="reverter", path=self.caminho("Prazo"), motivo="já decidido")
-        self.assertTrue(r["ok"], r)
-        self.assertIn("horas úteis", (self.dir / "regras.md").read_text(encoding="utf-8"))
-
-    def test_a_refusal_keeps_the_passage_out(self):
-        self.agir(acao="aprovar", path=self.caminho("Regras"))
-        self.escrever(DOC.replace("O prazo conta em horas úteis.",
-                                  "O prazo conta em dias.\n\n> 🚫 **discordo** — não é isso."))
-        r = self.agir(acao="aprovar", path=self.caminho("Prazo"))
-        self.assertFalse(r["ok"])
-        self.assertIn("🚫", r["erro"])
-        self.assertIn("horas úteis", ch.chancelado(self.dir, "regras.md"))
-
-    def test_marca_writes_the_agreed_form(self):
-        r = self.agir(acao="marca", path=self.caminho("Prazo"), marca="⚠️",
-                      texto="veio de um print")
-        self.assertTrue(r["ok"], r)
-        self.assertIn("> ⚠️ **sem certeza** — veio de um print",
-                      (self.dir / "regras.md").read_text(encoding="utf-8"))
-
-    def test_editing_a_passage_saves_only_that_passage(self):
-        d = self.serve.estado(self.dir, arquivo="regras.md")["docs"][0]
-        prazo = self.trecho(d, "Prazo")
-        r = self.agir(acao="salvar", path=prazo["path"], sha=prazo["sha"],
-                      texto="## Prazo\n\nO prazo conta em horas úteis, sempre.")
-        self.assertTrue(r["ok"], r)
-        texto = (self.dir / "regras.md").read_text(encoding="utf-8")
-        self.assertIn("horas úteis, sempre", texto)
-        self.assertIn("Onze colunas", texto)             # o resto do arquivo ficou
-
-    def test_saving_over_someone_else_is_refused_and_shows_both(self):
-        d = self.serve.estado(self.dir, arquivo="regras.md")["docs"][0]
-        prazo = self.trecho(d, "Prazo")
-        self.escrever(DOC.replace("horas úteis", "horas corridas"))   # outro agente escreveu
-        r = self.agir(acao="salvar", path=prazo["path"], sha=prazo["sha"],
-                      texto="## Prazo\n\nminha versão")
-        self.assertFalse(r["ok"])
-        self.assertIn("horas corridas", r["conflito"]["atual"])
-        self.assertNotIn("minha versão", (self.dir / "regras.md").read_text(encoding="utf-8"))
-
-    def test_the_editable_column_is_the_file_itself(self):
-        """Uma tabela re-alinhada não conta como mudança, mas o que a tela mostra e salva
-        é o texto do arquivo — normalizar na tela reescreveria o arquivo do autor."""
-        tabela = DOC + "\n## Tabela\n\n| coluna | origem |\n| ------ | ------ |\n| Delta  | Tasks  |\n"
-        self.escrever(tabela)
-        self.agir(acao="aprovar", path=self.caminho("Regras"))
-        d = self.serve.estado(self.dir, arquivo="regras.md")["docs"][0]
-        tr = self.trecho(d, "Tabela")
-        self.assertIn("| coluna | origem |", tr["texto"])
-        self.assertEqual(tr["sha"], ch.sha_do(tr["texto"]))
-        r = self.agir(acao="salvar", path=tr["path"], sha=tr["sha"], texto=tr["texto"])
-        self.assertTrue(r["ok"], r)          # salvar o que a tela mostrou não é conflito
-        self.assertIn("| coluna | origem |", (self.dir / "regras.md").read_text(encoding="utf-8"))
+        self.assertEqual(len(self.mudancas(base=sha)), 1)
 
 
 if __name__ == "__main__":
