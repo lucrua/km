@@ -380,6 +380,7 @@ function desenhar(){
   const d = D.docs[doc];
   originais = {};
   km.destruirTodos();
+  $('selecao').hidden = true;
   if (!d) {
     // Nada acompanhado ainda: um repositório novo, ou tudo pausado. A revisão não tem o
     // que mostrar, e o caminho é escolher arquivos. Uma config quebrada diz o que tem.
@@ -480,14 +481,21 @@ function selecaoAtual(){
 }
 function mostrarBarraSelecao(){
   const barra = $('selecao'), sel = selecaoAtual();
-  if (!sel || sel.erro || !sel.rect) { barra.hidden = true; return; }
+  if (!sel || sel.erro || !sel.rect || sel.rect.bottom < 50 || sel.rect.top > innerHeight) { barra.hidden = true; return; }
   barra.hidden = false;
   barra.style.top = Math.max(50, sel.rect.top - 40) + 'px';
   barra.style.left = Math.min(innerWidth - 300, Math.max(10, sel.rect.left)) + 'px';
 }
+// A barra vale para a seleção que está na tela: sai com o foco (os botões dela não o
+// tiram do editor), acompanha a rolagem e some quando a página se redesenha.
+document.addEventListener('focusout', (e) => {
+  if (e.target.closest?.('.cm-editor') && !e.relatedTarget?.closest?.('#selecao')) $('selecao').hidden = true;
+});
+document.addEventListener('focusin', (e) => { if (e.target.closest?.('.cm-editor')) mostrarBarraSelecao(); });
+addEventListener('scroll', () => { if (!$('selecao').hidden) mostrarBarraSelecao(); }, true);
 function naSelecao(acao){
   const sel = selecaoAtual();
-  if (!sel) return;
+  if (!sel) { $('selecao').hidden = true; return; }
   if (sel.erro) { recado = '✕ ' + sel.erro; return desenhar(); }
   $('selecao').hidden = true;
   agir({acao, shas: sel.shas, parciais: sel.parciais});
