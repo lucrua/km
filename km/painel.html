@@ -609,9 +609,9 @@ function linhaArvore(n, nivel){
       aria-checked="${ARIA[n.marcado]}" ${pasta ? `aria-expanded="${aberta}"` : ''}
       data-caminho="${esc(n.caminho)}" tabindex="${n.caminho === focoArq ? 0 : -1}"
       style="padding-left:${12 + nivel * 20}px">
-    <span class="seta" onclick="alternar('${esc(n.caminho)}')">${pasta ? (aberta ? '▾' : '▸') : ''}</span>
-    <span class="caixa ${n.marcado}" onclick="clicar('${esc(n.caminho)}')">${CAIXA[n.marcado]}</span>
-    <span class="nome ${pasta ? 'pasta' : ''}" onclick="${pasta ? `alternar('${esc(n.caminho)}')` : `clicar('${esc(n.caminho)}')`}">${esc(n.caminho === '.' ? n.nome + '/' : n.nome + (pasta ? '/' : ''))}</span>
+    <span class="seta" data-acao="alternar">${pasta ? (aberta ? '▾' : '▸') : ''}</span>
+    <span class="caixa ${n.marcado}" data-acao="clicar">${CAIXA[n.marcado]}</span>
+    <span class="nome ${pasta ? 'pasta' : ''}" data-acao="${pasta ? 'alternar' : 'clicar'}">${esc(n.caminho === '.' ? n.nome + '/' : n.nome + (pasta ? '/' : ''))}</span>
     ${novos}<span class="info ${estadoClasse(n)}">${esc(info)}</span></div>`;
   if (pasta && aberta) html += `<div role="group">${n.filhos.map(f => linhaArvore(f, nivel + 1)).join('')}</div>`;
   return html;
@@ -638,6 +638,17 @@ function desenharArvore(){
   const f = a.querySelector(`[data-caminho="${CSS.escape(focoArq)}"]`);
   if (f && noTeclado) f.focus();
 }
+
+// Um ouvinte só, que lê o caminho do atributo: um nome de arquivo nunca vira código.
+// Antes, cada linha montava onclick="clicar('…')" — um arquivo chamado it's.md quebrava a
+// linha, e um nome escolhido a dedo rodava script no painel que grava documentos.
+$('arquivos').addEventListener('click', (e) => {
+  const alvo = e.target.closest('[data-acao]');
+  const linha = alvo && alvo.closest('[data-caminho]');
+  if (!linha) return;
+  if (alvo.dataset.acao === 'alternar') alternar(linha.dataset.caminho);
+  else clicar(linha.dataset.caminho);
+});
 
 function acharNo(caminho, n = ARV.raiz){
   if (n.caminho === caminho) return n;

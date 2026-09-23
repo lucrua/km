@@ -33,8 +33,10 @@ def _caminho_valido(caminho: object, pasta: bool) -> bool:
         return False
     if caminho == ".":
         return pasta
+    # Uma barra invertida é um caractere como outro no nome de um arquivo (em Linux, `a\\b.md`
+    # existe); o separador é sempre "/".
     return (not caminho.startswith("/") and not caminho.endswith("/")
-            and "\\" not in caminho and ".." not in caminho.split("/"))
+            and ".." not in caminho.split("/"))
 
 
 def carregar(root: Path) -> dict:
@@ -58,7 +60,7 @@ def carregar(root: Path) -> dict:
         if not isinstance(lista, list):
             raise ConfigInvalida(f".km/config.json: `{chave}` tem que ser uma lista")
         for caminho in lista:
-            if not _caminho_valido(caminho, pasta=chave != "files"):
+            if not _caminho_valido(caminho, pasta=chave == "folders"):
                 raise ConfigInvalida(f".km/config.json: caminho inválido em `{chave}`: {caminho!r}"
                                      " — relativo, com /, sem .. e sem / no fim")
         cfg[chave] = list(lista)
@@ -69,8 +71,17 @@ def sha_config(cfg: dict) -> str:
     return hashlib.sha256(json.dumps(normalizar(cfg), sort_keys=True).encode()).hexdigest()[:12]
 
 
+def validar(cfg: dict) -> None:
+    """Refuse a config `carregar` would refuse — so nothing written can lock `km` out."""
+    for chave in CHAVES:
+        for caminho in cfg.get(chave, []):
+            if not _caminho_valido(caminho, pasta=chave == "folders"):
+                raise ConfigInvalida(f"caminho inválido em `{chave}`: {caminho!r}")
+
+
 def gravar(root: Path, cfg: dict) -> None:
     """Write the config normalised, atomically: a reader never sees half a file."""
+    validar(cfg)
     d = root / KM_DIR
     d.mkdir(parents=True, exist_ok=True)
     texto = json.dumps(normalizar(cfg), indent=2, ensure_ascii=False) + "\n"
@@ -112,8 +123,10 @@ def decisao(rel: str, cfg: dict) -> bool:
 def normalizar(cfg: dict) -> dict:
     """The same decisions, with nothing redundant, sorted — so the file stays readable."""
     pastas = sorted(set(cfg["folders"]))
-    arquivos = sorted(set(cfg["files"]))
     excecoes = sorted(set(cfg["except"]))
+    # No mesmo nível a exceção vence: um arquivo listado nos dois não é acompanhado, e
+    # continuar em `files` depois que a exceção sai por redundante o faria voltar.
+    arquivos = sorted(set(cfg["files"]) - set(excecoes))
     bruto = {"folders": pastas, "files": arquivos, "except": excecoes}
     pastas = [p for p in pastas if p not in excecoes and (p == "." or not herdado(p, bruto))]
     limpo = {"folders": pastas, "files": [], "except": excecoes}
@@ -129,15 +142,21 @@ def candidatos(root: Path) -> list[str]:
                         "--", "*.md"], cwd=root, capture_output=True)
     if r.returncode != 0:
         return []
-    return sorted({p for p in r.stdout.decode("utf-8").split("\0") if p})
+    return sorted({p for p in r.stdout.decode("utf-8").split("\0")
+                   if p and (root / p).is_file()})
 
 
 def documentos(root: Path, cfg: dict | None = None) -> list[str]:
     """The files the chancel covers today: tracked candidates, plus files named explicitly
     that exist on disk even if git ignores them — naming a file is a decision."""
+    from . import chancela as ch
+
     cfg = cfg if cfg is not None else carregar(root)
     achados = {c for c in candidatos(root) if decisao(c, cfg)}
     achados |= {f for f in cfg["files"] if (root / f).is_file() and decisao(f, cfg)}
+    # Um arquivo acompanhado que saiu do disco ainda tem chancela: a remoção é uma mudança
+    # como outra e tem que poder ser aprovada — senão um agente apaga e ninguém vê.
+    achados |= {f for f in ch.arquivos(root) if decisao(f, cfg)}
     return sorted(achados)
 
 
@@ -219,7 +238,8 @@ def arvore(root: Path) -> dict:
 
     for rel in todos:
         existe = rel in cands or (root / rel).is_file()
-        acomp = existe and decisao(rel, cfg)
+        decidido = decisao(rel, cfg)
+        acomp = existe and decidido
         if not existe:
             estado = "não existe mais"
         elif acomp:
@@ -233,7 +253,7 @@ def arvore(root: Path) -> dict:
             estado = "—"
         pai = pasta_de(rel.rsplit("/", 1)[0] if "/" in rel else ".")
         pai["filhos"].append({"nome": rel.rsplit("/", 1)[-1], "caminho": rel, "tipo": "arquivo",
-                              "marcado": "sim" if acomp else "nao", "estado": estado,
+                              "marcado": "sim" if decidido else "nao", "estado": estado,
                               "existe": existe, "excecao": rel in cfg["except"]})
 
     def completar(n: dict) -> tuple[int, int]:
@@ -242,7 +262,7 @@ def arvore(root: Path) -> dict:
             if f["tipo"] == "pasta":
                 a, t = completar(f)
             else:
-                a, t = (1 if f["marcado"] == "sim" else 0), (1 if f["existe"] else 0)
+                a, t = (1 if f["existe"] and f["marcado"] == "sim" else 0), (1 if f["existe"] else 0)
             acomp, total = acomp + a, total + t
         n["filhos"].sort(key=lambda f: (f["tipo"] == "arquivo", f["nome"].lower()))
         n["acompanhados"], n["total"] = acomp, total

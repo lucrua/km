@@ -170,8 +170,10 @@ Nothing of the glob model stays, and nothing is adapted to look like the new one
 - `include` / `exclude`, `DEFAULT_CONFIG`, `_casa()` and `fnmatch`, the `rglob("*.md")` walk
   and the noise exclusions (`**/node_modules/**`, `**/.git/**`, `**/.km/**`, `**/sandbox/**`,
   `**/CHANGELOG.md`, `**/LICENSE*`).
-- `documentos()` as it is — it is rewritten over git candidates and the closest-decision rule,
-  and no longer silently adds files that only exist in the ref: those are *pausado* now.
+- `documentos()` as it is — it is rewritten over git candidates and the closest-decision rule.
+  A file that exists only in the ref is *pausado* when it is not tracked; when it **is**
+  tracked, it stays in the review, because its deletion is a change like any other —
+  approving it takes the file out of the ref.
 - Every message and doc that says "fora do `include`" — the vocabulary becomes
   *acompanhado* / *não acompanhado*.
 - `km init` writing `**/*.md`: it writes the three lists empty. Tracking is opt-in, and the

@@ -283,3 +283,118 @@ class CliConfigTest(RepoTest):
         e = serve.estado(self.dir)
         self.assertEqual(e["docs"], [])
         self.assertIn("JSON", e["erro"])
+
+
+class RevisaoFinalTest(RepoTest):
+    """Findings of the whole-branch review, each pinned before its fix."""
+
+    def test_normalising_never_changes_a_decision_when_a_file_is_also_an_exception(self):
+        cfg = {"folders": [], "files": ["f.md"], "except": ["f.md"]}
+        self.assertFalse(ac.decisao("f.md", cfg))
+        self.assertFalse(ac.decisao("f.md", ac.normalizar(cfg)))
+
+    def test_dot_cannot_be_an_exception(self):
+        (self.dir / ".km").mkdir(exist_ok=True)
+        (self.dir / ".km" / "config.json").write_text('{"folders": ["."], "except": ["."]}')
+        with self.assertRaises(ac.ConfigInvalida):
+            ac.carregar(self.dir)
+
+    def test_a_path_the_config_cannot_hold_is_refused_by_the_server(self):
+        from km import serve
+        sha = ac.arvore(self.dir)["sha"]
+        r = serve.arquivos_clicar(self.dir, {"caminho": "../x.md", "pasta": False, "marcar": True, "sha": sha})
+        self.assertFalse(r["ok"])
+        self.assertEqual(ac.carregar(self.dir), ac.vazia())
+        r = serve.arquivos_trocar(self.dir, {"config": {"folders": [], "files": ["../x.md"], "except": []},
+                                             "esperado": ac.vazia()})
+        self.assertFalse(r["ok"])
+        self.assertEqual(ac.carregar(self.dir), ac.vazia())
+
+    def test_a_backslash_in_a_file_name_is_just_a_character(self):
+        from km import serve
+        (self.dir / "a\\b.md").write_text("# barra\n")
+        sha = ac.arvore(self.dir)["sha"]
+        r = serve.arquivos_clicar(self.dir, {"caminho": "a\\b.md", "pasta": False, "marcar": True, "sha": sha})
+        self.assertTrue(r["ok"], r)
+        self.assertIn("a\\b.md", ac.documentos(self.dir))
+
+    def test_a_file_deleted_from_disk_is_not_a_candidate(self):
+        (self.dir / "design" / "v1.md").unlink()                   # rm, sem git rm
+        self.assertNotIn("design/v1.md", ac.candidatos(self.dir))
+
+    def test_a_tracked_file_deleted_and_committed_is_still_reviewed(self):
+        from km import chancela as ch, serve
+        ac.gravar(self.dir, {"folders": ["design"], "files": [], "except": []})
+        ch.escrever(self.dir, {"design/v1.md": (self.dir / "design" / "v1.md").read_text()}, "chancela")
+        git(self.dir, "rm", "-q", "design/v1.md")
+        git(self.dir, "commit", "-qm", "um agente apagou")
+        self.assertIn("design/v1.md", ac.documentos(self.dir))
+        s = ch.situacao(self.dir, "design/v1.md")
+        self.assertTrue(s.unidades and all(u.tipo == "sumiu" for u in s.unidades))
+        r = serve.agir(self.dir, {"acao": "aprovar", "file": "design/v1.md",
+                                  "shas": [u.sha for u in s.unidades]}, by="t")
+        self.assertTrue(r["ok"], r)
+        self.assertIsNone(ch.chancelado(self.dir, "design/v1.md"))  # a remoção aprovada sai do ref
+        self.assertNotIn("design/v1.md", ac.documentos(self.dir))
+
+    def test_a_listed_file_that_is_gone_can_be_unticked(self):
+        ac.gravar(self.dir, {"folders": [], "files": ["sumiu.md"], "except": []})
+        arv = ac.arvore(self.dir)
+        no = next(f for f in arv["raiz"]["filhos"] if f["caminho"] == "sumiu.md")
+        self.assertEqual((no["marcado"], no["estado"]), ("sim", "não existe mais"))
+        self.assertEqual(arv["raiz"]["acompanhados"], 0)            # o que não existe não conta
+        self.assertEqual(ac.desmarcar(ac.carregar(self.dir), "sumiu.md", False), ac.vazia())
+
+    def test_the_tree_never_puts_a_path_inside_a_js_string(self):
+        pagina = (Path(__file__).parent.parent / "km" / "painel.html").read_text(encoding="utf-8")
+        self.assertNotIn("('${esc(n.caminho)}')", pagina)
+        self.assertNotIn("${esc(JSON.stringify", pagina)
+
+
+class OrigemTest(unittest.TestCase):
+    """The panel writes documents and the chancel: only the panel itself may ask it to."""
+
+    def setUp(self):
+        import threading
+        from http.server import ThreadingHTTPServer
+        from km import serve
+        self.dir = Path(tempfile.mkdtemp())
+        git(self.dir, "init", "-q", "-b", "main")
+        serve.Handler.root, serve.Handler.by = self.dir, "t"
+        self.srv = ThreadingHTTPServer(("127.0.0.1", 0), serve.Handler)
+        self.porta = self.srv.server_address[1]
+        threading.Thread(target=self.srv.serve_forever, daemon=True).start()
+
+    def tearDown(self):
+        self.srv.shutdown()
+        self.srv.server_close()
+        shutil.rmtree(self.dir)
+
+    def post(self, **cabecalhos):
+        import urllib.request, urllib.error
+        req = urllib.request.Request(f"http://127.0.0.1:{self.porta}/api/arquivos",
+                                     data=json.dumps({"caminho": "a.md", "pasta": False, "marcar": True,
+                                                      "sha": ac.sha_config(ac.vazia())}).encode(),
+                                     headers=cabecalhos, method="POST")
+        try:
+            return urllib.request.urlopen(req).status
+        except urllib.error.HTTPError as e:
+            return e.code
+
+    def test_another_site_cannot_write(self):
+        self.assertEqual(self.post(**{"Content-Type": "application/json",
+                                      "Origin": "http://mal.example"}), 403)
+        self.assertEqual(self.post(**{"Content-Type": "text/plain"}), 403)
+        self.assertFalse((self.dir / ".km" / "config.json").exists())
+
+    def test_the_panel_through_a_forwarded_port_can(self):
+        self.assertEqual(self.post(**{"Content-Type": "application/json", "Host": "localhost:9999",
+                                      "Origin": "http://localhost:9999"}), 200)
+
+    def test_a_rebound_name_cannot(self):
+        self.assertEqual(self.post(**{"Content-Type": "application/json", "Host": "mal.example:8431",
+                                      "Origin": "http://mal.example:8431"}), 403)
+
+    def test_the_panel_itself_can(self):
+        self.assertEqual(self.post(**{"Content-Type": "application/json",
+                                      "Origin": f"http://127.0.0.1:{self.porta}"}), 200)

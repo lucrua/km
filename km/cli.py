@@ -287,7 +287,10 @@ def chancelar(root: Path, rel: str, escolhidas: list[ch.Unidade], s: ch.Situacao
     if motivo:
         mensagem += f"\n{motivo}\n"
     mensagem += f"\npor: {by}\n"
-    return ch.escrever(root, {rel: novo}, mensagem)
+    # Aprovar que um arquivo saiu é tirá-lo da chancela: um arquivo vazio guardado no ref
+    # deixaria um fantasma "em dia" para sempre.
+    fora = ch.atual(root, rel) is None and not novo.strip()
+    return ch.escrever(root, {rel: None if fora else novo}, mensagem)
 
 
 def cmd_restore(args) -> int:

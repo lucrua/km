@@ -453,7 +453,10 @@ def arquivos_clicar(root: Path, pedido: dict) -> dict:
                 "arvore": ac.arvore(root)}
     caminho, pasta, marcou = pedido["caminho"], bool(pedido.get("pasta")), bool(pedido.get("marcar"))
     depois = (ac.marcar if marcou else ac.desmarcar)(antes, caminho, pasta)
-    ac.gravar(root, depois)
+    try:
+        ac.gravar(root, depois)
+    except ac.ConfigInvalida as e:
+        return {"ok": False, "erro": str(e), "arvore": ac.arvore(root)}
     msg = ac.rotulo(root, antes, depois, caminho, pasta, marcou)
     return {"ok": True, "msg": msg,
             "passo": {"rotulo": msg.split(" · ")[0], "antes": antes, "depois": ac.normalizar(depois)},
@@ -469,7 +472,10 @@ def arquivos_trocar(root: Path, pedido: dict) -> dict:
     if ac.normalizar(atual) != ac.normalizar(pedido["esperado"]):
         return {"ok": False, "erro": "a configuração mudou por fora — a tela foi atualizada",
                 "arvore": ac.arvore(root)}
-    ac.gravar(root, pedido["config"])
+    try:
+        ac.gravar(root, pedido["config"])
+    except ac.ConfigInvalida as e:
+        return {"ok": False, "erro": str(e), "arvore": ac.arvore(root)}
     return {"ok": True, "arvore": ac.arvore(root)}
 
 
@@ -503,7 +509,27 @@ class Handler(BaseHTTPRequestHandler):
         else:
             self._envia(b"nao encontrado", "text/plain; charset=utf-8", 404)
 
+    def _de_outro_site(self) -> bool:
+        """This server writes documents and the chancel. A page from anywhere else must not
+        be able to ask it to: a cross-site POST carries its own Origin, and insisting on
+        application/json forces the browser's preflight, which this server never grants."""
+        if (self.headers.get("Content-Type") or "").split(";")[0].strip() != "application/json":
+            return True
+        origem = self.headers.get("Origin")
+        if not origem:
+            return False                      # não veio de um navegador em outro site
+        from urllib.parse import urlparse
+        # Mesma origem é o Host que o próprio navegador usou — o VS Code no WSL pode
+        # encaminhar a porta para outra no Windows, então a porta do servidor não serve de
+        # régua. E o Host tem que ser local, contra DNS rebinding.
+        host = self.headers.get("Host", "")
+        local = urlparse("//" + host).hostname in ("127.0.0.1", "localhost")
+        return not (local and urlparse(origem).netloc == host)
+
     def do_POST(self) -> None:  # noqa: N802
+        if self._de_outro_site():
+            self._envia(b"origem recusada", "text/plain; charset=utf-8", 403)
+            return
         tamanho = int(self.headers.get("Content-Length", 0))
         pedido = json.loads(self.rfile.read(tamanho) or b"{}")
         if self.path.startswith("/api/arquivos/desfazer"):
