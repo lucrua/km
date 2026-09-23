@@ -170,7 +170,7 @@ barra.command = 'km.abrirPainel';
 function marcarProblemas(doc) {
   if (!doc || doc.languageId !== 'markdown' || !raiz(doc)) return;
   const e = estado(doc);
-  if (!e) {   // fora do include do .km/config.json: o km não tem nada a dizer
+  if (!e) {   // arquivo não acompanhado: o km não tem nada a dizer
     problemas.set(doc.uri, []);
     barra.hide();
     return;

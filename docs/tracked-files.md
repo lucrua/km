@@ -1,6 +1,6 @@
 # Tracked files: which documents the chancel covers
 
-Status: **design, approved in conversation on 2026-09-23; spec for review.** Replaces the
+Status: **built** (2026-09-23). Replaces the
 `include`/`exclude` glob lists. Built as if new: nothing of the glob model is kept, adapted
 or read for compatibility.
 

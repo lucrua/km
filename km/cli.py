@@ -44,7 +44,7 @@ def _sem_acento(t: str) -> str:
 
 
 def _arquivos(root: Path, arg: str | None) -> list[str]:
-    """The opt-in is the `include` list, and it is the opt-in everywhere.
+    """Tracking is the opt-in, and it is the opt-in everywhere.
 
     Naming a file explicitly does not smuggle it in: otherwise the editor would decorate
     and nag about documents this repository deliberately left out.
@@ -122,7 +122,7 @@ def cmd_pendente(args) -> int:
         if args.json:
             print("[]")
             return 0
-        print(f"{args.file} está fora do `include` do .km/config.json — o km não olha para ele")
+        print(f"{args.file} não é acompanhado — escolha no painel, aba Arquivos")
         return 0
     situacoes = [ch.situacao(root, rel, hoje) for rel in alvos]
 
@@ -164,7 +164,7 @@ def cmd_pendente(args) -> int:
 
     novos = [s for s in situacoes if not s.tem_chancela]
     if args.novos:
-        print("\nsem chancela nenhuma:" if novos else "\ntodo arquivo incluído tem chancela")
+        print("\nsem chancela nenhuma:" if novos else "\ntodo arquivo acompanhado tem chancela")
         for s in novos:
             print(f"      {s.arquivo}  ·  {len(s.depois.splitlines())} linhas")
 
@@ -193,8 +193,8 @@ def cmd_chancela(args) -> int:
     if ch.atual(root, rel) is None:
         raise SystemExit(f"{rel} não existe no disco")
     if rel not in ac.documentos(root):
-        raise SystemExit(f"{rel} está fora do `include` do .km/config.json — "
-                         f"inclua-o lá antes de chancelar")
+        raise SystemExit(f"{rel} não é acompanhado — marque-o no painel, aba Arquivos,"
+                         f" antes de chancelar")
     s = ch.situacao(root, rel)
     if not s.mudancas:
         print(f"{rel}: nada pendente — a chancela já é o arquivo de hoje")
@@ -249,7 +249,7 @@ def _chancelar_de(root: Path, args) -> int:
             print(f"   — {rel}: não existia em {rev}")
             continue
         if rel not in cobertos:
-            print(f"   — {rel}: fora do `include` do .km/config.json")
+            print(f"   — {rel}: não é acompanhado")
             continue
         mudancas[rel] = texto
     if not mudancas:
@@ -421,7 +421,7 @@ def main(argv: list[str]) -> int:
     s = sub.add_parser("pendente", aliases=["pending"],
                        help="o que mudou desde a chancela, e o que nunca teve uma")
     s.add_argument("file", nargs="?")
-    s.add_argument("--novos", action="store_true", help="listar os arquivos sem chancela")
+    s.add_argument("--novos", action="store_true", help="listar os arquivos acompanhados que nunca tiveram chancela")
     s.add_argument("--short", action="store_true", help="uma linha, para o hook")
     s.add_argument("--json", action="store_true", help="para o editor e para a tela")
     s.add_argument("--limit", type=int, default=12)
@@ -467,4 +467,8 @@ def main(argv: list[str]) -> int:
                    ).set_defaults(func=cmd_install_hooks)
 
     args = p.parse_args(argv)
-    return args.func(args)
+    try:
+        return args.func(args)
+    except ac.ConfigInvalida as e:
+        # A config é escrita à mão também: o que está errado nela é uma frase, não um traceback.
+        raise SystemExit(f"km: {e}")

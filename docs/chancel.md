@@ -7,6 +7,8 @@ same day, with every number below measured on a real repository.
 ## What the chancel is
 
 **A copy of each tracked file, as you last endorsed it, stored in `refs/km/chancela`.**
+Which files are tracked is chosen by folder and file in the panel — see
+[tracked-files.md](tracked-files.md); a file you stop tracking keeps its copy in the ref.
 
 Reviewing is comparing that copy with the file on disk. Approving a block means writing
 that block into the copy. There is nothing else: no identity per block, no anchors, no
@@ -154,13 +156,9 @@ it, and `tools/migrar_ledger.py` (deleted with it) carried the block ledger into
   already removes it, because reverting the hunk is removing the text; `restore` only
   refuses when the file has no chancel at all. What is still missing is the reason going
   anywhere but the commit message.
-- **Editing outside the editor.** A standalone surface needs a local server to save, with
-  block-scoped writes and optimistic concurrency: re-read the file, compare, refuse and show
-  both versions if it moved. Designed, not built.
 - **WYSIWYG.** Any serialising editor rewrites Markdown on save. With the chancel as text,
   that shows up as a diff of the whole file rather than as silent loss — better than under
   the hash model, still noisy. CodeMirror with live preview avoids it entirely.
-- **Which files are tracked**, and whether the ref carries every file or only those opted in.
 
 ## Measured, so nobody re-derives it
 

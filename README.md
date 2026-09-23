@@ -13,8 +13,12 @@ the copy. Nothing is stored per passage — no identity, no anchor, no hash — 
 written with plumbing and never checked out, so your branch, your index and your open files
 are untouched.
 
-Which documents it covers is the `include` list in `.km/config.json`: opt-in, and anything
-outside it never appears.
+Which documents it covers is chosen in the panel's **Arquivos** view: a tree of the
+repository's Markdown files where a ticked folder takes the files created in it later
+(`+ novos`), a file can be ticked on its own, and an exception leaves one out. It is stored
+in `.km/config.json` as three lists — `folders`, `files`, `except` — and nothing outside
+them appears. Untracking keeps the chancel, so the file is *paused*, not forgotten. The
+design: [docs/tracked-files.md](docs/tracked-files.md).
 
 ## The panel
 
@@ -93,9 +97,9 @@ The panel is where reviewing happens; these are the same things in a terminal, a
 script or an agent reads the state.
 
 ```bash
-km init                          # creates .km/config.json — the include list is the opt-in
+km init                          # creates .km/config.json with nothing tracked
 km pendente                      # what changed since the chancel, and what never had one
-km pendente --novos              # the list of files with no chancel
+km pendente --novos              # tracked files that never had a chancel
 km chancela regras.md --hunk 2   # change 2 into the ref; `--hunk 2.1` only its first block
 km chancela regras.md --all      # the file as it stands today
 km restore  regras.md --hunk 2.1 # put the chancelled text of that block back on disk

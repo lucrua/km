@@ -265,3 +265,21 @@ class RotaTest(RepoTest):
         self.assertFalse(r["ok"])
         self.assertIn("mudou por fora", r["erro"])
         self.assertEqual(ac.carregar(self.dir)["files"], ["README.md"])
+
+
+class CliConfigTest(RepoTest):
+    def test_a_broken_config_is_one_line_not_a_traceback(self):
+        from km import cli
+        (self.dir / ".km").mkdir(exist_ok=True)
+        (self.dir / ".km" / "config.json").write_text('{"include": ["**/*.md"]}')
+        with self.assertRaises(SystemExit) as e:
+            cli.main(["--repo", str(self.dir), "pendente"])
+        self.assertIn("include", str(e.exception.code))
+
+    def test_the_review_state_reports_a_broken_config(self):
+        from km import serve
+        (self.dir / ".km").mkdir(exist_ok=True)
+        (self.dir / ".km" / "config.json").write_text("{ não é json")
+        e = serve.estado(self.dir)
+        self.assertEqual(e["docs"], [])
+        self.assertIn("JSON", e["erro"])

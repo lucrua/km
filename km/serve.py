@@ -333,7 +333,14 @@ def estado(root: Path, by: str = "", base: str | None = None,
     hoje = date.today().isoformat()
     docs = []
     soma_pend = soma_total = 0
-    for rel in ac.documentos(root):
+    try:
+        acompanhados = ac.documentos(root)
+    except ac.ConfigInvalida as e:
+        # Uma config quebrada vira um aviso na tela, não uma página que não carrega.
+        return {"repo": root.name, "root": str(root), "docs": [], "hoje": hoje, "by": by,
+                "base": base or ch.REF, "revisoes": ch.revisoes(root), "pct": "",
+                "erro": str(e)}
+    for rel in acompanhados:
         s = ch.situacao(root, rel, hoje, base=base)
         if not s.depois.strip():
             continue
@@ -372,7 +379,7 @@ def agir(root: Path, pedido: dict, by: str) -> dict:
     acao = pedido.get("acao")
     rel = pedido.get("file", "")
     if rel not in ac.documentos(root):
-        return {"ok": False, "erro": f"{rel} está fora do include do .km/config.json"}
+        return {"ok": False, "erro": f"{rel} não é acompanhado — escolha na aba Arquivos"}
 
     if acao == "salvar":
         try:

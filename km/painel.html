@@ -153,6 +153,7 @@ background:var(--card);border:1px solid var(--rule);border-radius:8px;padding:4p
 #historico[hidden]{display:none}
 #historico button{text-align:left;border:0;padding:6px 10px;background:transparent;color:var(--ink);cursor:pointer}
 #historico button:hover{background:var(--bg)}
+.vazio-geral.ruim{color:var(--neg)}
 .vazio-geral{grid-column:1 / 4;padding:40px 20px;color:var(--mut);display:flex;gap:14px;align-items:center}
 .vazio-geral button{font:inherit;padding:5px 12px;border-radius:6px;cursor:pointer;border:1px solid var(--ok-bg);
 background:var(--ok-bg);color:var(--ok)}
@@ -367,7 +368,8 @@ function desenhar(){
   originais = {};
   if (!d) {
     // Nada acompanhado ainda: um repositório novo, ou tudo pausado. A revisão não tem o
-    // que mostrar, e o caminho é escolher arquivos.
+    // que mostrar, e o caminho é escolher arquivos. Uma config quebrada diz o que tem.
+    if (D.erro) { $('doc').innerHTML = `<div class="vazio-geral ruim">✕ ${esc(D.erro)}</div>`; return; }
     $('doc').innerHTML = `<div class="vazio-geral">Nenhum arquivo é acompanhado ainda.
       <button class="pri" onclick="mostrar('arquivos')">Escolher arquivos</button></div>`;
     return;
