@@ -84,3 +84,11 @@ test('switching keeps the editor read-only or editable', () => {
   const s2 = s1.update({ effects: trocarModo(s1, false) }).state;
   for (const s of [s1, s2]) { assert.equal(s.readOnly, true); assert.equal(s.facet(EditorView.editable), false); }
 });
+
+test('today is the local date, not UTC', async () => {
+  process.env.TZ = 'America/Sao_Paulo';
+  const { hoje } = await import('../../km/painel/preview.js');
+  // 22:30 em Brasília já é o dia seguinte em UTC: um ❓ que vence hoje não está vencido.
+  assert.equal(hoje(new Date('2026-09-23T22:30:00-03:00')), '2026-09-23');
+  assert.equal(hoje(new Date('2026-09-24T00:10:00-03:00')), '2026-09-24');
+});

@@ -10,7 +10,11 @@ import { EditorView, Decoration, WidgetType, StateField, StateEffect, EditorStat
 import { quebrasOcultas } from './paragrafo.js';
 import * as tabela from './tabela.js';
 
-const hoje = () => new Date().toISOString().slice(0, 10);
+// A data de hoje no relógio de quem lê: em UTC, um ❓ que vence hoje apareceria vencido
+// depois das 21h no Brasil.
+const doisDigitos = (n) => String(n).padStart(2, '0');
+export const hoje = (d = new Date()) =>
+  `${d.getFullYear()}-${doisDigitos(d.getMonth() + 1)}-${doisDigitos(d.getDate())}`;
 const esc = (s) => s.replace(/[&<>"]/g, (m) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[m]));
 
 // Markdown inline, só para ler as células da tabela — nunca usado para escrever nada.
@@ -143,10 +147,13 @@ export function decorar(state, editavel) {
   arvore.iterate({ enter: (n) => {
     const nome = n.name;
     if (nome === 'Table') return false;
+    // Sem URL não é link que o preview conheça — uma nota de rodapé `[^1]`, uma referência:
+    // fica como está no arquivo, com os colchetes.
+    if (nome === 'Link' && !n.node.getChild('URL')) return false;
     const pai = n.node.parent ? n.node.parent.name : '';
     const m = /^ATXHeading(\d)$/.exec(nome);
     if (m) linha(n.from, n.to, 'cm-h cm-h' + m[1]);
-    else if (nome === 'HeaderMark' && !ativa(n.from)) esconder(n.from, depoisEspaco(n.to));
+    else if (nome === 'HeaderMark' && pai.startsWith('ATXHeading') && !ativa(n.from)) esconder(n.from, depoisEspaco(n.to));
     else if (nome === 'CodeMark' && pai === 'FencedCode') { /* cercas: tratadas em FencedCode */ }
     else if (OCULTAVEIS.has(nome) && !ativa(n.from)) esconder(n.from, n.to);
     else if (nome === 'URL' && pai === 'Link' && !ativa(n.from)) esconder(n.from, n.to);

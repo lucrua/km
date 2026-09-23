@@ -29,10 +29,11 @@ export function editorSimples(lugar, chave, texto, editavel, aoMudar, aoSelecion
 }
 
 export function editorMudanca(lugar, chave, antes, agora, editavel, aoMudar, aoSelecionar) {
-  // Um trecho que só saiu não tem o que editar do lado de hoje.
+  // Quem chama decide se o lado de hoje é editável (um trecho que só saiu não é); o texto
+  // não decide: um trecho que você esvaziou continua seu para escrever.
   const mv = new MergeView({ parent: lugar, gutter: false,
     a: { doc: antes, extensions: extensoes(false) },
-    b: { doc: agora, extensions: extensoes(editavel && agora !== '', aoMudar, aoSelecionar) } });
+    b: { doc: agora, extensions: extensoes(editavel, aoMudar, aoSelecionar) } });
   vivos.set(chave, { view: mv.b, todas: [mv.a, mv.b], destruir: () => mv.destroy() });
 }
 

@@ -40,9 +40,12 @@ def arquivo_estatico(caminho: str, raizes: dict | None = None) -> Path | None:
     partes = unquote(urlparse(caminho).path).split("/")
     if len(partes) != 4 or partes[1] != "static" or partes[2] not in raizes or not partes[3]:
         return None
-    base = raizes[partes[2]].resolve()
-    alvo = (base / partes[3]).resolve()
-    if alvo.parent != base or not alvo.is_file():
+    try:
+        base = raizes[partes[2]].resolve()
+        alvo = (base / partes[3]).resolve()
+        if alvo.parent != base or not alvo.is_file():
+            return None
+    except (OSError, ValueError):   # um byte nulo no nome, um nome longo demais
         return None
     return alvo
 
@@ -65,6 +68,7 @@ def segmentos(s: ch.Situacao) -> list[dict]:
     pd, ba, bd, ops = ch._alinhar(s.antes, s.depois)
     por_n = {m.n: m for m in s.mudancas}
     out: list[dict] = []
+    vistas: dict[str, int] = {}
     n = 0
     for tag, i1, i2, j1, j2 in ops:
         if tag == "equal":
@@ -75,7 +79,13 @@ def segmentos(s: ch.Situacao) -> list[dict]:
             continue
         n += 1
         m = por_n[n]
-        out.append(_trecho_mudado(s, m))
+        t = _trecho_mudado(s, m)
+        # A chave vem do texto, para o que você digitou num trecho seguir com ele quando outro
+        # sai da tela; duas mudanças iguais no mesmo arquivo ganham cada uma a sua.
+        k = vistas[t["chave"]] = vistas.get(t["chave"], 0) + 1
+        if k > 1:
+            t["chave"] += f"-{k}"
+        out.append(t)
     return out
 
 
