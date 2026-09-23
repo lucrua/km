@@ -366,10 +366,11 @@ def estado(root: Path, by: str = "", base: str | None = None,
 
 def _unidades(root: Path, rel: str, shas: list[str]) -> tuple[ch.Situacao, list[ch.Unidade]]:
     """The blocks the page asked for, found by content. If any is missing the file moved
-    under the page, and acting on the rest would be acting on something you did not see."""
+    under the page, and acting on the rest would be acting on something you did not see.
+    Blocks with the same text share a sha, so one sha can find several blocks."""
     s = ch.situacao(root, rel)
     achadas = ch.unidades_por_sha(s.mudancas, set(shas))
-    if len(achadas) != len(set(shas)):
+    if {u.sha for u in achadas} != set(shas):
         raise LookupError("o arquivo mudou enquanto você olhava — a tela foi atualizada")
     return s, achadas
 

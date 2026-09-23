@@ -337,6 +337,19 @@ class RevisaoFinalTest(RepoTest):
         self.assertIsNone(ch.chancelado(self.dir, "design/v1.md"))  # a remoção aprovada sai do ref
         self.assertNotIn("design/v1.md", ac.documentos(self.dir))
 
+    def test_a_change_that_removes_the_same_paragraph_twice_can_be_approved(self):
+        from km import chancela as ch, serve
+        ac.gravar(self.dir, {"folders": ["design"], "files": [], "except": []})
+        repetido = "# v1\n\nrepetido\n\nno meio\n\nrepetido\n"
+        ch.escrever(self.dir, {"design/v1.md": repetido}, "chancela")
+        (self.dir / "design" / "v1.md").write_text("# v1\n\nno meio\n", encoding="utf-8")
+        s = ch.situacao(self.dir, "design/v1.md")
+        shas = [u.sha for u in s.unidades]
+        self.assertGreater(len(shas), len(set(shas)))              # dois blocos, um só sha
+        r = serve.agir(self.dir, {"acao": "aprovar", "file": "design/v1.md", "shas": shas}, by="t")
+        self.assertTrue(r["ok"], r)
+        self.assertFalse(ch.situacao(self.dir, "design/v1.md").mudancas)
+
     def test_a_listed_file_that_is_gone_can_be_unticked(self):
         ac.gravar(self.dir, {"folders": [], "files": ["sumiu.md"], "except": []})
         arv = ac.arvore(self.dir)
