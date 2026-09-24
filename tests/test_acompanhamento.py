@@ -368,6 +368,14 @@ class RevisaoFinalTest(RepoTest):
         self.assertEqual(arv["raiz"]["acompanhados"], 0)            # o que não existe não conta
         self.assertEqual(ac.desmarcar(ac.carregar(self.dir), "sumiu.md", False), ac.vazia())
 
+    def test_the_tab_title_starts_with_the_repository(self):
+        # ActivityWatch reads the window title, and the esteira's /activity attributes the
+        # time to the project named before ` · `. A title without the repo is time billed
+        # to nobody.
+        pagina = (Path(__file__).parent.parent / "km" / "painel.html").read_text(encoding="utf-8")
+        codigo = "\n".join(l for l in pagina.splitlines() if not l.strip().startswith("//"))
+        self.assertIn("document.title = `${D.repo} · ", codigo)
+
     def test_the_tree_never_puts_a_path_inside_a_js_string(self):
         pagina = (Path(__file__).parent.parent / "km" / "painel.html").read_text(encoding="utf-8")
         self.assertNotIn("('${esc(n.caminho)}')", pagina)

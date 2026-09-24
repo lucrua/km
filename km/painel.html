@@ -371,6 +371,9 @@ function desenhar(){
   // A posição é lida antes de qualquer coisa ser destruída.
   const y = scrollY;
   $('repo').textContent = D.repo;
+  // A aba diz o repositório primeiro: o ActivityWatch grava o título da janela, e o
+  // /activity da esteira cobra o tempo ao projeto que vem antes de ` · `. É contrato.
+  document.title = `${D.repo} · km chancela`;
   const em = D.docs.filter(d => d.rastreado && !d.pendente).length;
   const sem = D.docs.filter(d => !d.rastreado).length;
   $('resumo').textContent = `${D.docs.length} arquivos · ${em} em dia · `
