@@ -92,3 +92,31 @@ test('today is the local date, not UTC', async () => {
   assert.equal(hoje(new Date('2026-09-23T22:30:00-03:00')), '2026-09-23');
   assert.equal(hoje(new Date('2026-09-24T00:10:00-03:00')), '2026-09-24');
 });
+
+// As três marcas viram caixas; o ❓ vencido destaca a data.
+const classes = (state) => {
+  const out = [];
+  decorar(state, true).between(0, state.doc.length, (from, to, d) => { if (d.spec.class) out.push([from, d.spec.class]); });
+  return out;
+};
+
+test('each mark is a box of its own kind, and the old marks are plain quotes', () => {
+  const texto = ['> 📌 **to_do · 2026-09-24** — a', '', '> ❓ **to_validate by 2999-01-01** — b', '',
+                 '> 💬 c', '', '> ⚠️ **sem certeza** — d', '', '> 🚫 **discordo** — e', ''].join('\n');
+  const s = EditorState.create({ doc: texto, extensions: editorMarkdown() });
+  const porLinha = (n) => classes(s).filter(([f, c]) => f === s.doc.line(n).from && c.startsWith('cm-cit')).map(([, c]) => c);
+  assert.deepEqual(porLinha(1), ['cm-cit cm-cit-fazer']);
+  assert.deepEqual(porLinha(3), ['cm-cit cm-cit-validar']);
+  assert.deepEqual(porLinha(5), ['cm-cit cm-cit-comentario']);
+  assert.deepEqual(porLinha(7), ['cm-cit']);
+  assert.deepEqual(porLinha(9), ['cm-cit']);
+  assert.ok(!classes(s).some(([, c]) => c === 'cm-vencida'));
+});
+
+test('an overdue to_validate highlights its date, and a to_do date never does', () => {
+  const texto = '> ❓ **to_validate by 2020-01-01** — venceu\n\n> 📌 **to_do · 2020-01-01** — velho\n';
+  const s = EditorState.create({ doc: texto, extensions: editorMarkdown() });
+  const vencidas = classes(s).filter(([, c]) => c === 'cm-vencida').map(([f]) => texto.slice(f, f + 10));
+  assert.deepEqual(vencidas, ['2020-01-01']);
+  assert.equal(classes(s).filter(([, c]) => c === 'cm-vencida')[0][0], texto.indexOf('2020'));
+});

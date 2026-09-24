@@ -136,8 +136,7 @@ def cmd_pendente(args) -> int:
                 "file": s.arquivo, "tem_chancela": s.tem_chancela,
                 "pct": ch.percentual(pend, total), "pendente": bool(s.mudancas),
                 "mudancas": [{"n": m.n, "titulo": m.titulo, "linha": m.linha,
-                              "fim": max(m.fim, m.linha + 1), "bloqueio": m.bloqueio,
-                              "sumidas": m.sumidas} for m in s.mudancas],
+                              "fim": max(m.fim, m.linha + 1), "sumidas": m.sumidas} for m in s.mudancas],
                 "vencidas": [{"linha": l, "prazo": p, "texto": x} for l, p, x in s.vencidas],
             })
         print(json.dumps(saida, ensure_ascii=False))
@@ -155,12 +154,10 @@ def cmd_pendente(args) -> int:
             # Um trecho mudado é uma coisa só para ler: blocos seguidos que mudaram não se
             # listam um a um. `--hunk 2.1` continua valendo para quem precisa endereçar menos.
             total += 1
-            sinal = "🚫" if m.bloqueio else ("⚠️" if m.sumidas else "  ")
+            sinal = "!" if m.sumidas else " "
             print(f"  {m.n:>3} {sinal} {m.titulo[:40]:<40} {m.unidades[0].resumo(46)}")
             for l in m.sumidas:
-                print(f"       ressalva removida: {l[:66]}")
-            if m.bloqueio:
-                print(f"       trecho bloqueado: {m.bloqueio[:66]}")
+                print(f"      marca removida: {l[:66]}")
 
     novos = [s for s in situacoes if not s.tem_chancela]
     if args.novos:
@@ -207,21 +204,12 @@ def cmd_chancela(args) -> int:
     else:
         raise SystemExit("diga o que entra: --hunk <n|n.m|título> (um ou mais) ou --all")
 
-    barradas = [u for u in escolhidas if u.bloqueio and not args.force]
-    escolhidas = [u for u in escolhidas if u not in barradas]
-    if not escolhidas:
-        for u in barradas:
-            print(f"🚫 {u.titulo}: {u.bloqueio}")
-        raise SystemExit("nada entrou: resolva o 🚫 (ou --force, que o deixa no texto)")
-
     commit = chancelar(root, rel, escolhidas, s, args.message, args.by)
     print(f"{rel}  ·  na chancela  ·  {commit[:8]}")
     for u in escolhidas:
         print(f"   ✓ {u.id:<5} {u.tipo:<6} {u.resumo(50)}")
         for l in u.sumidas:
-            print(f"     (a ressalva {l[:56]} saiu junto)")
-    for u in barradas:
-        print(f"   🚫 {u.id} {u.titulo} — ficou de fora: {u.bloqueio[:60]}")
+            print(f"     (a marca {l[:56]} saiu junto)")
     depois = ch.situacao(root, rel)
     resto = depois.mudancas
     print(f"falta {ch.percentual(*ch.pendencia_do_arquivo(depois))} deste arquivo" if resto
@@ -312,7 +300,7 @@ def cmd_restore(args) -> int:
     for u in alvos:
         print(f"   ↩ {u.id:<5} {u.resumo(56)}")
     if args.message:
-        print(f"   motivo: {args.message}  (escreva-o no commit, ou como ⚠️ no texto)")
+        print(f"   motivo: {args.message}  (escreva-o no commit, ou como 💬 no texto)")
     return 0
 
 
@@ -336,10 +324,11 @@ def cmd_lint(args) -> int:
             print(f"{rel}: tem chancela e não está mais no disco")
             achados += 1
             continue
-        linhas = [f"  ❓ :{n} venceu em {prazo} — {txt[:60]}" for n, prazo, txt in s.vencidas]
-        linhas += [f"  🚫 bloqueia a chancela do trecho — {txt[:60]}"
-                   for _, marca, txt in ch.ressalvas(texto) if marca == "🚫"]
-        linhas += [f"  ⚠️ ressalva removida em {u.titulo[:30]} — {l[:50]}"
+        linhas = [f"  :{n} ❓ to_validate venceu em {prazo} — {txt[:60]}"
+                  for n, prazo, txt in s.vencidas]
+        linhas += [f"  :{m.linha} {m.tipo} ainda com o texto de exemplo — {m.cru[:60]}"
+                   for m in ch.marcas(texto) if m.placeholder]
+        linhas += [f"  marca removida em {u.titulo[:30]} — {l[:50]}"
                    for u in s.unidades for l in u.sumidas]
         if linhas:
             print(f"\n{rel}")
@@ -347,6 +336,33 @@ def cmd_lint(args) -> int:
             achados += len(linhas)
     print(f"\n{achados} apontamento(s)")
     return 1 if achados and args.strict else 0
+
+
+def cmd_marcas(args) -> int:
+    """The marks an agent is meant to find, across every Markdown file git knows about.
+
+    Not only the tracked ones: a to-do is written for whoever passes by, and a file nobody
+    reviews is exactly where one would otherwise go unseen.
+    """
+    root = _root(args)
+    hoje = date.today().isoformat()
+    tipos = {args.tipo} if args.tipo else ({"to_do", "to_validate", "comment"} if args.todas
+                                           else {"to_do", "to_validate"})
+    achadas = []
+    for rel in ac.candidatos(root):
+        texto = ch.atual(root, rel) or ""
+        for m in ch.marcas(texto):
+            if m.tipo in tipos:
+                achadas.append({"file": rel, "line": m.linha, "kind": m.tipo, "date": m.data,
+                                "text": m.texto,
+                                "overdue": m.tipo == "to_validate" and m.data < hoje})
+    if args.json:
+        print(json.dumps(achadas, ensure_ascii=False))
+        return 0
+    for a in achadas:
+        print(f"{a['file']}:{a['line']}  {a['kind']}  " + (f"{a['date']}  " if a["date"] else "")
+              + a["text"] + ("  (vencido)" if a["overdue"] else ""))
+    return 0
 
 
 def cmd_baseline(args) -> int:
@@ -439,7 +455,6 @@ def main(argv: list[str]) -> int:
                    help="número do `km pendente`, ou parte do título; repetível")
     s.add_argument("--all", action="store_true", help="o arquivo inteiro como está hoje")
     s.add_argument("-m", "--message", help="por que você endossa (vai na mensagem do commit)")
-    s.add_argument("--force", action="store_true", help="chancelar mesmo com 🚫 no trecho")
     s.add_argument("--by", default=quem)
     s.set_defaults(func=cmd_chancela)
 
@@ -450,10 +465,20 @@ def main(argv: list[str]) -> int:
     s.add_argument("-m", "--message", help="por que a mudança não serve")
     s.set_defaults(func=cmd_restore)
 
-    s = sub.add_parser("lint", help="a convenção das ressalvas: 🚫 pendente, ❓ vencida, ⚠️ sumida")
+    s = sub.add_parser("lint", help="a convenção das marcas: ❓ vencida, texto de exemplo, marca sumida")
     s.add_argument("file", nargs="?")
     s.add_argument("--strict", action="store_true", help="sai com erro se houver apontamento")
     s.set_defaults(func=cmd_lint)
+
+    s = sub.add_parser("marcas", aliases=["marks"],
+                       help="as marcas ❓ to_validate e 📌 to_do de todo Markdown do git,"
+                            " acompanhado ou não — para um agente achar o que fazer")
+    s.add_argument("--tipo", "--kind", dest="tipo", choices=["to_do", "to_validate", "comment"])
+    s.add_argument("--todas", "--all", dest="todas", action="store_true",
+                   help="incluir 💬 comment")
+    s.add_argument("--json", action="store_true",
+                   help="lista de {file, line, kind, date, text, overdue}")
+    s.set_defaults(func=cmd_marcas)
 
     s = sub.add_parser("quando", aliases=["when"],
                        help="quando este trecho teve chancela pela última vez")

@@ -5,8 +5,8 @@ It reads `refs/km/chancela` and the files on disk, and every action goes through
 functions the CLI uses — the page is a surface, not a second implementation.
 
 It is started when you sit down to review and stopped with Ctrl-C. Nothing runs in the
-background, nothing is written except what you ask for: the ref, a reservation in the text,
-or a passage you edited here.
+background, nothing is written except what you ask for: the ref, or a passage you edited
+here — a mark included.
 """
 
 from __future__ import annotations
@@ -134,7 +134,7 @@ def _trecho_mudado(s: ch.Situacao, m: ch.Mudanca) -> dict:
     return {"tipo": "mudanca", "n": m.n, "titulo": m.titulo, "geral": geral,
             "linha": linha or m.linha, "antes": antes, "agora": agora,
             "chave": ch.sha_do(antes + "\x00" + agora),
-            "unidades": unidades, "bloqueio": m.bloqueio, "sumidas": m.sumidas}
+            "unidades": unidades, "sumidas": m.sumidas}
 
 
 def estado(root: Path, by: str = "", base: str | None = None,
@@ -163,7 +163,6 @@ def estado(root: Path, by: str = "", base: str | None = None,
         soma_pend, soma_total = soma_pend + pend, soma_total + total
         d = {"file": rel, "rastreado": s.tem_chancela, "cheio": cheio,
              "pendente": bool(s.mudancas), "pct": ch.percentual(pend, total),
-             "bloqueado": any(u.bloqueio for u in s.unidades),
              "vencidas": len(s.vencidas)}
         if cheio:
             d["em"] = _ultima(root, rel)
@@ -223,25 +222,7 @@ def agir(root: Path, pedido: dict, by: str) -> dict:
         return {"ok": True, "msg": "de volta ao texto chancelado"
                 + (" — só a parte selecionada" if parciais else "")}
 
-    if acao == "validar":
-        # O ❓ entra logo depois do último bloco escolhido, como bloco próprio, e entra na
-        # chancela junto: a meia-chancela é uma linha que qualquer leitor vê.
-        linha = max((u.depois.fim - 1 for u in alvos if u.depois),
-                    default=min(u.antes.linha for u in alvos) - 1)
-        marca = ch.linha_de_marca("❓", pedido.get("texto") or "", pedido.get("prazo"))
-        shas = {u.sha for u in alvos}
-        if not ch.inserir_apos(root, rel, linha, marca):
-            return {"ok": False, "erro": "não consegui escrever o prazo no texto"}
-        s = ch.situacao(root, rel)
-        alvos = [u for u in s.unidades
-                 if u.sha in shas or (u.depois and u.depois.texto == marca)]
-        inteiras, parciais = alvos, {}
-        acao = "aprovar"
-
     if acao == "aprovar":
-        barradas = [u for u in alvos if u.bloqueio]
-        if barradas and not pedido.get("force"):
-            return {"ok": False, "erro": "🚫 " + barradas[0].bloqueio.lstrip("> ")}
         commit = cli.chancelar(root, rel, inteiras, s, pedido.get("motivo"), by, parciais)
         saiu = sum(len(u.sumidas) for u in inteiras)
         depois = ch.situacao(root, rel)
@@ -249,7 +230,7 @@ def agir(root: Path, pedido: dict, by: str) -> dict:
                + (f" · falta {ch.percentual(*ch.pendencia_do_arquivo(depois))} deste arquivo"
                   if depois.mudancas else " · arquivo em dia"))
         if saiu:
-            msg += f" · {saiu} ressalva(s) removida(s) aprovada(s) junto"
+            msg += f" · {saiu} marca(s) removida(s) aprovada(s) junto"
         return {"ok": True, "msg": msg}
 
     return {"ok": False, "erro": f"ação desconhecida: {acao}"}

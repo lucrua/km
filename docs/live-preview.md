@@ -66,7 +66,7 @@ The pure modules have no DOM and no CodeMirror imports, so they are tested with 
 `serve.segmentos` returns plain text, no HTML:
 
 - unchanged stretch: `{"tipo": "igual", "linha", "texto"}`;
-- change: `{"tipo": "mudanca", "n", "titulo", "linha", "antes", "agora", "unidades": [{sha, tipo, ini, fim}], "bloqueio", "sumidas"}` — `antes` is the chancel's text of the passage, `agora` today's, and `unidades` the block offsets inside `agora`, as today.
+- change: `{"tipo": "mudanca", "n", "titulo", "linha", "antes", "agora", "unidades": [{sha, tipo, ini, fim}], "sumidas"}` — `antes` is the chancel's text of the passage, `agora` today's, and `unidades` the block offsets inside `agora`, as today.
 
 ## The live preview
 
@@ -80,7 +80,7 @@ Off the cursor line:
 | `- item`, `1. item` | a bullet or the number, with the item's indentation |
 | `- [ ]` / `- [x]` | ☐ / ☑ — display only; click the line to change it |
 | `> quote` | a bar on the left, `>` hidden |
-| `> ⚠️` · `> ❓` · `> 🚫` | amber, blue and red boxes; an overdue ❓ highlights its date |
+| `> 📌 **to_do · …**` · `> ❓ **to_validate by …**` · `> 💬 **comment**` | blue, amber and neutral boxes — only in the exact form; an overdue ❓ highlights its date (local time) |
 | fenced code | its own background, fence lines hidden |
 | `---` | a horizontal rule |
 
@@ -130,8 +130,8 @@ that differ.
   differs from the original.
 - **Approving a selection:** the selection's offsets come from the right editor, and are turned
   into "this part of this block" with the `unidades` offsets, as today.
-- **⚠️ ❓ 🚫 at the cursor:** a transaction inserting the mark at the end of the cursor's line,
-  with a blank line before and after.
+- **📌 ❓ 💬 at the cursor:** a transaction inserting the mark after the block the cursor is in,
+  with one blank line before and after, and `add your comment here` selected.
 - **Undo:** Ctrl+Z inside an editor undoes text (CodeMirror's history). In the *Arquivos* view,
   Ctrl+Z still undoes the config.
 

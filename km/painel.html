@@ -54,7 +54,6 @@ white-space:nowrap;align-self:flex-start}
 border:1px solid var(--rule);background:var(--bg);color:var(--ink);text-align:left}
 .acoes button:hover{border-color:var(--acc)}
 .acoes button.pri{background:var(--ok-bg);border-color:var(--ok-bg);color:var(--ok)}
-.acoes button[disabled]{opacity:.35;cursor:not-allowed}
 .acoes .marcas{display:flex;gap:4px}
 .acoes .marcas button{flex:1;text-align:center;padding:3px 0;font-size:12px}
 .nota{font-size:12px;border-left:3px solid var(--neg);background:var(--neg-bg);
@@ -81,7 +80,6 @@ border:1px solid var(--rule);background:var(--bg);color:var(--ink)}
 .cab-m .form{flex-direction:row;flex-wrap:wrap;align-items:center}
 .inicio-m{border-top:2px solid color-mix(in srgb,var(--ace) 55%,transparent)}
 .foco-m{box-shadow:inset 0 2px 0 var(--acc)}
-.acoes .par2{display:flex;gap:4px}.acoes .par2 button{flex:1;padding:4px 6px;font-size:12px}
 .acoes .tudo{display:flex;flex-direction:column;gap:4px;padding-bottom:8px;margin-bottom:6px;
 border-bottom:1px dashed var(--rule)}
 #selecao{position:fixed;z-index:20;display:flex;gap:6px;padding:5px;border-radius:8px;
@@ -136,9 +134,9 @@ background:var(--ok-bg);color:var(--ok)}
 .cm-line.cm-h{padding-top:.35em}
 .cm-link-texto{color:var(--acc)}
 .cm-line.cm-cit{border-left:3px solid var(--rule);padding-left:10px;color:#B9C6D2}
-.cm-line.cm-cit-alerta{border-color:var(--ace);background:color-mix(in srgb,var(--ace-bg) 55%,transparent)}
-.cm-line.cm-cit-pergunta{border-color:var(--val);background:color-mix(in srgb,var(--val-bg) 55%,transparent)}
-.cm-line.cm-cit-veto{border-color:var(--neg);background:color-mix(in srgb,var(--neg-bg) 55%,transparent)}
+.cm-line.cm-cit-fazer{border-color:var(--acc);background:color-mix(in srgb,var(--val-bg) 55%,transparent)}
+.cm-line.cm-cit-validar{border-color:var(--ace);background:color-mix(in srgb,var(--ace-bg) 55%,transparent)}
+.cm-line.cm-cit-comentario{border-color:var(--mut);background:color-mix(in srgb,var(--pend-bg) 70%,transparent)}
 .cm-vencida{color:var(--neg);font-weight:700}
 .cm-line.cm-codigo{font-family:ui-monospace,Menlo,monospace;font-size:.92em;background:var(--card)}
 .cm-line.cm-cerca{font-size:0;line-height:6px}
@@ -177,9 +175,9 @@ background:var(--ok-bg);color:var(--ok)}
 <div class="dir">
 <span id="so-revisar">
   <span class="q">no cursor:</span>
-  <button onmousedown="event.preventDefault()" onclick="noCursor('⚠️')" title="ressalva: sem certeza">⚠️</button>
-  <button onmousedown="event.preventDefault()" onclick="noCursor('❓')" title="a confirmar, com prazo">❓</button>
-  <button onmousedown="event.preventDefault()" onclick="noCursor('🚫')" title="discordo — bloqueia a chancela">🚫</button>
+  <button onmousedown="event.preventDefault()" onclick="noCursor('to_do')" title="to_do — para o agente">📌</button>
+  <button onmousedown="event.preventDefault()" onclick="noCursor('to_validate')" title="to_validate — com prazo">❓</button>
+  <button onmousedown="event.preventDefault()" onclick="noCursor('comment')" title="comment — para quem ler depois">💬</button>
   <span style="width:10px"></span>
   <span class="q">comparar com</span><select id="base" onchange="trocarBase()"></select>
   <button onclick="setVer('tudo')" id="v-tudo">texto inteiro</button>
@@ -212,9 +210,6 @@ const $ = (id) => document.getElementById(id);
 const kmPronto = new Promise((ok) => window.km ? ok() : window.addEventListener('km-pronto', ok, { once: true }));
 const esc = s => (s==null?'':String(s)).replace(/[&<>"]/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[m]));
 const neg = s => esc(s).replace(/\*\*(.+?)\*\*/g, '<b>$1</b>');
-const emDias = n => new Date(Date.now()+n*864e5).toISOString().slice(0,10);
-const MODELO = {'⚠️': '> ⚠️ **sem certeza** — ', '🚫': '> 🚫 **discordo** — ',
-                '❓': () => '> ❓ **a confirmar até ' + emDias(14) + '** — '};
 
 let D = null, doc = 0, ver = 'tudo', base = null, foco = null;
 let form = null, recado = '', conflito = null;
@@ -281,7 +276,7 @@ function lado(){
     if (!d.rastreado && !divisor) { divisor = true;
       antes = '<div class="rot" style="padding:11px 8px 5px">sem chancela ainda</div>'; }
     const estado = !d.rastreado ? 'sem chancela' : (d.pendente ? `${d.pct} a aprovar` : 'em dia');
-    const cor = !d.rastreado ? 'var(--rule)' : (d.bloqueado ? 'var(--neg)' : (d.pendente ? 'var(--ace)' : 'var(--ok)'));
+    const cor = !d.rastreado ? 'var(--rule)' : (d.pendente ? 'var(--ace)' : 'var(--ok)');
     return antes + `<button aria-current="${i===doc}" onclick="abrir(${i})">
       <div class="f">${esc(d.file)}</div>
       <div class="q"><i class="bolinha" style="background:${cor}"></i>${estado}${d.vencidas?' · ❓ vencida':''}</div></button>`;
@@ -327,15 +322,12 @@ function salvarCel(chave){
 }
 
 function formulario(chave, shas){
-  const rot = {validar:['o que falta confirmar','prazo'], reverter:['por que não serve (opcional)','']}[form.tipo];
   return `<div class="form">
-    <input id="f-texto" placeholder="${esc(rot[0])}"
+    <input id="f-texto" placeholder="por que não serve (opcional)"
       onkeydown="if(event.key==='Enter')enviar();if(event.key==='Escape')fechar()">
-    ${rot[1]==='prazo'?`<input id="f-prazo" value="${emDias(14)}">`:''}
-    <button class="pri" onclick="enviar()">${form.tipo==='reverter'?'Reverter':'Escrever e chancelar'}</button>
+    <button class="pri" onclick="enviar()">Reverter</button>
     <button onclick="fechar()">cancelar</button>
-    <div class="q">${form.tipo==='validar'?'o ❓ e o prazo entram no texto, logo depois do bloco'
-      :'o texto volta ao que você chancelou'}</div></div>`;
+    <div class="q">o texto volta ao que você chancelou</div></div>`;
 }
 
 function acoesDaMudanca(m){
@@ -346,23 +338,22 @@ function acoesDaMudanca(m){
   const rotulo = {novo: 'novo', saiu: 'saiu', editado: 'editado'}[m.geral];
   if (!naChancela()) return `<span class="chip e-pendente">${rotulo}</span>`;
   const js = esc(JSON.stringify(shas));
+  // As marcas entram logo depois do trecho, como texto seu: nada é aprovado no clique.
   const marcas = m.agora ? `<div class="marcas">
-      <button onclick="marcaNaMudanca('${chave}','⚠️')" title="ressalva: sem certeza">⚠️</button>
-      <button onclick="marcaNaMudanca('${chave}','🚫')" title="discordo — bloqueia a chancela">🚫</button></div>` : '';
+      <button onmousedown="event.preventDefault()" onclick="marcaNaMudanca('${chave}','to_do')" title="to_do — para o agente">📌</button>
+      <button onmousedown="event.preventDefault()" onclick="marcaNaMudanca('${chave}','to_validate')" title="to_validate — com prazo">❓</button>
+      <button onmousedown="event.preventDefault()" onclick="marcaNaMudanca('${chave}','comment')" title="comment — para quem ler depois">💬</button></div>` : '';
   return `<span class="chip ${m.geral==='saiu'?'e-negado':(m.geral==='novo'?'e-aprovado':'e-mexido')}">${rotulo}</span>
-    <button class="pri" ${m.bloqueio?'disabled title="resolva o 🚫 primeiro"':''} onclick="aprovar(${js})">${m.geral==='saiu'?'Aprovar a remoção':'Aprovar'}</button>
-    <div class="par2">
-      <button onclick="abrirForm('${chave}','validar',${js})">A validar…</button>
-      <button onclick="abrirForm('${chave}','reverter',${js})">${m.geral==='saiu'?'Trazer de volta':'Reverter'}</button></div>
+    <button class="pri" onclick="aprovar(${js})">${m.geral==='saiu'?'Aprovar a remoção':'Aprovar'}</button>
+    <button onclick="abrirForm('${chave}','reverter',${js})">${m.geral==='saiu'?'Trazer de volta':'Reverter'}</button>
     ${marcas}
     <div class="q">para aprovar só uma parte, selecione o texto</div>`;
 }
 
 function avisosDaMudanca(m){
   let out = '';
-  for (const s of (m.sumidas||[])) out += `<div class="nota"><b>ressalva removida</b> — ${neg(s.replace(/^\s*>\s*/,''))}
+  for (const s of (m.sumidas||[])) out += `<div class="nota"><b>marca removida</b> — ${neg(s.replace(/^\s*>\s*/,''))}
     <div class="q">estava na chancela; aprovar aqui aprova a remoção</div></div>`;
-  if (m.bloqueio) out += `<div class="nota"><b>🚫 bloqueado</b> — ${neg(m.bloqueio.replace(/^\s*>\s*/,''))}</div>`;
   return out;
 }
 
@@ -451,8 +442,6 @@ function abrirForm(chave, tipo, shas){ form = {chave, tipo, shas}; desenhar(); }
 function aprovar(shas){ agir({acao:'aprovar', shas}); }
 function enviar(){
   const texto = ($('f-texto')||{}).value || '';
-  const prazo = ($('f-prazo')||{}).value || '';
-  if (form.tipo === 'validar') return agir({acao:'validar', shas: form.shas, texto, prazo});
   return agir({acao:'reverter', shas: form.shas, motivo: texto});
 }
 function mexeuTexto(chave, texto){
@@ -472,17 +461,16 @@ function salvar(chave){
 function descartar(chave){ delete sujos[chave]; if (conflito && conflito.chave === chave) conflito = null; desenhar(); }
 function copiar(chave){ navigator.clipboard?.writeText(sujos[chave] || ''); recado = '✓ seu texto está na área de transferência'; desenhar(); }
 
-// A marca entra onde está o cursor, no formato combinado, e vira texto seu: você completa
-// e salva como qualquer outra edição.
-const modeloDe = (marca) => typeof MODELO[marca] === 'function' ? MODELO[marca]() : MODELO[marca];
-function noCursor(marca){
+// A marca entra no formato combinado, com o texto de exemplo selecionado, e vira texto seu:
+// você escreve por cima e salva como qualquer outra edição.
+function noCursor(tipo){
   const chave = km.focado();
   if (!chave) { recado = '✕ clique no texto, onde a marca deve entrar, e depois no botão'; return desenhar(); }
-  km.inserirMarca(chave, modeloDe(marca));
+  km.inserirMarca(chave, tipo);
 }
-function marcaNaMudanca(chave, marca){
+function marcaNaMudanca(chave, tipo){
   km.focarFim(chave);
-  km.inserirMarca(chave, modeloDe(marca));
+  km.inserirMarca(chave, tipo);
 }
 // ---- aprovar parte de um bloco ----------------------------------------------------
 // Como aceitar metade de um hunk numa revisão de código: selecione, na coluna do texto

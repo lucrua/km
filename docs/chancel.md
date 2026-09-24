@@ -71,36 +71,36 @@ On the page a block is named by the hash of its content, not its position: a pag
 asks to approve a block after the file moved underneath it is refused rather than served a
 different block.
 
-## Caveats live in the document
+## Marks live in the document
 
 Measured on the author's other repository: review notes are written as **visible
 blockquotes**, not hidden HTML comments — the whole repository holds two HTML comments, both
 tool markers. The practice is right, for reasons worth keeping: an agent reads a blockquote
-natively with no tooling, a human opening the file sees the reservation, and the note moves
+natively with no tooling, a human opening the file sees the mark, and the note moves
 with the text when the paragraph is edited.
 
 So there is **one ref and a writing convention**, not a parallel store of comments. Three
-marks, because each changes what happens next:
+marks, one line each, in the exact forms listed in the README's
+[convention](../README.md#the-convention):
 
 ```markdown
-> ⚠️ **sem certeza** — entra na chancela e continua visível
-> ❓ **a confirmar até AAAA-MM-DD** — vira pendência com data
-> 🚫 **discordo** — bloqueia a chancela deste trecho até ser resolvido
+> ❓ **to_validate by AAAA-MM-DD** — something to confirm by that deadline
+> 💬 for whoever reads the passage later
+> 📌 **to_do · AAAA-MM-DD** — for an agent to find and address; the day it was written
 ```
 
-"Approved with a reservation" is therefore a passage that is **in the chancel and carries a
-`⚠️` line**. That is what replaces the second ref an earlier draft proposed: the reservation
-is visible to every reader instead of hidden in a tool.
+None of them blocks a chancel. A passage approved with a mark in it is **in the chancel and
+carries the mark**, visible to every reader instead of hidden in a tool.
 
 ### The failure this creates, and the mechanism against it
 
-An agent rewrites the paragraph and drops the caveat. Nothing lies, but the tool would then
+An agent rewrites the paragraph and drops the mark. Nothing lies, but the tool would then
 see a fully endorsed passage.
 
-It is detectable: the chancelled copy **had** the caveat, so its removal is a change like any
+It is detectable: the chancelled copy **had** the mark, so its removal is a change like any
 other and shows in the diff. The reviewer decides, as with anything else. The tool's job is
-to make that specific change impossible to wave through — a removed `⚠️`/`❓`/`🚫` line gets
-its own mark in the review, separate from ordinary edits.
+to make that specific change impossible to wave through — a removed ❓, 💬 or 📌 line gets
+its own flag in the review, separate from ordinary edits.
 
 ## What this deletes from the current implementation
 
@@ -119,7 +119,8 @@ cosmetic re-alignment.
 | `km pendente [<arquivo>]` | what changed since the chancel, and what never had one. `--json` feeds the editor |
 | `km chancela <arquivo> --hunk <n\|n.m\|título>` | write a change (`2`), one of its blocks (`2.1`) or every change in a section into the ref. Repeatable; `--all` takes the file as it is |
 | `km restore <arquivo> --hunk <n\|n.m\|título>` | put the chancelled text back on disk |
-| `km lint [<arquivo>]` | the convention: a `🚫` pending, a `❓` past its date, a caveat that vanished |
+| `km lint [<arquivo>]` | the convention: a ❓ past its deadline, a mark still saying `add your comment here`, a mark that vanished |
+| `km marcas` | the ❓ and 📌 in every Markdown file git knows (`--todas` adds 💬; `--json`) |
 | `km quando <arquivo> --trecho <título>` | when this passage last had a chancel (`git log -L`) |
 | `km baseline <arquivo>` | the chancelled copy, for a diff's left-hand column |
 | `km status --short` | the line after every commit: files in step, passages moved, files with no chancel |
@@ -128,8 +129,7 @@ cosmetic re-alignment.
 
 Hunk numbers come from the diff, and the diff moves when the ref does: after a partial
 chancel the command says so, and several `--hunk` in one call are applied against one
-listing. The `🚫` refusal is enforced here — the passage is left out and named, and only
-`--force` overrides it.
+listing.
 
 `km serve` is where reviewing happens: a local page, started when you sit down and stopped
 with Ctrl-C. Unchanged text reads as one column at full width; each change is a row in three
@@ -141,9 +141,9 @@ form that lets a re-aligned table count as unchanged decides what moved and neve
 what is shown or written. Inside VS Code, one command starts it and opens it in the
 same window, bound to the window's lifetime.
 
-Both surfaces read the ref, not a ledger, and both **write the marks**: approving, deferring
-with a date or disagreeing insert the agreed blockquote into the document, so the convention
-is the path of least resistance rather than something to remember.
+Both surfaces read the ref, not a ledger. The panel **writes the marks**: 📌 ❓ 💬 insert the
+agreed line with its placeholder selected, so the convention is the path of least resistance
+rather than something to remember.
 
 The claim queue that preceded this — parsing documents into claims, approving by hash,
 triage and conflicts — was removed in the same change. It answered a different question and

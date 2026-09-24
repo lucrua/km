@@ -1,5 +1,5 @@
 // Live preview: the document is always the file's exact text; formatting is decoration.
-// Off the cursor's line the Markdown markers are hidden, paragraphs flow, ⚠️ ❓ 🚫 quotes
+// Off the cursor's line the Markdown markers are hidden, paragraphs flow, the 📌 ❓ 💬 marks
 // become coloured boxes and tables become a grid with row and column controls. All of it
 // lives in one StateField: hidden line breaks and block widgets are decorations CodeMirror
 // accepts only from the state, never from a plugin. The Código mode swaps that layer out for
@@ -9,12 +9,11 @@ import { EditorView, Decoration, WidgetType, StateField, StateEffect, EditorStat
          HighlightStyle, tags } from '../vendor/cm.js';
 import { quebrasOcultas } from './paragrafo.js';
 import * as tabela from './tabela.js';
+import { hoje, marcaDaLinha } from './marcas.js';
 
-// A data de hoje no relógio de quem lê: em UTC, um ❓ que vence hoje apareceria vencido
-// depois das 21h no Brasil.
-const doisDigitos = (n) => String(n).padStart(2, '0');
-export const hoje = (d = new Date()) =>
-  `${d.getFullYear()}-${doisDigitos(d.getMonth() + 1)}-${doisDigitos(d.getDate())}`;
+export { hoje };
+// Cada marca, a sua caixa.
+const CAIXA = { to_do: 'fazer', to_validate: 'validar', comment: 'comentario' };
 const esc = (s) => s.replace(/[&<>"]/g, (m) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[m]));
 
 // Markdown inline, só para ler as células da tabela — nunca usado para escrever nada.
@@ -160,14 +159,18 @@ export function decorar(state, editavel) {
     else if (nome === 'Link' && !numaGrade(n.from)) deco.push(Decoration.mark({ class: 'cm-link-texto' }).range(n.from, n.to));
     else if (nome === 'QuoteMark' && !ativa(n.from)) esconder(n.from, depoisEspaco(n.to));
     else if (nome === 'Blockquote') {
-      const texto = doc.sliceString(n.from, n.to);
-      const tipo = /🚫/.test(texto) ? 'veto' : /❓/.test(texto) ? 'pergunta' : /⚠/.test(texto) ? 'alerta' : '';
-      linha(n.from, n.to, 'cm-cit' + (tipo ? ' cm-cit-' + tipo : ''));
-      if (tipo === 'pergunta') {
-        for (const d of texto.matchAll(/\d{4}-\d{2}-\d{2}/g)) {
-          if (d[0] < hoje()) deco.push(Decoration.mark({ class: 'cm-vencida' }).range(n.from + d.index, n.from + d.index + 10));
+      // Uma citação é marca só no formato exato; a primeira linha que for dá a cor da caixa.
+      let tipo = '';
+      for (let k = doc.lineAt(n.from).number; k <= doc.lineAt(n.to).number; k++) {
+        const l = doc.line(k), m = marcaDaLinha(l.text);
+        if (!m) continue;
+        tipo = tipo || m.tipo;
+        if (m.tipo === 'to_validate' && m.data < hoje()) {
+          const d = l.from + l.text.indexOf(m.data);
+          deco.push(Decoration.mark({ class: 'cm-vencida' }).range(d, d + 10));
         }
       }
+      linha(n.from, n.to, 'cm-cit' + (tipo ? ' cm-cit-' + CAIXA[tipo] : ''));
     }
     else if (nome === 'ListMark' && !ativa(n.from) && n.node.parent?.parent?.name === 'BulletList') {
       deco.push(Decoration.replace({ widget: new Texto('•', 'cm-bala') }).range(n.from, n.to));

@@ -14,7 +14,7 @@ Conteúdo que o preview não conhece.
 | a \| b | com barra escapada | `código` |
 | só uma célula |
 
-> ❓ **a confirmar até 2026-01-01** — prazo vencido
+> ❓ **to_validate by 2026-01-01** — prazo vencido
 
 - [x] tarefa feita
 - [ ] tarefa aberta

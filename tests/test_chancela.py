@@ -21,7 +21,7 @@ Texto de abertura.
 
 Onze colunas, nesta ordem.
 
-> ⚠️ **sem certeza** — a ordem veio de um print, não do export.
+> 💬 a ordem veio de um print, não do export.
 
 ## Prazo
 
@@ -127,8 +127,8 @@ class MudancaTest(unittest.TestCase):
         self.assertEqual(ms[0].titulo, "Prazo")
 
     def test_neighbouring_blocks_that_changed_are_one_change(self):
-        depois = DOC.replace("Onze", "Doze").replace("> ⚠️ **sem certeza** — a ordem veio de um print, não do export.",
-                                                     "> ⚠️ **sem certeza** — outra dúvida, bem diferente da primeira.")
+        depois = DOC.replace("Onze", "Doze").replace("> 💬 a ordem veio de um print, não do export.",
+                                                     "> 💬 outra dúvida, bem diferente da primeira.")
         ms = ch.mudancas(DOC, depois)
         self.assertEqual(len(ms), 1)
         self.assertEqual(len(ms[0].unidades), 2)
@@ -153,8 +153,8 @@ class MudancaTest(unittest.TestCase):
 
     def test_accepting_one_block_of_a_change_leaves_the_rest_pending(self):
         depois = DOC.replace("Onze", "Doze").replace(
-            "> ⚠️ **sem certeza** — a ordem veio de um print, não do export.",
-            "> ⚠️ **sem certeza** — outra dúvida, bem diferente da primeira.")
+            "> 💬 a ordem veio de um print, não do export.",
+            "> 💬 outra dúvida, bem diferente da primeira.")
         [m] = ch.mudancas(DOC, depois)
         primeiro = m.unidades[0]
         novo = ch.aplicar(DOC, depois, {primeiro.id})
@@ -219,38 +219,77 @@ class PendenciaTest(unittest.TestCase):
         self.assertEqual(ch.percentual(0, 100), "0%")
 
 
-class RessalvaTest(unittest.TestCase):
+class MarcaTest(unittest.TestCase):
+    """The three marks, in the exact form an agent can grep for."""
+
     def test_reads_the_three_marks(self):
-        texto = ("> ⚠️ **sem certeza** — x\n"
-                 "> ❓ **a confirmar até 2020-01-01** — y\n"
-                 "> 🚫 **discordo** — z\n")
-        self.assertEqual([m for _, m, _ in ch.ressalvas(texto)], ["⚠", "❓", "🚫"])
+        texto = ("> ❓ **to_validate by 2026-10-01** — com quem assina\n"
+                 "> 💬 para quem ler depois\n"
+                 "> 📌 **to_do · 2026-09-24** — trocar a tabela\n")
+        ms = ch.marcas(texto)
+        self.assertEqual([(m.linha, m.tipo, m.data, m.texto) for m in ms], [
+            (1, "to_validate", "2026-10-01", "com quem assina"),
+            (2, "comment", "", "para quem ler depois"),
+            (3, "to_do", "2026-09-24", "trocar a tabela")])
 
-    def test_a_removed_caveat_is_flagged_on_its_own(self):
-        depois = DOC.replace("> ⚠️ **sem certeza** — a ordem veio de um print, não do export.\n\n", "")
+    def test_what_is_not_the_exact_form_is_not_a_mark(self):
+        for linha in ["> ❓ **to_validate** — sem data",
+                      "> ❓ **to_validate by 2026-10-01** - hífen, não travessão",
+                      "> 📌 **to_do 2026-09-24** — sem o ponto",
+                      "> 📌 **to_do · 2026-09-24** — ",
+                      "> 💬 ",
+                      ">💬 sem espaço",
+                      "💬 fora da citação",
+                      "❓ **to_validate by 2026-10-01** — fora da citação",
+                      "> ⚠️ **sem certeza** — a marca antiga",
+                      "> 🚫 **discordo** — a marca antiga",
+                      "> ❓ **a confirmar até 2026-10-01** — a marca antiga"]:
+            self.assertEqual(ch.marcas(linha), [], linha)
+
+    def test_a_removed_mark_is_flagged_on_its_own(self):
+        depois = DOC.replace("> 💬 a ordem veio de um print, não do export.\n\n", "")
         m = ch.mudancas(DOC, depois)[0]
-        self.assertTrue(m.sumidas)
-        self.assertIn("sem certeza", m.sumidas[0])
+        self.assertEqual(len(m.sumidas), 1)
+        self.assertIn("💬", m.sumidas[0])
 
-    def test_rewriting_a_caveat_is_not_removing_it(self):
-        antes = ["> ❓ **a confirmar até 2026-09-15** — com quem assina"]
-        depois = ["> ❓ **a confirmar até 2026-10-10** — com quem assina"]
+    def test_each_kind_that_vanishes_is_flagged(self):
+        for linha in ["> ❓ **to_validate by 2026-10-01** — x",
+                      "> 💬 x",
+                      "> 📌 **to_do · 2026-09-24** — x"]:
+            antes = DOC + "\n" + linha + "\n"
+            ms = ch.mudancas(antes, DOC)
+            self.assertEqual([s for m in ms for s in m.sumidas], [linha], linha)
+
+    def test_rewriting_a_mark_is_not_removing_it(self):
+        antes = ["> ❓ **to_validate by 2026-09-15** — com quem assina"]
+        depois = ["> ❓ **to_validate by 2026-10-10** — com quem assina, e quando"]
         self.assertEqual(ch.sumidas(antes, depois), [])
         self.assertEqual(ch.sumidas(antes, []), [antes[0]])
+
+    def test_a_mark_turned_into_another_kind_is_flagged(self):
+        antes = ["> 📌 **to_do · 2026-09-24** — trocar a tabela"]
+        depois = ["> 💬 trocar a tabela"]
+        self.assertEqual(ch.sumidas(antes, depois), [antes[0]])
 
     def test_an_ordinary_edit_flags_nothing(self):
         m = ch.mudancas(DOC, DOC.replace("horas úteis", "horas corridas"))[0]
         self.assertEqual(m.sumidas, [])
 
-    def test_a_refusal_blocks_its_passage_only(self):
-        depois = DOC.replace("O prazo conta em horas úteis.",
-                             "O prazo conta em dias.\n\n> 🚫 **discordo** — não é o que vale.")
-        self.assertTrue(ch.mudancas(DOC, depois)[0].bloqueio)
-        self.assertFalse(ch.mudancas(DOC, DOC.replace("Onze", "Doze"))[0].bloqueio)
+    def test_a_deadline_past_today_is_overdue(self):
+        texto = ("> ❓ **to_validate by 2026-09-23** — ontem\n"
+                 "> ❓ **to_validate by 2026-09-24** — hoje\n"
+                 "> 📌 **to_do · 2020-01-01** — to_do não vence\n")
+        self.assertEqual([(l, d) for l, d, _ in ch.vencidas(texto, hoje="2026-09-24")],
+                         [(1, "2026-09-23")])
 
-    def test_a_question_past_its_date_is_reported(self):
-        texto = "> ❓ **a confirmar até 2020-01-01** — y\n> ❓ **a confirmar até 2999-01-01** — z\n"
-        self.assertEqual(len(ch.vencidas(texto, hoje="2026-09-22")), 1)
+    def test_the_placeholder_is_found(self):
+        texto = ("> 💬 add your comment here\n"
+                 "> 📌 **to_do · 2026-09-24** — trocar a tabela\n")
+        self.assertEqual([m.linha for m in ch.marcas(texto) if m.placeholder], [1])
+
+    def test_no_mark_blocks_anything(self):
+        self.assertFalse(hasattr(ch, "bloqueio_de"))
+        self.assertFalse(hasattr(ch.Mudanca, "bloqueio"))
 
 
 class EstadoTest(RepoTest):
@@ -301,15 +340,61 @@ class CliTest(RepoTest):
         self.assertIn("Doze colunas", chancela)          # o que você olhou entrou
         self.assertIn("horas úteis", chancela)           # o que você não olhou, não
 
-    def test_a_refusal_blocks_the_passage_and_says_so(self):
+    def test_a_mark_never_blocks_the_chancel(self):
         self.km("chancela", "regras.md", "--all")
         self.escrever(DOC.replace("O prazo conta em horas úteis.",
-                                  "O prazo conta em dias.\n\n> 🚫 **discordo** — não é isso."))
+                                  "O prazo conta em dias.\n\n> ❓ **to_validate by 2026-10-01** — é isso?"))
+        self.km("chancela", "regras.md", "--hunk", "Prazo")
+        self.assertIn("to_validate by 2026-10-01", ch.chancelado(self.dir, "regras.md"))
+
+    def test_there_is_no_force(self):
         with self.assertRaises(SystemExit):
-            self.km("chancela", "regras.md", "--hunk", "Prazo")
-        self.assertIn("horas úteis", ch.chancelado(self.dir, "regras.md"))
+            self.km("chancela", "regras.md", "--all", "--force")
+
+    def test_lint_reports_overdue_and_placeholder_and_nothing_else(self):
+        self.escrever(DOC + "\n> ❓ **to_validate by 2020-01-01** — venceu\n"
+                      "\n> ❓ **to_validate by 2999-01-01** — longe\n"
+                      "\n> 📌 **to_do · 2020-01-01** — add your comment here\n"
+                      "\n> 💬 um comentário de verdade\n")
+        self.km("chancela", "regras.md", "--all")
         codigo, saida = self.km("lint")
-        self.assertIn("bloqueia a chancela", saida)
+        self.assertIn(":15", saida)                       # o ❓ vencido, com a linha
+        self.assertIn("2020-01-01", saida)
+        self.assertNotIn("longe", saida)
+        self.assertIn("add your comment here", saida)
+        self.assertIn("2 apontamento(s)", saida)
+        self.assertEqual(self.km("lint", "--strict")[0], 1)
+
+    def test_marcas_lists_what_an_agent_should_find(self):
+        (self.dir / "outro.md").write_text(
+            "# Outro\n\n> 📌 **to_do · 2026-09-24** — trocar a tabela\n\n"
+            "> 💬 para quem ler\n", encoding="utf-8")
+        self.escrever(DOC + "\n> ❓ **to_validate by 2020-01-01** — venceu\n")
+        _, saida = self.km("marcas")
+        linhas = [l for l in saida.splitlines() if l.strip()]
+        self.assertEqual(linhas, [
+            "outro.md:3  to_do  2026-09-24  trocar a tabela",
+            "regras.md:15  to_validate  2020-01-01  venceu  (vencido)"])
+        self.assertIn("para quem ler", self.km("marcas", "--todas")[1])
+        self.assertIn("para quem ler", self.km("marcas", "--all")[1])
+        self.assertNotIn("regras.md", self.km("marcas", "--tipo", "to_do")[1])
+
+    def test_marcas_json(self):
+        import json
+        self.escrever(DOC + "\n> ❓ **to_validate by 2020-01-01** — venceu\n")
+        _, saida = self.km("marcas", "--json", "--todas")
+        dados = json.loads(saida)
+        self.assertEqual(dados, [
+            {"file": "regras.md", "line": 9, "kind": "comment", "date": "",
+             "text": "a ordem veio de um print, não do export.", "overdue": False},
+            {"file": "regras.md", "line": 15, "kind": "to_validate", "date": "2020-01-01",
+             "text": "venceu", "overdue": True}])
+
+    def test_marcas_reads_files_the_chancel_does_not_track(self):
+        from km import acompanhamento as ac
+        ac.gravar(self.dir, ac.vazia())
+        self.escrever(DOC + "\n> 📌 **to_do · 2026-09-24** — mesmo sem acompanhar\n")
+        self.assertIn("mesmo sem acompanhar", self.km("marcas")[1])
 
     def test_restore_puts_the_chancelled_text_back_on_disk(self):
         self.km("chancela", "regras.md", "--all")
@@ -327,11 +412,11 @@ class CliTest(RepoTest):
         self.escrever(DOC.replace("Onze", "Doze"))
         self.assertIn("Onze colunas", self.km("baseline", "regras.md")[1])
 
-    def test_a_removed_caveat_is_reported_apart_from_the_edit(self):
+    def test_a_removed_mark_is_reported_apart_from_the_edit(self):
         self.km("chancela", "regras.md", "--all")
-        self.escrever(DOC.replace("> ⚠️ **sem certeza** — a ordem veio de um print, não do export.\n\n", ""))
+        self.escrever(DOC.replace("> 💬 a ordem veio de um print, não do export.\n\n", ""))
         _, saida = self.km("pendente", "regras.md")
-        self.assertIn("ressalva removida", saida)
+        self.assertIn("marca removida", saida)
 
 class PainelTest(RepoTest):
     """The page acts through the same functions as the CLI — these are those functions."""
@@ -401,8 +486,8 @@ class PainelTest(RepoTest):
 
     def test_approving_one_block_leaves_its_neighbour_pending(self):
         self.escrever(DOC.replace("Onze", "Doze").replace(
-            "> ⚠️ **sem certeza** — a ordem veio de um print, não do export.",
-            "> ⚠️ **sem certeza** — outra dúvida, bem diferente da primeira."))
+            "> 💬 a ordem veio de um print, não do export.",
+            "> 💬 outra dúvida, bem diferente da primeira."))
         [m] = self.mudancas()
         r = self.agir(acao="aprovar", shas=[m["unidades"][0]["sha"]])
         self.assertTrue(r["ok"], r)
@@ -419,16 +504,14 @@ class PainelTest(RepoTest):
         self.assertFalse(r["ok"])
         self.assertIn("horas úteis", ch.chancelado(self.dir, "regras.md"))
 
-    def test_validar_writes_the_deadline_after_the_block_and_chancels_both(self):
+    def test_there_is_no_validar_action(self):
         self.escrever(DOC.replace("horas úteis", "horas corridas"))
         sha = self.mudancas()[0]["unidades"][0]["sha"]
-        r = self.agir(acao="validar", shas=[sha], texto="confirmar com quem assina",
-                      prazo="2026-10-15")
-        self.assertTrue(r["ok"], r)
-        linha = "> ❓ **a confirmar até 2026-10-15** — confirmar com quem assina"
-        self.assertIn("horas corridas.\n\n" + linha, self.texto())
-        self.assertIn(linha, ch.chancelado(self.dir, "regras.md"))
-        self.assertEqual(self.mudancas(), [])
+        r = self.agir(acao="validar", shas=[sha], texto="x", prazo="2026-10-15")
+        self.assertFalse(r["ok"])
+        self.assertIn("desconhecida", r["erro"])
+        self.assertNotIn("to_validate", self.texto())
+        self.assertIn("horas úteis", ch.chancelado(self.dir, "regras.md"))
 
     def test_reverter_puts_the_block_back(self):
         self.escrever(DOC.replace("horas úteis", "dias corridos"))
@@ -437,14 +520,24 @@ class PainelTest(RepoTest):
         self.assertTrue(r["ok"], r)
         self.assertEqual(self.texto(), DOC)
 
-    def test_a_refusal_keeps_its_section_out(self):
-        self.escrever(DOC.replace("O prazo conta em horas úteis.",
-                                  "O prazo conta em dias.\n\n> 🚫 **discordo** — não é isso."))
-        shas = [u["sha"] for u in self.mudancas()[0]["unidades"]]
-        r = self.agir(acao="aprovar", shas=shas)
-        self.assertFalse(r["ok"])
-        self.assertIn("🚫", r["erro"])
-        self.assertIn("horas úteis", ch.chancelado(self.dir, "regras.md"))
+    def test_approving_takes_the_passage_and_its_mark_and_nothing_blocks_it(self):
+        for linha in ["> ❓ **to_validate by 2020-01-01** — é isso?",
+                      "> 📌 **to_do · 2026-09-24** — refazer",
+                      "> 💬 add your comment here"]:
+            ch.escrever(self.dir, {"regras.md": DOC}, "chancela")
+            self.escrever(DOC.replace("O prazo conta em horas úteis.",
+                                      "O prazo conta em dias.\n\n" + linha))
+            [m] = self.mudancas()
+            self.assertNotIn("bloqueio", m)
+            r = self.agir(acao="aprovar", shas=[u["sha"] for u in m["unidades"]])
+            self.assertTrue(r["ok"], r)
+            self.assertEqual(ch.chancelado(self.dir, "regras.md"), self.texto())
+            self.assertNotIn("bloqueado", self.doc())
+
+    def test_a_vanished_mark_reaches_the_page(self):
+        self.escrever(DOC.replace("> 💬 a ordem veio de um print, não do export.\n\n", ""))
+        [m] = self.mudancas()
+        self.assertEqual(m["sumidas"], ["> 💬 a ordem veio de um print, não do export."])
 
     def test_saving_finds_the_text_even_if_the_file_moved(self):
         self.escrever(DOC.replace("horas úteis", "horas corridas"))
