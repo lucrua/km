@@ -21,7 +21,7 @@ Texto de abertura.
 
 Onze colunas, nesta ordem.
 
-> 💬 **comment** — a ordem veio de um print, não do export.
+> 💬 a ordem veio de um print, não do export.
 
 ## Prazo
 
@@ -127,8 +127,8 @@ class MudancaTest(unittest.TestCase):
         self.assertEqual(ms[0].titulo, "Prazo")
 
     def test_neighbouring_blocks_that_changed_are_one_change(self):
-        depois = DOC.replace("Onze", "Doze").replace("> 💬 **comment** — a ordem veio de um print, não do export.",
-                                                     "> 💬 **comment** — outra dúvida, bem diferente da primeira.")
+        depois = DOC.replace("Onze", "Doze").replace("> 💬 a ordem veio de um print, não do export.",
+                                                     "> 💬 outra dúvida, bem diferente da primeira.")
         ms = ch.mudancas(DOC, depois)
         self.assertEqual(len(ms), 1)
         self.assertEqual(len(ms[0].unidades), 2)
@@ -153,8 +153,8 @@ class MudancaTest(unittest.TestCase):
 
     def test_accepting_one_block_of_a_change_leaves_the_rest_pending(self):
         depois = DOC.replace("Onze", "Doze").replace(
-            "> 💬 **comment** — a ordem veio de um print, não do export.",
-            "> 💬 **comment** — outra dúvida, bem diferente da primeira.")
+            "> 💬 a ordem veio de um print, não do export.",
+            "> 💬 outra dúvida, bem diferente da primeira.")
         [m] = ch.mudancas(DOC, depois)
         primeiro = m.unidades[0]
         novo = ch.aplicar(DOC, depois, {primeiro.id})
@@ -224,7 +224,7 @@ class MarcaTest(unittest.TestCase):
 
     def test_reads_the_three_marks(self):
         texto = ("> ❓ **to_validate by 2026-10-01** — com quem assina\n"
-                 "> 💬 **comment** — para quem ler depois\n"
+                 "> 💬 para quem ler depois\n"
                  "> 📌 **to_do · 2026-09-24** — trocar a tabela\n")
         ms = ch.marcas(texto)
         self.assertEqual([(m.linha, m.tipo, m.data, m.texto) for m in ms], [
@@ -237,7 +237,9 @@ class MarcaTest(unittest.TestCase):
                       "> ❓ **to_validate by 2026-10-01** - hífen, não travessão",
                       "> 📌 **to_do 2026-09-24** — sem o ponto",
                       "> 📌 **to_do · 2026-09-24** — ",
-                      "> 💬 **comment**: dois-pontos",
+                      "> 💬 ",
+                      ">💬 sem espaço",
+                      "💬 fora da citação",
                       "❓ **to_validate by 2026-10-01** — fora da citação",
                       "> ⚠️ **sem certeza** — a marca antiga",
                       "> 🚫 **discordo** — a marca antiga",
@@ -245,14 +247,14 @@ class MarcaTest(unittest.TestCase):
             self.assertEqual(ch.marcas(linha), [], linha)
 
     def test_a_removed_mark_is_flagged_on_its_own(self):
-        depois = DOC.replace("> 💬 **comment** — a ordem veio de um print, não do export.\n\n", "")
+        depois = DOC.replace("> 💬 a ordem veio de um print, não do export.\n\n", "")
         m = ch.mudancas(DOC, depois)[0]
         self.assertEqual(len(m.sumidas), 1)
-        self.assertIn("comment", m.sumidas[0])
+        self.assertIn("💬", m.sumidas[0])
 
     def test_each_kind_that_vanishes_is_flagged(self):
         for linha in ["> ❓ **to_validate by 2026-10-01** — x",
-                      "> 💬 **comment** — x",
+                      "> 💬 x",
                       "> 📌 **to_do · 2026-09-24** — x"]:
             antes = DOC + "\n" + linha + "\n"
             ms = ch.mudancas(antes, DOC)
@@ -266,7 +268,7 @@ class MarcaTest(unittest.TestCase):
 
     def test_a_mark_turned_into_another_kind_is_flagged(self):
         antes = ["> 📌 **to_do · 2026-09-24** — trocar a tabela"]
-        depois = ["> 💬 **comment** — trocar a tabela"]
+        depois = ["> 💬 trocar a tabela"]
         self.assertEqual(ch.sumidas(antes, depois), [antes[0]])
 
     def test_an_ordinary_edit_flags_nothing(self):
@@ -281,7 +283,7 @@ class MarcaTest(unittest.TestCase):
                          [(1, "2026-09-23")])
 
     def test_the_placeholder_is_found(self):
-        texto = ("> 💬 **comment** — add your comment here\n"
+        texto = ("> 💬 add your comment here\n"
                  "> 📌 **to_do · 2026-09-24** — trocar a tabela\n")
         self.assertEqual([m.linha for m in ch.marcas(texto) if m.placeholder], [1])
 
@@ -353,7 +355,7 @@ class CliTest(RepoTest):
         self.escrever(DOC + "\n> ❓ **to_validate by 2020-01-01** — venceu\n"
                       "\n> ❓ **to_validate by 2999-01-01** — longe\n"
                       "\n> 📌 **to_do · 2020-01-01** — add your comment here\n"
-                      "\n> 💬 **comment** — um comentário de verdade\n")
+                      "\n> 💬 um comentário de verdade\n")
         self.km("chancela", "regras.md", "--all")
         codigo, saida = self.km("lint")
         self.assertIn(":15", saida)                       # o ❓ vencido, com a linha
@@ -366,7 +368,7 @@ class CliTest(RepoTest):
     def test_marcas_lists_what_an_agent_should_find(self):
         (self.dir / "outro.md").write_text(
             "# Outro\n\n> 📌 **to_do · 2026-09-24** — trocar a tabela\n\n"
-            "> 💬 **comment** — para quem ler\n", encoding="utf-8")
+            "> 💬 para quem ler\n", encoding="utf-8")
         self.escrever(DOC + "\n> ❓ **to_validate by 2020-01-01** — venceu\n")
         _, saida = self.km("marcas")
         linhas = [l for l in saida.splitlines() if l.strip()]
@@ -412,7 +414,7 @@ class CliTest(RepoTest):
 
     def test_a_removed_mark_is_reported_apart_from_the_edit(self):
         self.km("chancela", "regras.md", "--all")
-        self.escrever(DOC.replace("> 💬 **comment** — a ordem veio de um print, não do export.\n\n", ""))
+        self.escrever(DOC.replace("> 💬 a ordem veio de um print, não do export.\n\n", ""))
         _, saida = self.km("pendente", "regras.md")
         self.assertIn("marca removida", saida)
 
@@ -484,8 +486,8 @@ class PainelTest(RepoTest):
 
     def test_approving_one_block_leaves_its_neighbour_pending(self):
         self.escrever(DOC.replace("Onze", "Doze").replace(
-            "> 💬 **comment** — a ordem veio de um print, não do export.",
-            "> 💬 **comment** — outra dúvida, bem diferente da primeira."))
+            "> 💬 a ordem veio de um print, não do export.",
+            "> 💬 outra dúvida, bem diferente da primeira."))
         [m] = self.mudancas()
         r = self.agir(acao="aprovar", shas=[m["unidades"][0]["sha"]])
         self.assertTrue(r["ok"], r)
@@ -521,7 +523,7 @@ class PainelTest(RepoTest):
     def test_approving_takes_the_passage_and_its_mark_and_nothing_blocks_it(self):
         for linha in ["> ❓ **to_validate by 2020-01-01** — é isso?",
                       "> 📌 **to_do · 2026-09-24** — refazer",
-                      "> 💬 **comment** — add your comment here"]:
+                      "> 💬 add your comment here"]:
             ch.escrever(self.dir, {"regras.md": DOC}, "chancela")
             self.escrever(DOC.replace("O prazo conta em horas úteis.",
                                       "O prazo conta em dias.\n\n" + linha))
@@ -533,9 +535,9 @@ class PainelTest(RepoTest):
             self.assertNotIn("bloqueado", self.doc())
 
     def test_a_vanished_mark_reaches_the_page(self):
-        self.escrever(DOC.replace("> 💬 **comment** — a ordem veio de um print, não do export.\n\n", ""))
+        self.escrever(DOC.replace("> 💬 a ordem veio de um print, não do export.\n\n", ""))
         [m] = self.mudancas()
-        self.assertEqual(m["sumidas"], ["> 💬 **comment** — a ordem veio de um print, não do export."])
+        self.assertEqual(m["sumidas"], ["> 💬 a ordem veio de um print, não do export."])
 
     def test_saving_finds_the_text_even_if_the_file_moved(self):
         self.escrever(DOC.replace("horas úteis", "horas corridas"))

@@ -16,7 +16,7 @@ test('the three templates, exactly', () => {
   process.env.TZ = 'America/Sao_Paulo';
   const d = new Date('2026-09-24T22:00:00-03:00');
   assert.equal(modelo('to_validate', d), '> ❓ **to_validate by 2026-10-01** — add your comment here');
-  assert.equal(modelo('comment', d), '> 💬 **comment** — add your comment here');
+  assert.equal(modelo('comment', d), '> 💬 add your comment here');
   assert.equal(modelo('to_do', d), '> 📌 **to_do · 2026-09-24** — add your comment here');
   assert.equal(PLACEHOLDER, 'add your comment here');
 });
@@ -24,10 +24,10 @@ test('the three templates, exactly', () => {
 test('a line is read as a mark only in the exact form', () => {
   assert.deepEqual(marcaDaLinha('> ❓ **to_validate by 2026-10-01** — x'), { tipo: 'to_validate', data: '2026-10-01', texto: 'x' });
   assert.deepEqual(marcaDaLinha('> 📌 **to_do · 2026-09-24** — y'), { tipo: 'to_do', data: '2026-09-24', texto: 'y' });
-  assert.deepEqual(marcaDaLinha('> 💬 **comment** — z'), { tipo: 'comment', data: '', texto: 'z' });
-  for (const l of ['> ❓ **to_validate** — x', '> 📌 **to_do 2026-09-24** — y', '> 💬 **comment** - z',
+  assert.deepEqual(marcaDaLinha('> 💬 z'), { tipo: 'comment', data: '', texto: 'z' });
+  for (const l of ['> ❓ **to_validate** — x', '> 📌 **to_do 2026-09-24** — y', '>💬 z', '💬 fora da citação',
                    '> ⚠️ **sem certeza** — a', '> 🚫 **discordo** — b', '> ❓ **a confirmar até 2026-01-01** — c',
-                   '> 💬 **comment** — ']) {
+                   '> 💬 ', '> 💬  espaço antes']) {
     assert.equal(marcaDaLinha(l), null, l);
   }
 });
@@ -38,7 +38,7 @@ function inserir(doc, pos, linha) {
   const novo = doc.slice(0, i.from) + i.insert + doc.slice(i.from);
   return { novo, sel: novo.slice(i.anchor, i.head) };
 }
-const L = '> 💬 **comment** — add your comment here';
+const L = '> 💬 add your comment here';
 
 test('at the end of a passage the mark is its own block and the placeholder is selected', () => {
   const doc = 'Um parágrafo.';

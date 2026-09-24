@@ -102,7 +102,7 @@ const classes = (state) => {
 
 test('each mark is a box of its own kind, and the old marks are plain quotes', () => {
   const texto = ['> 📌 **to_do · 2026-09-24** — a', '', '> ❓ **to_validate by 2999-01-01** — b', '',
-                 '> 💬 **comment** — c', '', '> ⚠️ **sem certeza** — d', '', '> 🚫 **discordo** — e', ''].join('\n');
+                 '> 💬 c', '', '> ⚠️ **sem certeza** — d', '', '> 🚫 **discordo** — e', ''].join('\n');
   const s = EditorState.create({ doc: texto, extensions: editorMarkdown() });
   const porLinha = (n) => classes(s).filter(([f, c]) => f === s.doc.line(n).from && c.startsWith('cm-cit')).map(([, c]) => c);
   assert.deepEqual(porLinha(1), ['cm-cit cm-cit-fazer']);

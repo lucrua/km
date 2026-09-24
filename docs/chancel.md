@@ -85,7 +85,7 @@ marks, one line each, in the exact forms listed in the README's
 
 ```markdown
 > ❓ **to_validate by AAAA-MM-DD** — something to confirm by that deadline
-> 💬 **comment** — for whoever reads the passage later
+> 💬 for whoever reads the passage later
 > 📌 **to_do · AAAA-MM-DD** — for an agent to find and address; the day it was written
 ```
 

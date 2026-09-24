@@ -136,14 +136,14 @@ can see is a note the next agent rewrites without knowing it existed:
 
 ```markdown
 > ❓ **to_validate by 2026-10-01** — add your comment here
-> 💬 **comment** — add your comment here
+> 💬 add your comment here
 > 📌 **to_do · 2026-09-24** — add your comment here
 ```
 
 | | for | the date |
 |---|---|---|
 | ❓ **to_validate** | something to confirm by a deadline | the deadline — the panel writes today + 7 days, local time; `km lint` reports it once passed |
-| 💬 **comment** | whoever reads the passage later | none |
+| 💬 comment | whoever reads the passage later | none |
 | 📌 **to_do** | an agent, to find and address | the day it was written |
 
 The forms are exact, so an agent can grep for them:
@@ -151,7 +151,7 @@ The forms are exact, so an agent can grep for them:
 ```text
 ^> ❓ \*\*to_validate by (\d{4}-\d{2}-\d{2})\*\* — (.+)$
 ^> 📌 \*\*to_do · (\d{4}-\d{2}-\d{2})\*\* — (.+)$
-^> 💬 \*\*comment\*\* — (.+)$
+^> 💬 (\S.*)$
 ```
 
 — or run `km marcas`. A line in any other shape is an ordinary quote. No mark blocks a

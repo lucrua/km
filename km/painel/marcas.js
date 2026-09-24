@@ -2,7 +2,7 @@
 // exact forms are tested with `node --test` against the same regexes the engine greps for.
 //
 //   > ❓ **to_validate by AAAA-MM-DD** — …   a deadline; overdue once the date has passed
-//   > 💬 **comment** — …                      for whoever reads the passage later
+//   > 💬 …                                    for whoever reads the passage later
 //   > 📌 **to_do · AAAA-MM-DD** — …           for an agent to find and address; the day written
 
 export const PLACEHOLDER = 'add your comment here';
@@ -10,7 +10,7 @@ export const PLACEHOLDER = 'add your comment here';
 export const FORMAS = {
   to_validate: /^> ❓ \*\*to_validate by (\d{4}-\d{2}-\d{2})\*\* — (.+)$/,
   to_do: /^> 📌 \*\*to_do · (\d{4}-\d{2}-\d{2})\*\* — (.+)$/,
-  comment: /^> 💬 \*\*comment\*\* — ()(.+)$/,
+  comment: /^> 💬 ()(\S.*)$/,
 };
 
 // A data no relógio de quem escreve: em UTC, depois das 21h no Brasil já seria amanhã.
@@ -21,7 +21,7 @@ export const emDias = (n, d = new Date()) => hoje(new Date(d.getFullYear(), d.ge
 export function modelo(tipo, d = new Date()) {
   if (tipo === 'to_validate') return `> ❓ **to_validate by ${emDias(7, d)}** — ${PLACEHOLDER}`;
   if (tipo === 'to_do') return `> 📌 **to_do · ${hoje(d)}** — ${PLACEHOLDER}`;
-  if (tipo === 'comment') return `> 💬 **comment** — ${PLACEHOLDER}`;
+  if (tipo === 'comment') return `> 💬 ${PLACEHOLDER}`;
   throw new Error('marca desconhecida: ' + tipo);
 }
 

@@ -33,7 +33,7 @@ HEADING = re.compile(r"^(#{1,6})\s+(.*)$")
 MARCAS = {
     "to_validate": re.compile(r"^> ❓ \*\*to_validate by (\d{4}-\d{2}-\d{2})\*\* — (.+)$"),
     "to_do": re.compile(r"^> 📌 \*\*to_do · (\d{4}-\d{2}-\d{2})\*\* — (.+)$"),
-    "comment": re.compile(r"^> 💬 \*\*comment\*\* — ()(.+)$"),
+    "comment": re.compile(r"^> 💬 ()(\S.*)$"),
 }
 #: What the surfaces write for you to replace; left as is, `km lint` reports it.
 PLACEHOLDER = "add your comment here"
