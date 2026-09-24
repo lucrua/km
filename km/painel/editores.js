@@ -44,6 +44,10 @@ export function modo(emCodigo) {
   for (const v of vivos.values()) for (const view of v.todas) view.dispatch({ effects: trocarModo(view.state, codigo) });
 }
 
+// A coluna do texto mudou de largura (a régua da esquerda foi arrastada): cada editor mede de novo.
+// O CodeMirror já observa o próprio tamanho, mas ignora o que chega logo depois de uma atualização.
+export function medirTodos() { for (const v of vivos.values()) for (const view of v.todas) view.requestMeasure(); }
+
 export const texto = (chave) => vivos.get(chave)?.view.state.doc.toString();
 
 export function selecao(chave) {
@@ -80,5 +84,5 @@ export function focarFim(chave) {
   v.focus();
 }
 
-window.km = { editorSimples, editorMudanca, destruirTodos, modo, texto, selecao, focado, inserirMarca, focarFim };
+window.km = { editorSimples, editorMudanca, destruirTodos, modo, medirTodos, texto, selecao, focado, inserirMarca, focarFim };
 window.dispatchEvent(new Event('km-pronto'));
