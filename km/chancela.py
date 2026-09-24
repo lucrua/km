@@ -25,16 +25,18 @@ from pathlib import Path
 REF = "refs/km/chancela"
 HEADING = re.compile(r"^(#{1,6})\s+(.*)$")
 
-#: The writing convention, three marks, because each one changes what happens next.
-#: They live in the document as blockquotes — an agent reads them with no tooling and a
-#: human sees the reservation when opening the file, which no sidecar store achieves.
+#: The writing convention: three marks, each one a line of its own, a blockquote in the
+#: document itself — an agent reads them with no tooling and a human sees them when opening
+#: the file, which no sidecar store achieves. The forms are exact so they can be grepped:
+#: ❓ to_validate carries a deadline, 📌 to_do the day it was written and is meant for an
+#: agent to find and address, 💬 comment is for whoever reads the passage later.
 MARCAS = {
-    "⚠": "sem certeza — entra na chancela e continua visível",
-    "❓": "a confirmar — vira pendência com data",
-    "🚫": "discordo — bloqueia a chancela deste trecho",
+    "to_validate": re.compile(r"^> ❓ \*\*to_validate by (\d{4}-\d{2}-\d{2})\*\* — (.+)$"),
+    "to_do": re.compile(r"^> 📌 \*\*to_do · (\d{4}-\d{2}-\d{2})\*\* — (.+)$"),
+    "comment": re.compile(r"^> 💬 \*\*comment\*\* — ()(.+)$"),
 }
-RESSALVA = re.compile(r"^\s*>.*?([⚠❓🚫])")
-PRAZO = re.compile(r"(\d{4}-\d{2}-\d{2})")
+#: What the surfaces write for you to replace; left as is, `km lint` reports it.
+PLACEHOLDER = "add your comment here"
 
 ROW = re.compile(r"^\s*\|.*\|\s*$")
 SEP = re.compile(r"^[\s:|-]+$")
@@ -312,7 +314,6 @@ class Unidade:
     depois: Bloco | None
     titulo: str = ""
     sumidas: list[str] = field(default_factory=list)
-    bloqueio: str = ""
 
     @property
     def sha(self) -> str:
@@ -342,10 +343,6 @@ class Mudanca:
     @property
     def sumidas(self) -> list[str]:
         return [s for u in self.unidades for s in u.sumidas]
-
-    @property
-    def bloqueio(self) -> str:
-        return next((u.bloqueio for u in self.unidades if u.bloqueio), "")
 
     def contagem(self) -> tuple[int, int]:
         return (sum(1 for u in self.unidades if u.antes),
@@ -434,7 +431,6 @@ def mudancas(antes: str, depois: str) -> list[Mudanca]:
             u = Unidade(id=f"{n}.{k}", tipo=tipo, antes=vb, depois=nb)
             onde = trecho_da_linha(ts, nb.linha if nb else linha) if ts else None
             u.titulo = onde.titulo if onde else ""
-            u.bloqueio = bloqueio_de(onde.texto) if onde else ""
             u.sumidas = sumidas(vb.texto.splitlines() if vb else [],
                                 nb.texto.splitlines() if nb else [])
             unidades.append(u)
@@ -614,51 +610,56 @@ def unidades_por_sha(ms: list[Mudanca], shas: set[str]) -> list[Unidade]:
 
 # ---- the convention ------------------------------------------------------------------
 
-def ressalvas(texto: str) -> list[tuple[int, str, str]]:
-    """Every caveat in a text: (1-based line, mark, line)."""
+@dataclass
+class Marca:
+    linha: int                  # 1-based
+    tipo: str                   # to_validate · to_do · comment
+    data: str                   # the deadline, the day it was written, or "" for a comment
+    texto: str
+    cru: str                    # the whole line, as in the file
+
+    @property
+    def placeholder(self) -> bool:
+        return self.texto.strip() == PLACEHOLDER
+
+
+def marca_da_linha(linha: str, n: int = 0) -> Marca | None:
+    for tipo, rx in MARCAS.items():
+        m = rx.match(linha)
+        if m and m.group(2).strip():
+            return Marca(linha=n, tipo=tipo, data=m.group(1), texto=m.group(2).strip(), cru=linha)
+    return None
+
+
+def marcas(texto: str) -> list[Marca]:
+    """Every mark in a text, in the order it appears."""
     out = []
     for n, linha in enumerate(texto.splitlines(), start=1):
-        m = RESSALVA.match(linha)
+        m = marca_da_linha(linha, n)
         if m:
-            out.append((n, m.group(1), linha.strip()))
+            out.append(m)
     return out
 
 
 def sumidas(antes: list[str], depois: list[str]) -> list[str]:
-    """Caveats the change removes.
+    """Marks the change removes.
 
-    An agent rewrites the paragraph and drops the reservation. Nothing lies, and the tool
-    would see a fully endorsed passage — so this specific change gets its own mark instead
-    of travelling with ordinary edits.
+    An agent rewrites the paragraph and drops the mark. Nothing lies, and the tool would see
+    a fully endorsed passage — so this specific change gets its own flag instead of
+    travelling with ordinary edits.
     """
-    def marca(linha: str) -> str:
-        m = RESSALVA.match(linha)
-        return m.group(1) if m else ""
-
-    # Reescrever a ressalva — trocar a data, afinar a dúvida — não é removê-la, e a
-    # mudança já aparece no diff. O que precisa de marca própria é a marca que sumiu.
-    ficaram = {marca(l) for l in depois if RESSALVA.match(l)}
-    return [l.strip() for l in antes if RESSALVA.match(l) and marca(l) not in ficaram]
-
-
-def bloqueio_de(texto: str) -> str:
-    for _, marca, linha in ressalvas(texto):
-        if marca == "🚫":
-            return linha
-    return ""
+    # Reescrever a marca — trocar a data, afinar o texto — não é removê-la, e a mudança já
+    # aparece no diff. O que precisa de aviso próprio é o tipo de marca que sumiu do bloco.
+    ficaram = {m.tipo for m in (marca_da_linha(l) for l in depois) if m}
+    return [m.cru.strip() for m in (marca_da_linha(l) for l in antes)
+            if m and m.tipo not in ficaram]
 
 
 def vencidas(texto: str, hoje: str | None = None) -> list[tuple[int, str, str]]:
-    """`❓ a confirmar até AAAA-MM-DD` whose date has passed."""
+    """❓ to_validate whose deadline is before today (the local date)."""
     agora = hoje or date.today().isoformat()
-    out = []
-    for n, marca, linha in ressalvas(texto):
-        if marca != "❓":
-            continue
-        m = PRAZO.search(linha)
-        if m and m.group(1) < agora:
-            out.append((n, m.group(1), linha))
-    return out
+    return [(m.linha, m.data, m.cru) for m in marcas(texto)
+            if m.tipo == "to_validate" and m.data < agora]
 
 
 # ---- what is pending -----------------------------------------------------------------
@@ -703,41 +704,9 @@ def situacao(root: Path, rel: str, hoje: str | None = None,
 
 # ---- writing in the document ---------------------------------------------------------
 #
-# Two writes, both asked for explicitly: putting back text you had chancelled, and writing
-# a reservation in the agreed form. Everything else `km` does is read-only.
-
-def marca_da(marca: str) -> str:
-    return {"⚠️": "⚠️ **sem certeza** — ",
-            "❓": "❓ **a confirmar até {prazo}** — ",
-            "🚫": "🚫 **discordo** — "}.get(marca, "")
-
-
-def linha_de_marca(marca: str, texto: str, prazo: str | None = None) -> str:
-    """The reservation, in the agreed form. The surface writes it so nobody has to remember
-    it — the only reason a convention survives contact with a Tuesday."""
-    return "> " + marca_da(marca).format(prazo=prazo or "") + texto.strip()
-
-
-def inserir_apos(root: Path, rel: str, linha: int, bloco: str) -> bool:
-    """Insert a block after line `linha` (1-based; 0 is the top), as a block of its own.
-
-    Blank lines on both sides, always: a reservation glued to a quote above it would become
-    part of that quote, and the change it annotates would no longer be the same change.
-    """
-    texto = atual(root, rel)
-    if texto is None:
-        return False
-    linhas = texto.splitlines()
-    linha = max(0, min(linha, len(linhas)))
-    antes, depois = linhas[:linha], linhas[linha:]
-    while antes and not antes[-1].strip():
-        antes.pop()
-    while depois and not depois[0].strip():
-        depois.pop(0)
-    novas = antes + ([""] if antes else []) + bloco.splitlines() + ([""] + depois if depois else [])
-    (root / rel).write_text("\n".join(novas) + "\n", encoding="utf-8")
-    return True
-
+# Two writes, both asked for explicitly: putting back text you had chancelled, and saving a
+# passage you edited in the panel — the marks go in that way, as text. Everything else
+# `km` does is read-only.
 
 def sha_do(texto: str) -> str:
     return hashlib.sha256(texto.encode("utf-8")).hexdigest()[:12]
