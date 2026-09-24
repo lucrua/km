@@ -125,6 +125,14 @@ the block the cursor is in, the same way.
 A block is identified by its content, never its position: a page that asks to approve a
 block after the file moved gets a refusal, not a different block.
 
+**The left rail is a tree** of the files under review and their folders; a chain of
+single-folder folders is one row (`descoberta/guides`). Each row says what is left — `21%` to
+approve, `✓` up to date, `novo` never had a chancel, ❓ an overdue mark — and a folder shows `●N`
+files to approve below it. Folders with something to approve start open; the ones you open or
+close stay that way. It takes the keyboard like any tree (↑ ↓ ← → Enter Home End). **Drag its
+right edge to resize it** (or ← → on the edge); a double-click resets it, and the browser
+remembers the width.
+
 Keyboard: `j` `k` move between changes, `a` approves the change in focus.
 
 **abrir no VS Code**, in the document header, runs `code <file>` (or `code -g <file>:<line>` at the change in focus) — under WSL, Windows VS Code in WSL mode; `code` must be on the PATH of whoever started `km serve`.

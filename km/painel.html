@@ -20,22 +20,50 @@ border:1px solid var(--rule);background:var(--bg);color:var(--ink);cursor:pointe
 .recado{padding:7px 16px;font-size:13px;background:var(--ok-bg);color:var(--ok);
 border-bottom:1px solid var(--rule)}
 .recado.ruim{background:var(--neg-bg);color:var(--neg)}
-.corpo{display:flex;align-items:flex-start}
-.lado{width:210px;flex:0 0 210px;border-right:1px solid var(--rule);padding:9px 7px;
-position:sticky;top:45px;max-height:calc(100vh - 45px);overflow:auto}
-.lado button{display:block;width:100%;text-align:left;background:none;border:0;color:inherit;
-font:inherit;padding:6px 8px;border-radius:6px;cursor:pointer}
-.lado button:hover{background:var(--card)}
-.lado button[aria-current=true]{background:var(--card);box-shadow:inset 2px 0 0 var(--acc)}
-.lado .f{font-family:ui-monospace,Menlo,monospace;font-size:11.5px;word-break:break-all}
-.barra{display:flex;height:4px;border-radius:3px;overflow:hidden;margin-top:4px;background:var(--rule)}
-.barra i{display:block;height:100%}
+.corpo{display:flex;align-items:flex-start;--lado:248px}
+/* A régua da esquerda: a árvore dos arquivos revisados. A largura é --lado, que o divisor muda. */
+.lado{width:var(--lado);flex:0 0 var(--lado);padding:6px 0 16px;position:sticky;top:45px;
+max-height:calc(100vh - 45px);overflow:auto;overscroll-behavior:contain;scrollbar-width:thin;
+scrollbar-color:var(--rule) transparent}
+.ramo{font-size:13px;line-height:24px}
+.ramo .no{display:flex;align-items:center;height:24px;position:relative;cursor:pointer;
+padding:0 10px 0 calc(6px + (var(--n) - 1) * 12px);white-space:nowrap;outline:0;user-select:none}
+.ramo .no:hover{background:color-mix(in srgb,var(--card) 65%,transparent)}
+.ramo .no[aria-selected=true]{background:var(--card);box-shadow:inset 2px 0 0 var(--acc)}
+.ramo .no:focus-visible{box-shadow:inset 0 0 0 1px color-mix(in srgb,var(--acc) 70%,transparent)}
+.ramo .no[aria-selected=true]:focus-visible{box-shadow:inset 2px 0 0 var(--acc),inset 0 0 0 1px color-mix(in srgb,var(--acc) 70%,transparent)}
+.ramo .guias{position:absolute;left:6px;top:0;bottom:0;width:calc((var(--n) - 1) * 12px);pointer-events:none;
+background:repeating-linear-gradient(90deg,transparent 0 7px,var(--guia) 7px 8px,transparent 8px 12px)}
+.ramo{--guia:color-mix(in srgb,var(--rule) 80%,transparent)}
+.ramo .seta{flex:0 0 16px;height:24px;display:flex;align-items:center;justify-content:center;color:var(--mut)}
+.ramo .seta svg{width:9px;height:9px;transition:transform .12s ease}
+.ramo .no[aria-expanded=true] .seta svg{transform:rotate(90deg)}
+.ramo .nome{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;padding-left:2px}
+.ramo .pasta .nome{color:#C5D0DA}
+.ramo .no[aria-selected=true] .nome{color:#F2F6FA}
+.ramo .venc{flex:none;font-size:10px;margin-left:6px;opacity:.9}
+.ramo .est{flex:none;min-width:30px;margin-left:8px;text-align:right;font-size:11.5px;
+font-variant-numeric:tabular-nums;letter-spacing:.01em}
+.ramo .est.ace{color:var(--ace)}
+.ramo .est.ok{color:color-mix(in srgb,var(--ok) 55%,var(--mut))}
+.ramo .est.novo{color:color-mix(in srgb,var(--mut) 62%,var(--bg));font-size:11px}
+.ramo .est .ponto{display:inline-block;width:5px;height:5px;border-radius:50%;background:currentColor;margin-right:3px;vertical-align:1.5px}
+.ramo .nome .sep{color:var(--mut);padding:0 1px}
+/* O divisor entre a régua e o documento: um fio de 1px, com 7px de área para pegar. */
+.divisor{flex:0 0 1px;position:sticky;top:45px;height:calc(100vh - 45px);background:var(--rule);
+cursor:col-resize;z-index:3;outline:0;touch-action:none}
+/* Nada a revisar: sem régua, a mensagem toma a largura. */
+.corpo.sem-docs .lado,.corpo.sem-docs .divisor{display:none}
+.divisor::before{content:'';position:absolute;top:0;bottom:0;left:-3px;right:-3px}
+.divisor:hover,.divisor:focus-visible,body.arrastando .divisor{background:var(--acc);box-shadow:0 0 0 1px var(--acc)}
+body.arrastando{cursor:col-resize;user-select:none}
+body.arrastando *{cursor:col-resize !important;user-select:none !important}
 .rot{font-family:system-ui,sans-serif;font-size:10px;text-transform:uppercase;
 letter-spacing:.08em;color:var(--mut)}
 
 /* A grade: uma linha por trecho, tres colunas alinhadas. O texto corre de cima a baixo;
    o que separa um trecho do outro e uma regua fina, nao um cartao. */
-.doc{flex:1;min-width:0;border-left:1px solid var(--rule);display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr) 196px;
+.doc{flex:1;min-width:0;display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr) 196px;
 align-items:stretch}
 .cabgrade{position:sticky;top:45px;background:var(--bg);border-bottom:1px solid var(--rule);
 padding:6px 14px;z-index:4}
@@ -64,7 +92,7 @@ padding:6px 9px;margin-bottom:8px;border-radius:0 4px 4px 0}
 border:1px solid var(--rule);background:var(--bg);color:var(--ink)}
 .vazio{padding:24px;color:var(--mut)}
 @media(max-width:1200px){.doc{grid-template-columns:minmax(0,1fr) 150px}
-.col.agora.inteiro{grid-column:auto}.lado{width:170px;flex-basis:170px}}
+.col.agora.inteiro{grid-column:auto}.corpo{--lado:200px}}
 
 /* uma mudança: cabeçalho de largura inteira, depois um bloco por linha */
 .cab-m{grid-column:1 / 4;display:flex;flex-wrap:wrap;gap:6px 12px;align-items:center;
@@ -92,7 +120,6 @@ border:1px solid var(--rule);background:var(--bg);color:var(--ink)}
 font-family:ui-monospace,Menlo,monospace;border-bottom:1px solid var(--rule)}
 .dobra:hover{color:var(--ink)}
 .aviso-doc{grid-column:1 / 4;padding:12px 14px;color:var(--ok);font-size:13px;border-bottom:1px solid var(--rule)}
-.bolinha{display:inline-block;width:7px;height:7px;border-radius:50%;margin-right:6px;vertical-align:1px}
 .txt.mini{font:11.5px/1.62 ui-monospace,SFMono-Regular,Menlo,monospace;white-space:pre-wrap;
 word-break:break-word;overflow-wrap:anywhere;max-height:160px;overflow:auto;margin-top:4px;opacity:.85}
 .topo .dir button{padding:3px 8px}
@@ -206,8 +233,12 @@ background:var(--ok-bg);color:var(--ok)}
   <button class="pri" onmousedown="event.preventDefault()" onclick="naSelecao('aprovar')">Aprovar seleção</button>
   <button onmousedown="event.preventDefault()" onclick="naSelecao('reverter')">Reverter seleção</button>
 </div>
-<div class="corpo"><nav class="lado" id="lado"></nav><main class="doc" id="doc"></main></div>
+<div class="corpo" id="corpo"><nav class="lado" id="lado" aria-label="arquivos revisados"></nav>
+<div class="divisor" id="divisor" role="separator" aria-orientation="vertical" tabindex="0"
+  aria-label="largura da lista de arquivos" aria-valuemin="160"
+  title="arraste para mudar a largura · duplo clique volta ao padrão"></div><main class="doc" id="doc"></main></div>
 <main id="arquivos" class="arquivos" hidden></main>
+<script type="module">import * as arvore from '/static/painel/arvore.js'; window.arvore = arvore;</script>
 <script type="module" src="/static/painel/editores.js"></script>
 <script>
 const $ = (id) => document.getElementById(id);
@@ -274,19 +305,156 @@ const mudancas = () => segs().filter(s => s.tipo === 'mudanca');
 const achar = (n) => mudancas().find(m => m.n === n);
 
 // ---- a régua da esquerda ----------------------------------------------------------
+// A árvore dos arquivos revisados (km/painel/arvore.js monta; aqui só se desenha). As pastas
+// que você abriu ou fechou ficam como você deixou, também depois de recarregar.
+let ARVL = null, abertasL = new Set(), linhasL = [], focoL = null, atualL = null;
+let escolhas = {}, escolhasDe = null;
+const chaveEscolhas = () => 'km-lado-pastas:' + D.repo;
+function gravarEscolhas(){ try { localStorage.setItem(chaveEscolhas(), JSON.stringify(escolhas)); } catch (e) {} }
+const SETA = '<svg viewBox="0 0 10 10" aria-hidden="true"><path d="M3.5 1.5 7 5l-3.5 3.5" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>';
+
 function lado(){
-  let divisor = false;
-  $('lado').innerHTML = D.docs.map((d,i)=>{
-    let antes = '';
-    if (!d.rastreado && !divisor) { divisor = true;
-      antes = '<div class="rot" style="padding:11px 8px 5px">sem chancela ainda</div>'; }
-    const estado = !d.rastreado ? 'sem chancela' : (d.pendente ? `${d.pct} a aprovar` : 'em dia');
-    const cor = !d.rastreado ? 'var(--rule)' : (d.pendente ? 'var(--ace)' : 'var(--ok)');
-    return antes + `<button aria-current="${i===doc}" onclick="abrir(${i})">
-      <div class="f">${esc(d.file)}</div>
-      <div class="q"><i class="bolinha" style="background:${cor}"></i>${estado}${d.vencidas?' · ❓ vencida':''}</div></button>`;
-  }).join('');
+  const A = window.arvore;
+  if (escolhasDe !== D.repo) {
+    escolhasDe = D.repo;
+    try { escolhas = JSON.parse(localStorage.getItem(chaveEscolhas()) || '{}') || {}; } catch (e) { escolhas = {}; }
+  }
+  ARVL = A.montarArvore(D.docs);
+  const atual = D.docs[doc] ? D.docs[doc].file : null;
+  const acima = atual ? A.ancestrais(ARVL, atual) : [];
+  const novo = atual !== atualL;
+  if (novo) {
+    // Abrir um arquivo abre as pastas acima dele, mesmo as que você tinha fechado.
+    atualL = atual; focoL = atual;
+    if (acima.some(c => escolhas[c] === false)) { acima.forEach(c => { delete escolhas[c]; }); gravarEscolhas(); }
+  }
+  abertasL = new Set([...A.abertasPadrao(ARVL), ...acima]);
+  for (const [c, v] of Object.entries(escolhas)) v ? abertasL.add(c) : abertasL.delete(c);
+  linhasL = A.visiveis(ARVL, abertasL);
+  if (!linhasL.some(l => l.no.caminho === focoL)) focoL = linhasL[0] ? linhasL[0].no.caminho : null;
+  $('corpo').classList.toggle('sem-docs', !D.docs.length);
+  const nav = $('lado'), noTeclado = !!document.activeElement?.closest?.('#lado');
+  nav.innerHTML = `<div class="ramo" role="tree" aria-label="arquivos revisados">${linhasL.map(linhaLado).join('')}</div>`;
+  const f = nav.querySelector(`[data-caminho="${CSS.escape(focoL || '')}"]`);
+  if (f && noTeclado) f.focus({preventScroll: true});
+  if (novo) aVista(nav.querySelector('[aria-selected="true"]'), true);
 }
+
+function linhaLado(l){
+  const n = l.no, pasta = n.tipo === 'pasta', A = window.arvore;
+  const e = pasta ? A.estadoPasta(n) : A.estadoArquivo(n.doc);
+  const diz = pasta
+    ? (n.pendentes ? `${n.pendentes} a aprovar` : (n.novos === n.total ? 'sem chancela' : (n.novos ? `${n.novos} sem chancela` : 'em dia')))
+    : (!n.doc.rastreado ? 'sem chancela' : (n.doc.pendente ? `${n.doc.pct} a aprovar` : 'em dia'));
+  // Numa pasta aberta o ❓ já aparece no arquivo; repeti-lo em cada pasta acima só faz barulho.
+  const venc = e.vencida && !(pasta && abertasL.has(n.caminho)) ? '<span class="venc" aria-hidden="true">❓</span>' : '';
+  const titulo = `${n.caminho}${pasta ? '/' : ''} — ${diz}${e.vencida ? ' · ❓ vencida' : ''}`;
+  return `<div class="no ${pasta ? 'pasta' : 'arq'}" role="treeitem" aria-level="${l.nivel}" aria-setsize="${l.de}"
+    aria-posinset="${l.pos}" ${pasta ? `aria-expanded="${abertasL.has(n.caminho)}"` : `aria-selected="${n.i === doc}"`}
+    data-caminho="${esc(n.caminho)}" tabindex="${n.caminho === focoL ? 0 : -1}" title="${esc(titulo)}" style="--n:${l.nivel}">
+    <span class="guias"></span><span class="seta">${pasta ? SETA : ''}</span><span class="nome">${esc(n.nome).replaceAll('/', '<span class="sep">/</span>')}</span>${venc}<span class="est ${e.classe}">${esc(e.texto).replace('●', '<i class="ponto"></i>')}</span></div>`;
+}
+
+// Rola só a régua, e só o necessário: o documento fica onde está.
+function aVista(el, centro){
+  if (!el) return;
+  const nav = $('lado'), t = el.offsetTop, h = el.offsetHeight;
+  if (centro && (t < nav.scrollTop || t + h > nav.scrollTop + nav.clientHeight)) nav.scrollTop = t - nav.clientHeight / 2;
+  else if (t < nav.scrollTop) nav.scrollTop = t;
+  else if (t + h > nav.scrollTop + nav.clientHeight) nav.scrollTop = t + h - nav.clientHeight;
+}
+
+function alternarPasta(c){
+  escolhas[c] = !abertasL.has(c); gravarEscolhas();
+  focoL = c; lado();
+}
+function linhaDe(c){ return linhasL.find(l => l.no.caminho === c); }
+function focarLinha(c){
+  focoL = c;
+  for (const el of $('lado').querySelectorAll('[role="treeitem"]')) el.tabIndex = el.dataset.caminho === c ? 0 : -1;
+  const el = $('lado').querySelector(`[data-caminho="${CSS.escape(c)}"]`);
+  if (el) { el.focus({preventScroll: true}); aVista(el); }
+}
+function ativar(c){
+  const l = linhaDe(c); if (!l) return;
+  focoL = c;
+  if (l.no.tipo === 'pasta') alternarPasta(c); else if (l.no.i !== doc) abrir(l.no.i);
+}
+$('lado').addEventListener('click', (e) => {
+  const el = e.target.closest('[role="treeitem"]');
+  if (el) ativar(el.dataset.caminho);
+});
+// O teclado é o da árvore WAI-ARIA: ↑ ↓ andam, → abre ou desce, ← fecha ou sobe,
+// Enter e espaço abrem o arquivo ou alternam a pasta, Home e End vão às pontas.
+$('lado').addEventListener('keydown', (e) => {
+  const el = e.target.closest?.('[role="treeitem"]');
+  if (!el || e.ctrlKey || e.metaKey || e.altKey) return;
+  const i = linhasL.findIndex(l => l.no.caminho === el.dataset.caminho), l = linhasL[i];
+  if (!l) return;
+  const pasta = l.no.tipo === 'pasta', aberta = pasta && abertasL.has(l.no.caminho);
+  const feito = () => { e.preventDefault(); e.stopPropagation(); };
+  if (e.key === 'ArrowDown') { feito(); if (i < linhasL.length - 1) focarLinha(linhasL[i + 1].no.caminho); }
+  else if (e.key === 'ArrowUp') { feito(); if (i > 0) focarLinha(linhasL[i - 1].no.caminho); }
+  else if (e.key === 'Home') { feito(); focarLinha(linhasL[0].no.caminho); }
+  else if (e.key === 'End') { feito(); focarLinha(linhasL[linhasL.length - 1].no.caminho); }
+  else if (e.key === 'ArrowRight') { feito(); if (pasta && !aberta) alternarPasta(l.no.caminho); else if (aberta) focarLinha(linhasL[i + 1].no.caminho); }
+  else if (e.key === 'ArrowLeft') { feito(); if (aberta) alternarPasta(l.no.caminho); else if (l.pai !== null) focarLinha(l.pai); }
+  else if (e.key === 'Enter' || e.key === ' ') { feito(); ativar(l.no.caminho); }
+});
+
+// ---- o divisor: a largura da régua ------------------------------------------------
+// Arrastar, ou ← → com o foco nele; duplo clique volta ao padrão. A largura fica neste
+// navegador; a padrão é a do CSS (menor em tela estreita), e nenhuma passa de meia tela.
+const LADO_MIN = 160;
+let larguraL = null;
+try { larguraL = Number(localStorage.getItem('km-lado-largura')) || null; } catch (e) {}
+const limitar = (w) => Math.round(Math.max(LADO_MIN, Math.min(w, innerWidth * 0.5)));
+function aplicarLargura(gravar){
+  const c = $('corpo'), d = $('divisor');
+  if (larguraL === null) c.style.removeProperty('--lado'); else c.style.setProperty('--lado', limitar(larguraL) + 'px');
+  d.setAttribute('aria-valuemax', Math.round(innerWidth * 0.5));
+  d.setAttribute('aria-valuenow', Math.round($('lado').getBoundingClientRect().width));
+  if (gravar) try {
+    if (larguraL === null) localStorage.removeItem('km-lado-largura');
+    else localStorage.setItem('km-lado-largura', String(limitar(larguraL)));
+  } catch (e) {}
+}
+function medir(){ if (window.km && km.medirTodos) km.medirTodos(); }
+(function(){
+  const d = $('divisor');
+  let x0 = 0, w0 = 0, quadro = 0;
+  d.addEventListener('pointerdown', (e) => {
+    if (e.button !== 0) return;
+    e.preventDefault();
+    d.setPointerCapture(e.pointerId);
+    x0 = e.clientX; w0 = $('lado').getBoundingClientRect().width;
+    document.body.classList.add('arrastando');
+  });
+  d.addEventListener('pointermove', (e) => {
+    if (!d.hasPointerCapture(e.pointerId)) return;
+    larguraL = limitar(w0 + e.clientX - x0);
+    cancelAnimationFrame(quadro);
+    quadro = requestAnimationFrame(() => aplicarLargura(false));
+  });
+  const soltar = (e) => {
+    if (!document.body.classList.contains('arrastando')) return;
+    if (d.hasPointerCapture(e.pointerId)) d.releasePointerCapture(e.pointerId);
+    document.body.classList.remove('arrastando');
+    cancelAnimationFrame(quadro);
+    aplicarLargura(true); medir();
+  };
+  d.addEventListener('pointerup', soltar);
+  d.addEventListener('pointercancel', soltar);
+  d.addEventListener('dblclick', () => { larguraL = null; aplicarLargura(true); medir(); });
+  d.addEventListener('keydown', (e) => {
+    if (e.key !== 'ArrowLeft' && e.key !== 'ArrowRight') return;
+    e.preventDefault(); e.stopPropagation();
+    larguraL = limitar($('lado').getBoundingClientRect().width + (e.key === 'ArrowRight' ? 16 : -16));
+    aplicarLargura(true); medir();
+  });
+  addEventListener('resize', () => aplicarLargura(false));
+  aplicarLargura(false);
+})();
 
 // ---- os editores ------------------------------------------------------------------
 // Cada trecho igual é um editor; cada trecho mudado, uma MergeView (chancela à esquerda,
