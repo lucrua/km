@@ -11,7 +11,8 @@
     "Other"
   ],
   "activationEvents": [
-    "onLanguage:markdown"
+    "onLanguage:markdown",
+    "onStartupFinished"
   ],
   "main": "./extension.js",
   "contributes": {
@@ -57,7 +58,7 @@
       {
         "command": "km.abrirPainel",
         "key": "ctrl+alt+p",
-        "when": "editorLangId == markdown"
+        "when": "editorLangId == markdown || activeCustomEditorId == 'markdown-editor.customEditor'"
       }
     ],
     "menus": {
