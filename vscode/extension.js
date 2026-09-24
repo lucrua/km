@@ -2,9 +2,8 @@
 //
 // The chancel is a reviewed copy of the file in refs/km/chancela, so the left-hand column
 // is `km baseline` (which is `git show refs/km/chancela:<file>`) and the state of each
-// passage comes from `km pendente --json`. Reservations are not stored here: they are
-// written into the document as blockquotes, and this extension exists partly to insert
-// them in the agreed form.
+// passage comes from `km pendente --json`. The marks (❓ to_validate, 💬 comment, 📌 to_do)
+// are not stored here: they are blockquotes in the document, written in the panel.
 const vscode = require('vscode');
 const cp = require('child_process');
 const fs = require('fs');
@@ -92,7 +91,6 @@ function raizDe(arquivo) {
   return null;
 }
 
-// Um trecho: titulo, estado contra a chancela, ressalvas e o que o diff comeu.
 // O que o editor sabe do arquivo: onde estão as mudanças pendentes e quanto do conteúdo
 // elas são. A unidade é a mudança, a medida é o %: nada de contagem por título.
 function estado(doc) {
@@ -142,11 +140,6 @@ const pendenteDeco = vscode.window.createTextEditorDecorationType({
   overviewRulerLane: vscode.OverviewRulerLane.Right,
   borderWidth: '0 0 0 2px', borderStyle: 'solid', borderColor: '#E3B665',
 });
-const bloqueadoDeco = vscode.window.createTextEditorDecorationType({
-  isWholeLine: true, overviewRulerColor: '#8B4E4E',
-  overviewRulerLane: vscode.OverviewRulerLane.Right,
-  borderWidth: '0 0 0 2px', borderStyle: 'solid', borderColor: '#8B4E4E',
-});
 
 function faixa(m) {
   return new vscode.Range(Math.max(0, m.linha - 1), 0, Math.max(0, m.fim - 2), 0);
@@ -156,8 +149,7 @@ function pintar(editor) {
   if (!editor || editor.document.languageId !== 'markdown') return;
   const e = estado(editor.document);
   const ms = e ? e.mudancas : [];
-  editor.setDecorations(pendenteDeco, ms.filter(m => !m.bloqueio).map(faixa));
-  editor.setDecorations(bloqueadoDeco, ms.filter(m => m.bloqueio).map(faixa));
+  editor.setDecorations(pendenteDeco, ms.map(faixa));
 }
 
 // ---- o painel de problemas e a barra -------------------------------------------
@@ -179,15 +171,14 @@ function marcarProblemas(doc) {
   const sev = vscode.DiagnosticSeverity;
   for (const m of e.mudancas) {
     const r = faixa(m);
-    if (m.bloqueio) achados.push(new vscode.Diagnostic(r, '🚫 ' + m.bloqueio.replace(/^\s*>\s*/, ''), sev.Warning));
-    for (const s of m.sumidas) achados.push(new vscode.Diagnostic(r, 'ressalva removida desde a chancela: ' + s, sev.Warning));
-    if (!m.bloqueio && !m.sumidas.length) {
+    for (const s of m.sumidas) achados.push(new vscode.Diagnostic(r, 'marca removida desde a chancela: ' + s, sev.Warning));
+    if (!m.sumidas.length) {
       achados.push(new vscode.Diagnostic(r, 'mudança pendente de chancela' + (m.titulo ? ' — ' + m.titulo : ''), sev.Information));
     }
   }
   for (const v of e.vencidas) {
     const l = Math.max(0, v.linha - 1);
-    achados.push(new vscode.Diagnostic(new vscode.Range(l, 0, l, 200), '❓ prazo vencido em ' + v.prazo, sev.Warning));
+    achados.push(new vscode.Diagnostic(new vscode.Range(l, 0, l, 200), '❓ to_validate vencido em ' + v.prazo, sev.Warning));
   }
   for (const d of achados) d.source = 'km';
   problemas.set(doc.uri, achados);
@@ -223,7 +214,7 @@ async function veredicto() {
   const escolha = await vscode.window.showQuickPick([
     { label: 'Aprovar', detail: 'a mudança inteira entra na chancela' },
     { label: 'Reverter', detail: 'o texto volta ao que você chancelou' },
-    { label: 'Abrir o painel', detail: 'aprovar parte, a validar com prazo, ver lado a lado' },
+    { label: 'Abrir o painel', detail: 'aprovar parte, 📌 ❓ 💬 depois do trecho, ver lado a lado' },
   ], { title: (m.titulo || 'mudança') + ' — pendente' });
   if (!escolha) return;
   if (escolha.label === 'Abrir o painel') return void abrirPainel();

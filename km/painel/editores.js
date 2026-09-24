@@ -4,6 +4,7 @@ import { EditorView, EditorState, MergeView, keymap, history, historyKeymap, def
          drawSelection } from '../vendor/cm.js';
 import { editorMarkdown, trocarModo } from './preview.js';
 import { emPontos } from './pontos.js';
+import { modelo, insercao } from './marcas.js';
 
 const vivos = new Map();
 let codigo = false;                    // o modo da página: Formatado ou Código
@@ -59,13 +60,15 @@ export function focado() {
   return null;
 }
 
-export function inserirMarca(chave, modelo) {
+// A marca entra depois do bloco do cursor, como bloco próprio, com o texto de exemplo
+// selecionado: o que você digitar toma o lugar dele. Nada é aprovado: a marca é texto seu,
+// salvo como qualquer edição, e sai na chancela junto com o trecho.
+export function inserirMarca(chave, tipo) {
   const v = vivos.get(chave)?.view;
   if (!v) return false;
-  // A marca é um bloco próprio: no fim da linha do cursor, com linha em branco antes e depois.
-  const l = v.state.doc.lineAt(v.state.selection.main.head);
-  v.dispatch({ changes: { from: l.to, insert: '\n\n' + modelo + '\n' },
-               selection: { anchor: l.to + 2 + modelo.length } });
+  const i = insercao(v.state.doc.toString(), v.state.selection.main.head, modelo(tipo));
+  v.dispatch({ changes: { from: i.from, insert: i.insert },
+               selection: { anchor: i.anchor, head: i.head }, scrollIntoView: true });
   v.focus();
   return true;
 }
