@@ -10,6 +10,7 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const http = require('http');
+const { uriDaAba } = require('./aba');
 
 const SCHEME = 'km-baseline';
 
@@ -18,10 +19,17 @@ function km(args, cwd) {
     || path.join(os.homedir(), 'knowledge-manager', 'bin', 'km');
   return cp.execFileSync(bin, args, { cwd, encoding: 'utf8', maxBuffer: 32 * 1024 * 1024 });
 }
-const raiz = (doc) => vscode.workspace.getWorkspaceFolder(doc.uri)?.uri.fsPath;
-const rel = (doc) => vscode.workspace.asRelativePath(doc.uri, false);
+const raiz = (uri) => vscode.workspace.getWorkspaceFolder(uri)?.uri.fsPath;
+const rel = (uri) => vscode.workspace.asRelativePath(uri, false);
+const ehMarkdown = (uri) => /\.md$/i.test(uri.path);
 
-// ---- o painel: um servidor local sob demanda, aberto na propria janela ----------
+// O arquivo em foco, aberto como texto ou num editor customizado (um webview de outra
+// extensão, onde nem decoração nem CodeLens chegam).
+const arquivoAtivo = () =>
+  uriDaAba(vscode.window.tabGroups.activeTabGroup.activeTab, vscode)
+  || vscode.window.activeTextEditor?.document.uri;
+
+// ---- o painel: um servidor local sob demanda, aberto no navegador ----------------
 let painel = null;   // o processo do `km serve`, preso a esta janela
 
 function porta() {
@@ -44,8 +52,8 @@ function quemAtende(p) {
 }
 
 async function abrirPainel() {
-  const doc = vscode.window.activeTextEditor?.document;
-  const pasta = (doc && vscode.workspace.getWorkspaceFolder(doc.uri))
+  const uri = arquivoAtivo();
+  const pasta = (uri && vscode.workspace.getWorkspaceFolder(uri))
     || (vscode.workspace.workspaceFolders || [])[0];
   if (!pasta) { vscode.window.showWarningMessage('km: abra uma pasta primeiro'); return; }
   const dir = pasta.uri.fsPath;
@@ -77,11 +85,11 @@ async function abrirPainel() {
       return;
     }
   }
-  // O VS Code aqui roda no WSL e a janela no Windows: sem asExternalUri, o 127.0.0.1 do
-  // webview seria o do Windows, e o painel nao apareceria.
+  // O VS Code aqui roda no WSL e o navegador no Windows: asExternalUri encaminha a porta,
+  // sem ele o 127.0.0.1 seria o do Windows e o painel nao apareceria.
   const externo = await vscode.env.asExternalUri(
     vscode.Uri.parse('http://127.0.0.1:' + p + '/'));
-  await vscode.commands.executeCommand('simpleBrowser.show', externo.toString(true));
+  await vscode.env.openExternal(externo);
 }
 
 function raizDe(arquivo) {
@@ -93,10 +101,10 @@ function raizDe(arquivo) {
 
 // O que o editor sabe do arquivo: onde estão as mudanças pendentes e quanto do conteúdo
 // elas são. A unidade é a mudança, a medida é o %: nada de contagem por título.
-function estado(doc) {
-  const r = raiz(doc);
-  if (!r || doc.languageId !== 'markdown') return null;
-  try { return JSON.parse(km(['pendente', rel(doc), '--json'], r))[0] || null; }
+function estado(uri) {
+  const r = raiz(uri);
+  if (!r || !ehMarkdown(uri)) return null;
+  try { return JSON.parse(km(['pendente', rel(uri), '--json'], r))[0] || null; }
   catch (e) { return null; }
 }
 
@@ -124,7 +132,7 @@ class Aviso {
     this.onDidChangeCodeLenses = this.mudou.event;
   }
   provideCodeLenses(doc) {
-    const e = estado(doc);
+    const e = estado(doc.uri);
     if (!e) return [];
     const titulo = !e.tem_chancela ? 'km · sem chancela — abrir o painel'
       : (e.pendente ? 'km · ' + e.pct + ' a aprovar — abrir o painel'
@@ -147,62 +155,50 @@ function faixa(m) {
 
 function pintar(editor) {
   if (!editor || editor.document.languageId !== 'markdown') return;
-  const e = estado(editor.document);
+  const e = estado(editor.document.uri);
   const ms = e ? e.mudancas : [];
   editor.setDecorations(pendenteDeco, ms.map(faixa));
 }
 
-// ---- o painel de problemas e a barra -------------------------------------------
+// ---- a barra: o arquivo em foco, também quando aberto num editor customizado -----
 const avisos = new Aviso();
 const baseline = new Baseline();
-const problemas = vscode.languages.createDiagnosticCollection('km');
 const barra = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
 barra.command = 'km.abrirPainel';
 
-function marcarProblemas(doc) {
-  if (!doc || doc.languageId !== 'markdown' || !raiz(doc)) return;
-  const e = estado(doc);
-  if (!e) {   // arquivo não acompanhado: o km não tem nada a dizer
-    problemas.set(doc.uri, []);
-    barra.hide();
-    return;
-  }
-  const achados = [];
-  const sev = vscode.DiagnosticSeverity;
-  for (const m of e.mudancas) {
-    const r = faixa(m);
-    for (const s of m.sumidas) achados.push(new vscode.Diagnostic(r, 'marca removida desde a chancela: ' + s, sev.Warning));
-    if (!m.sumidas.length) {
-      achados.push(new vscode.Diagnostic(r, 'mudança pendente de chancela' + (m.titulo ? ' — ' + m.titulo : ''), sev.Information));
-    }
-  }
-  for (const v of e.vencidas) {
-    const l = Math.max(0, v.linha - 1);
-    achados.push(new vscode.Diagnostic(new vscode.Range(l, 0, l, 200), '❓ to_validate vencido em ' + v.prazo, sev.Warning));
-  }
-  for (const d of achados) d.source = 'km';
-  problemas.set(doc.uri, achados);
+function mostrarBarra() {
+  const uri = arquivoAtivo();
+  const e = uri && estado(uri);
+  if (!e) { barra.hide(); return; }   // arquivo não acompanhado: o km não tem nada a dizer
   barra.text = !e.tem_chancela ? '$(circle-outline) km sem chancela'
-    : (e.pendente ? '$(alert) km ' + e.pct : '$(check) km');
-  barra.tooltip = !e.tem_chancela ? 'este arquivo nunca teve chancela'
+    : (e.pendente ? '$(alert) km ' + e.pct + ' a aprovar' : '$(check) km');
+  barra.tooltip = !e.tem_chancela ? 'este arquivo nunca teve chancela — clique para abrir o painel'
     : (e.pendente ? e.pct + ' do conteúdo a aprovar — clique para abrir o painel' : 'em dia com a chancela');
   barra.show();
+}
+
+let emFoco = '';
+function seTrocouDeArquivo() {
+  const agora = arquivoAtivo()?.toString() || '';
+  if (agora === emFoco) return;
+  emFoco = agora;
+  mostrarBarra();
 }
 
 function atualizar(doc) {
   if (!doc || doc.languageId !== 'markdown') return;
   const ed = vscode.window.visibleTextEditors.find(x => x.document === doc);
   if (ed) pintar(ed);
-  marcarProblemas(doc);
+  mostrarBarra();
   avisos.mudou.fire();
-  if (raiz(doc)) baseline.invalidar(rel(doc));
+  if (raiz(doc.uri)) baseline.invalidar(rel(doc.uri));
 }
 
 // ---- a mudança sob o cursor ------------------------------------------------------
 async function veredicto() {
   const ed = vscode.window.activeTextEditor;
   if (!ed) return;
-  const e = estado(ed.document);
+  const e = estado(ed.document.uri);
   const linha = ed.selection.active.line + 1;
   const m = e && e.mudancas.find(x => x.linha <= linha && linha < Math.max(x.fim, x.linha + 1));
   if (!m) {
@@ -219,10 +215,10 @@ async function veredicto() {
   if (!escolha) return;
   if (escolha.label === 'Abrir o painel') return void abrirPainel();
   const args = escolha.label === 'Aprovar'
-    ? ['chancela', rel(ed.document), '--hunk', String(m.n)]
-    : ['restore', rel(ed.document), '--hunk', String(m.n)];
+    ? ['chancela', rel(ed.document.uri), '--hunk', String(m.n)]
+    : ['restore', rel(ed.document.uri), '--hunk', String(m.n)];
   try {
-    km(args, raiz(ed.document));
+    km(args, raiz(ed.document.uri));
     vscode.window.showInformationMessage('km: ' + (m.titulo || 'mudança') + ' → ' + escolha.label.toLowerCase());
     atualizar(ed.document);
   } catch (err) { vscode.window.showErrorMessage('km: ' + (err.stdout || err.message)); }
@@ -237,7 +233,7 @@ function activate(ctx) {
     vscode.commands.registerCommand('km.review', async () => {
       const ed = vscode.window.activeTextEditor;
       if (!ed) return;
-      const arquivo = rel(ed.document);
+      const arquivo = rel(ed.document.uri);
       const esq = vscode.Uri.parse(SCHEME + ':' + arquivo).with({ query: arquivo });
       await vscode.commands.executeCommand('vscode.diff', esq, ed.document.uri,
         path.basename(arquivo) + ' · chancela ↔ agora');
@@ -249,21 +245,26 @@ function activate(ctx) {
         title: 'Chancelar o arquivo inteiro', prompt: 'Por que você endossa? (vai no commit da chancela)' });
       if (motivo === undefined) return;
       try {
-        km(['chancela', rel(ed.document), '--all'].concat(motivo ? ['-m', motivo] : []),
-          raiz(ed.document));
+        km(['chancela', rel(ed.document.uri), '--all'].concat(motivo ? ['-m', motivo] : []),
+          raiz(ed.document.uri));
         atualizar(ed.document);
         vscode.window.showInformationMessage('km: arquivo inteiro na chancela');
       } catch (e) { vscode.window.showErrorMessage('km: ' + (e.stdout || e.message)); }
     }),
-    problemas, barra,
+    barra,
     vscode.window.onDidChangeActiveTextEditor(function (ed) {
-      if (ed && ed.document.languageId === 'markdown') { pintar(ed); marcarProblemas(ed.document); }
-      else { barra.hide(); }
+      if (ed) pintar(ed);
+      mostrarBarra();
     }),
+    // Trocar para uma aba de editor customizado não muda o editor de texto ativo. As abas
+    // também avisam a cada tecla (o sujo muda): só refaz quando o arquivo em foco é outro.
+    vscode.window.tabGroups.onDidChangeTabs(seTrocouDeArquivo),
+    vscode.window.tabGroups.onDidChangeTabGroups(seTrocouDeArquivo),
     vscode.workspace.onDidSaveTextDocument(atualizar)
   );
   const ativo = vscode.window.activeTextEditor;
-  if (ativo) { pintar(ativo); marcarProblemas(ativo.document); }
+  if (ativo) pintar(ativo);
+  mostrarBarra();
 }
 
 module.exports = {

@@ -196,10 +196,16 @@ written for whoever passes by. `--json` gives `[{file, line, kind, date, text, o
 
 ## In the editor
 
-The extension in [`vscode/`](vscode/) paints each passage in the gutter, puts in the
-Problems panel what moved since your chancel, what never had one, a ❓ past its deadline and
-a mark that vanished, and opens the diff against `km baseline`. Approving and reverting are
-the same verdicts as the panel's; the marks are written in the panel.
+The extension in [`vscode/`](vscode/), on a Markdown file the chancel covers:
+
+- a line at the top of the file — how much is left to approve, or that it never had a
+  chancel — and an amber left border on each pending passage;
+- the status bar shows the same %, also when the file is open in a custom editor such as
+  Markdown Editor, where the top line and the border cannot be drawn;
+- `Ctrl+Alt+K` approves or reverts the change under the cursor — the same verdicts as the
+  panel's; a command opens the diff against `km baseline`;
+- `Ctrl+Alt+P`, the top line or the status bar starts `km serve` and opens the panel in your
+  default browser (from WSL, the port is forwarded). The marks are written in the panel.
 
 ## What it does not do
 
