@@ -163,6 +163,11 @@ background:var(--ok-bg);color:var(--ok)}
 .cm-mergeViewEditor:first-child{background:color-mix(in srgb,var(--bg) 55%,#000);border-right:1px solid var(--rule)}
 /* O que mudou se marca na palavra; a linha inteira não ganha fundo. */
 .col.mudanca-cm .cm-merge-a .cm-changedText{text-decoration:line-through;text-decoration-color:var(--neg);background:none}
+/* Mudou o alvo escondido de um link: o texto dele, pontilhado, com ↗ — a URL fica no título. */
+.col.mudanca-cm .cm-mergeView .cm-alvo-mudou{background:none;text-decoration:underline dotted 2px;text-underline-offset:3px}
+.col.mudanca-cm .cm-merge-a .cm-alvo-mudou{text-decoration-color:var(--neg)}
+.col.mudanca-cm .cm-merge-b .cm-alvo-mudou{text-decoration-color:var(--ok)}
+.cm-alvo-mudou::after{content:'\2197';font-size:.75em;color:var(--mut);margin-left:1px}
 .col.mudanca-cm .cm-mergeView .cm-editor .cm-changedLine,.col.mudanca-cm .cm-mergeView .cm-editor .cm-deletedChunk{background:transparent}
 .grudado{position:sticky;top:46px;display:flex;flex-direction:column;gap:4px}
 </style></head><body>

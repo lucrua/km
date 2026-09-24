@@ -22,8 +22,16 @@ export function inline(t) {
     .replace(/`([^`]+)`/g, '<code>$1</code>')
     .replace(/\*\*([^*]+)\*\*|__([^_]+)__/g, (_, a, b) => `<b>${a || b}</b>`)
     .replace(/(^|[^*\w])\*([^*\s][^*]*)\*/g, '$1<i>$2</i>')
-    // A URL some; uma marca que estava nela fica, vazia, para não desequilibrar a célula.
-    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_, t, url) => `<span class="cm-link-texto">${t}</span>${url.replace(/[^\uE000\uE001]/g, '')}`)
+    // A URL some; uma marca que estava nela fica, vazia, para não desequilibrar a célula. Um
+    // texto entre ALVO_ABRE e ALVO_FECHA é de um link cujo alvo mudou (ver `celulaHTML`).
+    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_, t, url) => {
+      const resto = url.replace(/[^\uE000\uE001]/g, '');
+      if (t.startsWith(ALVO_ABRE) && t.endsWith(ALVO_FECHA)) {
+        return `<span class="cm-link-texto ${ALVO_CLASSE}" title="${tituloAlvo(url)}">${t.slice(1, -1)}</span>${resto}`;
+      }
+      return `<span class="cm-link-texto">${t}</span>${resto}`;
+    })
+    .replace(/[\uE002\uE003]/g, '')
     .replace(/\\\|/g, '|');
 }
 
@@ -34,9 +42,33 @@ export function inline(t) {
 const ABRE = '\uE000', FECHA = '\uE001';
 const MARCA = '<span class="cm-changedText">';
 
+// Um link cuja única mudança está no alvo — o `](url)` que o preview esconde — não teria marca
+// visível: a da MergeView fica sobre o texto escondido, e a grade a descarta. Então o texto
+// visível do link leva a marca, com a URL no título. Onde a URL aparece (a linha do cursor, o
+// modo Código) valem as marcas normais.
+const ALVO_ABRE = '\uE002', ALVO_FECHA = '\uE003';
+const ALVO_CLASSE = 'cm-changedText cm-alvo-mudou';
+const tituloAlvo = (url) => `alvo mudou: ${url}`;
+
+// Os links cujo alvo mudou e cujo texto não está todo marcado já. `links`: [{texto: [de, até],
+// alvo: [de, até], url}]; `faixas`: as faixas mudadas, [de, até) — uma vazia é um ponto, o que
+// só o outro lado tem, e conta se cair dentro do alvo.
+export function alvosMudados(links, faixas) {
+  const out = [];
+  for (const { texto: [a, b], alvo: [c, d], url } of links) {
+    const tocado = faixas.some(([x, y]) => (x === y ? x > c && x < d : x < d && y > c));
+    if (!tocado) continue;
+    let coberto = true;
+    for (let k = a; k < b && coberto; k++) coberto = faixas.some(([x, y]) => k >= x && k < y);
+    if (!coberto) out.push({ de: a, ate: b, url });
+  }
+  return out;
+}
+
 // As faixas mudadas deste lado, em posições do documento — as mesmas que a MergeView marca.
+// Com `pontos`, também as vazias: o que este lado não tem e o outro tem.
 // Um editor fora de uma MergeView não tem faixas.
-export function faixasDoLado(state) {
+export function faixasDoLado(state, pontos = false) {
   const r = getChunks(state);
   if (!r || !r.side) return [];
   const a = r.side === 'a', out = [];
@@ -44,7 +76,7 @@ export function faixasDoLado(state) {
     const ini = a ? ch.fromA : ch.fromB;
     for (const c of ch.changes) {
       const de = ini + (a ? c.fromA : c.fromB), ate = ini + (a ? c.toA : c.toB);
-      if (ate > de) out.push([de, ate]);
+      if (ate > de || pontos) out.push([de, ate]);
     }
   }
   return out;
@@ -60,6 +92,7 @@ export function faixasDasLinhas(linhas, from, faixas) {
     for (const [a, b] of faixas) {
       const de = Math.max(a, ini), ate = Math.min(b, fim);
       if (ate > de) out.push([de - ini, ate - ini]);
+      else if (a === b && a > ini && a < fim) out.push([a - ini, a - ini]);   // um ponto
     }
     return out;
   });
@@ -67,11 +100,39 @@ export function faixasDasLinhas(linhas, from, faixas) {
 
 // Os trechos de uma célula em HTML: o Markdown inline de `inline`, com a marca por dentro da
 // formatação — ela fecha e reabre em volta de cada tag, então o HTML continua bem aninhado.
+// Um link cujo alvo mudou perde as marcas do alvo, e o texto dele vai entre ALVO_ABRE e
+// ALVO_FECHA, que `inline` troca pelo span com o título.
 export function celulaHTML(segs) {
-  const bruto = segs.map((s) => {
-    const t = s.t.replace(/[\uE000\uE001]/g, '');
-    return s.m ? ABRE + t + FECHA : t;
-  }).join('');
+  let texto = '';
+  const m = [], pontos = [];
+  for (const s of segs) {
+    if (s.t === '') { if (s.m) pontos.push(texto.length); continue; }
+    const t = s.t.replace(/[\uE000-\uE003]/g, '');
+    texto += t;
+    for (let k = 0; k < t.length; k++) m.push(!!s.m);
+  }
+  const links = [...texto.matchAll(/\[([^\]]+)\]\(([^)]+)\)/g)].map((x) => {
+    const de = x.index + 1, ate = de + x[1].length;
+    return { texto: [de, ate], alvo: [ate, x.index + x[0].length], url: x[2] };
+  });
+  const faixas = [...pontos.map((p) => [p, p])];
+  m.forEach((v, k) => { if (v) faixas.push([k, k + 1]); });
+  const abre = new Set(), fecha = new Set();
+  for (const l of alvosMudados(links, faixas)) {
+    const [c, d] = links.find((x) => x.texto[0] === l.de).alvo;
+    for (let k = c; k < d; k++) m[k] = false;
+    abre.add(l.de); fecha.add(l.ate);
+  }
+  let bruto = '', aberta = false;
+  for (let k = 0; k <= texto.length; k++) {
+    const borda = abre.has(k) || fecha.has(k);
+    if (aberta && (k === texto.length || !m[k] || borda)) { bruto += FECHA; aberta = false; }
+    if (fecha.has(k)) bruto += ALVO_FECHA;
+    if (abre.has(k)) bruto += ALVO_ABRE;
+    if (k === texto.length) break;
+    if (m[k] && !aberta) { bruto += ABRE; aberta = true; }
+    bruto += texto[k];
+  }
   let dentro = false, out = '';
   for (const peca of inline(bruto).split(/(<[^>]*>|[\uE000\uE001])/)) {
     if (peca === ABRE) { if (!dentro) out += MARCA; dentro = true; }
@@ -162,7 +223,8 @@ const foco = StateField.define({
 
 const OCULTAVEIS = new Set(['EmphasisMark', 'CodeMark', 'LinkMark', 'StrikethroughMark']);
 
-export function decorar(state, editavel) {
+// `mudadas`: as faixas mudadas deste lado, pontos incluídos — por padrão, as da MergeView.
+export function decorar(state, editavel, mudadas = faixasDoLado(state, true)) {
   const doc = state.doc;
   const arvore = ensureSyntaxTree(state, doc.length, 500) || syntaxTree(state);
   const ativo = editavel && state.field(foco, false) === true;
@@ -188,7 +250,6 @@ export function decorar(state, editavel) {
     juntas.add(q.to);
   }
   const blocos = [];                              // faixas que viraram grade
-  const mudadas = tabelas.length ? faixasDoLado(state) : [];
   for (const tb of tabelas) {
     if (ativo && cursor >= tb.from && cursor <= tb.to) continue;
     const l1 = doc.lineAt(tb.from), l2 = doc.lineAt(tb.to);
@@ -205,6 +266,7 @@ export function decorar(state, editavel) {
   };
   const esconder = (from, to) => { if (to > from && !numaGrade(from)) deco.push(Decoration.replace({}).range(from, to)); };
   const depoisEspaco = (to) => (doc.sliceString(to, to + 1) === ' ' ? to + 1 : to);
+  const links = [];                               // os de alvo escondido, para `alvosMudados`
 
   // 2ª passada: o resto.
   arvore.iterate({ enter: (n) => {
@@ -220,7 +282,14 @@ export function decorar(state, editavel) {
     else if (nome === 'CodeMark' && pai === 'FencedCode') { /* cercas: tratadas em FencedCode */ }
     else if (OCULTAVEIS.has(nome) && !ativa(n.from)) esconder(n.from, n.to);
     else if (nome === 'URL' && pai === 'Link' && !ativa(n.from)) esconder(n.from, n.to);
-    else if (nome === 'Link' && !numaGrade(n.from)) deco.push(Decoration.mark({ class: 'cm-link-texto' }).range(n.from, n.to));
+    else if (nome === 'Link' && !numaGrade(n.from)) {
+      deco.push(Decoration.mark({ class: 'cm-link-texto' }).range(n.from, n.to));
+      const url = n.node.getChild('URL'), marcas = n.node.getChildren('LinkMark');
+      if (url && marcas.length >= 2 && !ativa(url.from)) {
+        links.push({ texto: [marcas[0].to, marcas[1].from], alvo: [marcas[1].from, n.to],
+                     url: doc.sliceString(url.from, url.to) });
+      }
+    }
     else if (nome === 'QuoteMark' && !ativa(n.from)) esconder(n.from, depoisEspaco(n.to));
     else if (nome === 'Blockquote') {
       // Uma citação é marca só no formato exato; a primeira linha que for dá a cor da caixa.
@@ -250,6 +319,9 @@ export function decorar(state, editavel) {
       for (const l of [primeira, ultima]) if (!ativa(l.from)) deco.push(Decoration.line({ class: 'cm-cerca' }).range(l.from));
     }
   } });
+  for (const l of alvosMudados(links, mudadas)) {
+    deco.push(Decoration.mark({ class: ALVO_CLASSE, attributes: { title: tituloAlvo(l.url) } }).range(l.de, l.ate));
+  }
   return Decoration.set(deco, true);
 }
 

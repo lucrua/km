@@ -66,11 +66,12 @@ test('cell HTML marks the changed text and keeps formatting and escaping', () =>
   assert.equal(celulaHTML([{ t: '**a', m: true }, { t: 'b**', m: false }]),
                '<b><span class="cm-changedText">a</span>b</b>');
   assert.equal(celulaHTML([{ t: 'a \\| b', m: true }]), '<span class="cm-changedText">a | b</span>');
-  // Uma mudança só na URL de um link não some nem desequilibra o HTML.
+  // Uma mudança só na URL de um link marca o texto dele, sem desequilibrar o HTML.
   assert.equal(celulaHTML([{ t: '[texto](http://', m: false }, { t: 'x', m: true }, { t: ') fim', m: false }]),
-               '<span class="cm-link-texto">texto</span> fim');
+               '<span class="cm-link-texto cm-changedText cm-alvo-mudou" title="alvo mudou: http://x">texto</span> fim');
+  // Mudaram o texto e o alvo: o texto leva as duas marcas.
   assert.equal(celulaHTML([{ t: '[te', m: false }, { t: 'xto](http://x', m: true }, { t: ') fim', m: false }]),
-               '<span class="cm-link-texto">te<span class="cm-changedText">xto</span></span> fim');
+               '<span class="cm-link-texto cm-changedText cm-alvo-mudou" title="alvo mudou: http://x">te<span class="cm-changedText">xto</span></span> fim');
 });
 
 test('the table widget re-renders when its marks change', () => {

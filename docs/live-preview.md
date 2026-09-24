@@ -127,6 +127,14 @@ The marks sit inside the cell's formatting and are display only; the grid is red
 MergeView recomputes its chunks, so a word typed in a cell is marked when the cursor leaves the
 table. In the Código mode there is no grid and CodeMirror's own marks show.
 
+A change only inside a link's hidden target — the `](url)` part — would leave no visible mark,
+in prose or in a cell. So the link's visible text is marked instead (`cm-changedText
+cm-alvo-mudou`: a dotted underline, red or green by side, with ↗), and its `title` gives the
+URL of that side. A removal counts too: it is an empty range on that side. If the text is
+already wholly marked, nothing is added; where the URL is on screen (the cursor's line, the
+Código mode) the normal marks show. Only inline `[text](url)` links; references, footnotes and
+autolinks are left alone.
+
 ## The page
 
 - **Unchanged stretch:** one full-width editor.
