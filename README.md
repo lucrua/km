@@ -84,7 +84,7 @@ changes — a one-word fix and a new section are not "one" each.
 
 The text is edited in [CodeMirror](https://codemirror.net/) with a **live preview**, the
 model Obsidian uses: the editor always holds the file's exact bytes, and formatting is only
-a display layer. Headings, bold, links, lists, task boxes and the ⚠️ ❓ 🚫 boxes show
+a display layer. Headings, bold, links, lists, task boxes and the 📌 ❓ 💬 boxes show
 formatted, with their markers hidden except on the line with the cursor; a hard-wrapped
 paragraph reads as one flowing paragraph until you click into it. Nothing is rewritten on
 save — which is why a WYSIWYG editor was not used: it would rewrite the file and every save
@@ -104,10 +104,9 @@ removed.
 
 | | |
 |---|---|
-| **Aprovar** | the passage goes into the chancel |
-| **A validar…** | writes `> ❓ **a confirmar até …**` right after the passage, and chancels both: the half-chancel is a visible line, not a hidden state |
+| **Aprovar** | the passage goes into the chancel — with any mark written in it |
 | **Reverter** | puts the chancel's text back in the file |
-| **⚠️ · 🚫** | start a reservation after the passage, in the agreed form, for you to finish |
+| **📌 · ❓ · 💬** | write a [mark](#the-convention) right after the passage, as a block of its own, with `add your comment here` selected so what you type replaces it. Nothing is approved: the mark is your text, saved like any edit |
 
 On a long passage the actions **stay on screen** under the top bar while you scroll it, and
 leave with the passage.
@@ -116,8 +115,8 @@ The whole second column is always editable — click and type. The action column
 **Salvar no arquivo** when there is something to save; Ctrl+S saves, Esc discards. A save is
 located by what the text said, not by line number, so a line an agent inserted above does not
 make you write over someone else's paragraph; if your text is no longer in the file, the save
-is refused and the page shows what is there now. **⚠️ ❓ 🚫 at the top** insert a
-reservation at the cursor, on its own line.
+is refused and the page shows what is there now. **📌 ❓ 💬 at the top** insert a mark after
+the block the cursor is in, the same way.
 
 A block is identified by its content, never its position: a page that asks to approve a
 block after the file moved gets a refusal, not a different block.
@@ -132,16 +131,33 @@ window, and it dies with the window.
 
 ## The convention
 
-Reservations live **in the document**, as blockquotes, because a note only the tool can see
-is a note the next agent rewrites without knowing it existed:
+Marks live **in the document**, one line each, as a blockquote, because a note only the tool
+can see is a note the next agent rewrites without knowing it existed:
 
 ```markdown
-> ⚠️ **sem certeza** — enters the chancel and stays visible
-> ❓ **a confirmar até 2026-10-15** — a pending item with a date; reported once it passes
-> 🚫 **discordo** — blocks the chancel of this passage until it is resolved
+> ❓ **to_validate by 2026-10-01** — add your comment here
+> 💬 **comment** — add your comment here
+> 📌 **to_do · 2026-09-24** — add your comment here
 ```
 
-One ref and a writing convention, not a parallel store of comments. A caveat that
+| | for | the date |
+|---|---|---|
+| ❓ **to_validate** | something to confirm by a deadline | the deadline — the panel writes today + 7 days, local time; `km lint` reports it once passed |
+| 💬 **comment** | whoever reads the passage later | none |
+| 📌 **to_do** | an agent, to find and address | the day it was written |
+
+The forms are exact, so an agent can grep for them:
+
+```text
+^> ❓ \*\*to_validate by (\d{4}-\d{2}-\d{2})\*\* — (.+)$
+^> 📌 \*\*to_do · (\d{4}-\d{2}-\d{2})\*\* — (.+)$
+^> 💬 \*\*comment\*\* — (.+)$
+```
+
+— or run `km marcas`. A line in any other shape is an ordinary quote. No mark blocks a
+chancel: approving the passage takes its marks with it.
+
+One ref and a writing convention, not a parallel store of comments. A mark that
 **disappears** from a rewrite is flagged on its own, apart from ordinary edits, because that
 is the change designed to pass unnoticed.
 
@@ -157,13 +173,16 @@ km pendente --novos              # tracked files that never had a chancel
 km chancela regras.md --hunk 2   # change 2 into the ref; `--hunk 2.1` only its first block
 km chancela regras.md --all      # the file as it stands today
 km restore  regras.md --hunk 2.1 # put the chancelled text of that block back on disk
-km lint                          # 🚫 pending · ❓ past its date · ⚠️ caveat that vanished
+km lint                          # ❓ past its date · a mark still saying `add your comment here` · a mark that vanished
+km marcas                        # ❓ and 📌 in every Markdown file git knows; --todas adds 💬, --tipo, --json
 km quando   regras.md --trecho "colunas"   # when that passage last had a chancel
 km baseline regras.md            # the chancelled copy, for a diff's left-hand column
 km install-hooks                 # one line after every commit, saying where you stand
 ```
 
-`chancela`, `pendente` and `quando` also answer to `chancel`, `pending` and `when`.
+`chancela`, `pendente`, `marcas` and `quando` also answer to `chancel`, `pending`, `marks` and
+`when`. `km marcas` reads every Markdown file git knows about, tracked or not — a to-do is
+written for whoever passes by. `--json` gives `[{file, line, kind, date, text, overdue}]`.
 
 ## What git gives for free
 
@@ -178,9 +197,9 @@ km install-hooks                 # one line after every commit, saying where you
 ## In the editor
 
 The extension in [`vscode/`](vscode/) paints each passage in the gutter, puts in the
-Problems panel what moved since your chancel, what never had one, a caveat past its date and
-a caveat that vanished, and opens the diff against `km baseline`. The verdicts are the same
-ones, and they write the marks into the text.
+Problems panel what moved since your chancel, what never had one, a ❓ past its deadline and
+a mark that vanished, and opens the diff against `km baseline`. Approving and reverting are
+the same verdicts as the panel's; the marks are written in the panel.
 
 ## What it does not do
 

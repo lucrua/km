@@ -13,7 +13,7 @@ and the VS Code extension read the same state. The model is in [chancel.md](chan
 - **Deleting a passage that never had a chancel.** `restore` already reverts the hunk, which
   removes text an agent added; what is missing is the reason going somewhere other than the
   commit message.
-- **A wider `km lint`** — today it checks the caveat convention. Still to come: a broken
+- **A wider `km lint`** — today it checks the marks. Still to come: a broken
   link, a source that does not exist.
 - **The panel as cards.** One card per passage that needs a decision, with the sources next
   to it and an option to open a conversation from the card.
@@ -27,7 +27,7 @@ and the VS Code extension read the same state. The model is in [chancel.md](chan
 
 - **Deciding anything.** No LLM call, no network. The tool reports; a person chancels.
 - **Confidence scores.** A number invented for a passage is false precision; what carries
-  weight is the reservation written next to it.
+  weight is the mark written next to it.
 - **Locking and session coordination.** Editors already refuse stale writes, git already
   merges, and the panel shows both texts when the file moved under you.
 - **Being a document editor.** The only writes are the ones you ask for: `restore`, the
