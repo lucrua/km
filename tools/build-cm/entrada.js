@@ -7,4 +7,4 @@ export { defaultKeymap, history, historyKeymap, indentWithTab } from '@codemirro
 export { syntaxTree, ensureSyntaxTree, syntaxHighlighting, HighlightStyle } from '@codemirror/language';
 export { markdown, markdownLanguage } from '@codemirror/lang-markdown';
 export { tags } from '@lezer/highlight';
-export { MergeView } from '@codemirror/merge';
+export { MergeView, getChunks } from '@codemirror/merge';

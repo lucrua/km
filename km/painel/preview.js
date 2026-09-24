@@ -6,7 +6,7 @@
 // plain highlighting in a monospace font — the same text, every marker and line break shown.
 import { EditorView, Decoration, WidgetType, StateField, StateEffect, EditorState, Compartment,
          syntaxTree, ensureSyntaxTree, markdown, markdownLanguage, syntaxHighlighting,
-         HighlightStyle, tags } from '../vendor/cm.js';
+         HighlightStyle, tags, getChunks } from '../vendor/cm.js';
 import { quebrasOcultas } from './paragrafo.js';
 import * as tabela from './tabela.js';
 import { hoje, marcaDaLinha } from './marcas.js';
@@ -22,8 +22,65 @@ export function inline(t) {
     .replace(/`([^`]+)`/g, '<code>$1</code>')
     .replace(/\*\*([^*]+)\*\*|__([^_]+)__/g, (_, a, b) => `<b>${a || b}</b>`)
     .replace(/(^|[^*\w])\*([^*\s][^*]*)\*/g, '$1<i>$2</i>')
-    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '<span class="cm-link-texto">$1</span>')
+    // A URL some; uma marca que estava nela fica, vazia, para não desequilibrar a célula.
+    .replace(/\[([^\]]+)\]\(([^)]+)\)/g, (_, t, url) => `<span class="cm-link-texto">${t}</span>${url.replace(/[^\uE000\uE001]/g, '')}`)
     .replace(/\\\|/g, '|');
+}
+
+// As marcas da MergeView sobre a grade. Dentro da faixa que a grade substitui, as marcas de
+// palavra do CodeMirror (`.cm-changedText`) não aparecem; a grade as desenha nas células, com
+// a mesma classe, e o tema da MergeView pinta igual à prosa: riscado à esquerda, sublinhado
+// à direita. Só exibição: o texto do editor não muda.
+const ABRE = '\uE000', FECHA = '\uE001';
+const MARCA = '<span class="cm-changedText">';
+
+// As faixas mudadas deste lado, em posições do documento — as mesmas que a MergeView marca.
+// Um editor fora de uma MergeView não tem faixas.
+export function faixasDoLado(state) {
+  const r = getChunks(state);
+  if (!r || !r.side) return [];
+  const a = r.side === 'a', out = [];
+  for (const ch of r.chunks) {
+    const ini = a ? ch.fromA : ch.fromB;
+    for (const c of ch.changes) {
+      const de = ini + (a ? c.fromA : c.fromB), ate = ini + (a ? c.toA : c.toB);
+      if (ate > de) out.push([de, ate]);
+    }
+  }
+  return out;
+}
+
+// Faixas do documento → faixas de cada linha da tabela, em posições da linha.
+export function faixasDasLinhas(linhas, from, faixas) {
+  let p = from;
+  return linhas.map((l) => {
+    const ini = p, fim = p + l.length;
+    p = fim + 1;
+    const out = [];
+    for (const [a, b] of faixas) {
+      const de = Math.max(a, ini), ate = Math.min(b, fim);
+      if (ate > de) out.push([de - ini, ate - ini]);
+    }
+    return out;
+  });
+}
+
+// Os trechos de uma célula em HTML: o Markdown inline de `inline`, com a marca por dentro da
+// formatação — ela fecha e reabre em volta de cada tag, então o HTML continua bem aninhado.
+export function celulaHTML(segs) {
+  const bruto = segs.map((s) => {
+    const t = s.t.replace(/[\uE000\uE001]/g, '');
+    return s.m ? ABRE + t + FECHA : t;
+  }).join('');
+  let dentro = false, out = '';
+  for (const peca of inline(bruto).split(/(<[^>]*>|[\uE000\uE001])/)) {
+    if (peca === ABRE) { if (!dentro) out += MARCA; dentro = true; }
+    else if (peca === FECHA) { if (dentro) out += '</span>'; dentro = false; }
+    else if (peca.startsWith('<') && dentro) out += '</span>' + peca + MARCA;
+    else out += peca;
+  }
+  if (dentro) out += '</span>';
+  return out.split(MARCA + '</span>').join('');
 }
 
 class Texto extends WidgetType {
@@ -42,9 +99,15 @@ function controle(rotulo, titulo, fazer) {
   return b;
 }
 
-class Tabela extends WidgetType {
-  constructor(linhas, from, editavel) { super(); this.linhas = linhas; this.from = from; this.editavel = editavel; }
-  eq(o) { return o.from === this.from && o.editavel === this.editavel && o.linhas.join('\n') === this.linhas.join('\n'); }
+export class Tabela extends WidgetType {
+  // `realce`: por linha da tabela, as faixas mudadas em posições da linha.
+  constructor(linhas, from, editavel, realce = linhas.map(() => [])) {
+    super(); this.linhas = linhas; this.from = from; this.editavel = editavel; this.realce = realce;
+  }
+  eq(o) {
+    return o.from === this.from && o.editavel === this.editavel && o.linhas.join('\n') === this.linhas.join('\n')
+      && JSON.stringify(o.realce) === JSON.stringify(this.realce);
+  }
   ignoreEvent() { return true; }
   trocar(view, novas) {
     view.dispatch({ changes: { from: this.from, to: this.from + this.linhas.join('\n').length, insert: novas.join('\n') } });
@@ -59,10 +122,10 @@ class Tabela extends WidgetType {
     this.linhas.forEach((linha, i) => {
       if (i === 1) return;                                   // o separador não aparece
       const tr = document.createElement('tr');
-      tabela.celulas(linha).forEach((c, j) => {
+      tabela.segmentos(linha, this.realce[i]).forEach((segs, j) => {
         const td = document.createElement(i === 0 ? 'th' : 'td');
         const conteudo = document.createElement('span');
-        conteudo.innerHTML = inline(c);
+        conteudo.innerHTML = celulaHTML(segs);
         td.append(conteudo);
         td.addEventListener('mousedown', (e) => {           // clicar na célula abre o texto
           if (e.target.closest('.cm-tab-ctl') || !this.editavel) return;
@@ -125,11 +188,12 @@ export function decorar(state, editavel) {
     juntas.add(q.to);
   }
   const blocos = [];                              // faixas que viraram grade
+  const mudadas = tabelas.length ? faixasDoLado(state) : [];
   for (const tb of tabelas) {
     if (ativo && cursor >= tb.from && cursor <= tb.to) continue;
     const l1 = doc.lineAt(tb.from), l2 = doc.lineAt(tb.to);
     const linhas = doc.sliceString(l1.from, l2.to).split('\n');
-    deco.push(Decoration.replace({ widget: new Tabela(linhas, l1.from, editavel), block: true }).range(l1.from, l2.to));
+    deco.push(Decoration.replace({ widget: new Tabela(linhas, l1.from, editavel, faixasDasLinhas(linhas, l1.from, mudadas)), block: true }).range(l1.from, l2.to));
     blocos.push([l1.from, l2.to]);
   }
   const numaGrade = (pos) => blocos.some(([a, b]) => pos >= a && pos <= b);
@@ -191,7 +255,10 @@ export function decorar(state, editavel) {
 
 const campo = (editavel) => StateField.define({
   create: (s) => decorar(s, editavel),
+  // A MergeView troca as mudanças por um efeito dela, sem mudar o texto deste lado (quem
+  // digitou foi o outro, ou o diff ficou pronto depois): compara-se o valor, não o efeito.
   update: (valor, tr) => (tr.docChanged || tr.selection || tr.effects.some((e) => e.is(mudouFoco))
+    || getChunks(tr.state)?.chunks !== getChunks(tr.startState)?.chunks
     ? decorar(tr.state, editavel) : valor),
   provide: (f) => EditorView.decorations.from(f),
 });

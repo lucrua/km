@@ -119,6 +119,14 @@ The left editor of a change is read-only and has no cursor, so it is always form
 MergeView's marks sit on top: a tinted background on the changed chunk and marks on the words
 that differ.
 
+Inside a table shown as a grid the MergeView's word marks would be hidden under the widget, so
+the grid draws them itself: it reads the changed ranges of its side from the MergeView
+(`getChunks`) and wraps the changed text of each cell in the same `cm-changedText` class —
+struck through on the chancel side, underlined on today's, a new or removed row marked whole.
+The marks sit inside the cell's formatting and are display only; the grid is redrawn when the
+MergeView recomputes its chunks, so a word typed in a cell is marked when the cursor leaves the
+table. In the Código mode there is no grid and CodeMirror's own marks show.
+
 ## The page
 
 - **Unchanged stretch:** one full-width editor.

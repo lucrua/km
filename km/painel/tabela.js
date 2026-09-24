@@ -68,3 +68,29 @@ export function removerColuna(linhas, j) {
     return montar({ ...p, celulas: p.celulas.filter((_, k) => k !== j) });
   });
 }
+
+// Onde começa o texto de cada célula (o que `celulas` devolve) dentro da linha.
+function posicoes(linha) {
+  const p = partes(linha);
+  let pos = p.pre.length + (p.inicial ? 1 : 0);
+  return p.celulas.map((bruta) => {
+    const ini = pos + (bruta.length - bruta.trimStart().length);
+    pos += bruta.length + 1;
+    return { texto: bruta.trim(), ini };
+  });
+}
+
+// O texto de cada célula em trechos marcados ou não, dadas as faixas mudadas da linha em
+// posições da linha ([de, até), até exclusivo). Só para mostrar: nada aqui escreve na linha.
+export function segmentos(linha, faixas) {
+  return posicoes(linha).map(({ texto, ini }) => {
+    const out = [];
+    for (let k = 0; k < texto.length; k++) {
+      const pos = ini + k;
+      const m = faixas.some(([a, b]) => pos >= a && pos < b);
+      const ult = out[out.length - 1];
+      if (ult && ult.m === m) ult.t += texto[k]; else out.push({ t: texto[k], m });
+    }
+    return out;
+  });
+}
