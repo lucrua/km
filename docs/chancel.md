@@ -1,9 +1,5 @@
 # The chancel: a reviewed copy, kept in a git ref
 
-Status: **built, current.** Supersedes `docs/blocks.md`, which stored review state per
-block; git history keeps it. Written 2026-09-22 from a working session and implemented the
-same day, with every number below measured on a real repository.
-
 ## What the chancel is
 
 **A copy of each tracked file, as you last endorsed it, stored in `refs/km/chancela`.**
@@ -14,15 +10,14 @@ Reviewing is comparing that copy with the file on disk. Approving a block means 
 that block into the copy. There is nothing else: no identity per block, no anchors, no
 hashes to maintain.
 
-Blocks were a storage decision wearing the costume of a model decision. In practice a
-"block" is whatever hunk the diff offered you at that moment, so granularity is an outcome
-of reviewing, not an input to it.
+Nothing is stored per passage because granularity is an outcome of reviewing, not an input
+to it: what you approve together is whatever the diff offered you at that moment.
 
 ## Why a ref and not a branch
 
-`refs/km/chancela` is written with plumbing — `hash-object`, `mktree`, `commit-tree`,
-`update-ref` — and is **never checked out**. Verified on the target repository: creating and
-advancing it left the current branch untouched and the working tree with zero changes.
+`refs/km/chancela` is written with plumbing — `hash-object`, a temporary index,
+`write-tree`, `commit-tree`, `update-ref` — and is **never checked out**: the current branch,
+the repository's index and the working tree are untouched.
 
 A branch would show up in `git branch`, invite a checkout, and tangle with the feature
 branches already in use. A ref under `refs/km/` is invisible to the normal flow, interferes
@@ -42,12 +37,12 @@ with no merge, and disappears with one command.
 All verified. The `-L` form is the important one: it answers a per-passage question with no
 per-passage storage, delimiting by the text of the heading rather than by any identifier.
 
-## The act is per block
+## What you approve
 
 The ref holds whole files; the gesture is per **Markdown block** — a paragraph, a list item,
 a table, a heading, a quote, a code fence. What lands in the ref is *the previous chancel plus
-the blocks you accepted* — `git add -p` semantics, at the grain prose actually has. Nobody
-needs to approve half a paragraph, and a line diff kept offering exactly that.
+the blocks you accepted* — `git add -p` semantics, at the grain prose actually has, where a
+line diff would cut through sentences.
 
 Less than a block is possible too: a selection over the new text takes only the changes
 inside it, decided word by word, with the spaces around each word travelling with it. The
@@ -99,66 +94,31 @@ see a fully endorsed passage.
 
 It is detectable: the chancelled copy **had** the mark, so its removal is a change like any
 other and shows in the diff. The reviewer decides, as with anything else. The tool's job is
-to make that specific change impossible to wave through — a removed ❓, 💬 or 📌 line gets
-its own flag in the review, separate from ordinary edits.
+to make that specific change impossible to wave through — a change that leaves a block
+without a kind of mark it had gets its own flag (*marca removida*) in the review and in
+`km lint`, separate from ordinary edits. Rewording a mark is an ordinary edit.
 
-## What this deletes from the current implementation
+## Moving a file
 
-- keys per block, heading paths, per-block hashes
-- re-anchoring, orphans, the fallback chain
-- the vouched body stored in `.km/` — the git blob is already content-addressed storage
-- `km baseline` assembling a document — becomes `git show refs/km/chancela:<file>`
+The ref is keyed by path. A plain `git mv` leaves the chancel under the old path: the moved
+file reads as never reviewed and the old one as a deletion to approve. `km mv <from> <to>`
+does the `git mv`, rewrites the entries of `.km/config.json` equal to or under `<from>`, and
+re-keys the ref's entries in one commit, blob for blob. The content is untouched, so a pure
+move leaves nothing to approve.
 
-Table canonicalisation survives, no longer to protect a hash but to let the diff ignore a
-cosmetic re-alignment.
+A passage moved to another file is not followed: it is new text in the destination and a
+removal in the source, reviewed as such.
 
-## The commands
+## Addresses move with the diff
 
-| | |
-|---|---|
-| `km pendente [<arquivo>]` | what changed since the chancel, and what never had one. `--json` feeds the editor |
-| `km chancela <arquivo> --hunk <n\|n.m\|título>` | write a change (`2`), one of its blocks (`2.1`) or every change in a section into the ref. Repeatable; `--all` takes the file as it is |
-| `km restore <arquivo> --hunk <n\|n.m\|título>` | put the chancelled text back on disk |
-| `km lint [<arquivo>]` | the convention: a ❓ past its deadline, a mark still saying `add your comment here`, a mark that vanished |
-| `km marcas` | the ❓ and 📌 in every Markdown file git knows (`--todas` adds 💬; `--json`) |
-| `km quando <arquivo> --trecho <título>` | when this passage last had a chancel (`git log -L`) |
-| `km baseline <arquivo>` | the chancelled copy, for a diff's left-hand column |
-| `km status --short` | the line after every commit: files in step, passages moved, files with no chancel |
+The commands are listed in the README's [command line](../README.md#the-command-line).
+`km pendente` numbers each change (`2`) and each of its blocks (`2.1`); those numbers come
+from the diff, and the diff moves when the ref does. After a partial chancel the command
+says so, and several `--hunk` in one call are applied against one listing.
 
-`chancela`, `pendente` and `quando` also answer to `chancel`, `pending` and `when`.
-
-Hunk numbers come from the diff, and the diff moves when the ref does: after a partial
-chancel the command says so, and several `--hunk` in one call are applied against one
-listing.
-
-`km serve` is where reviewing happens: a local page, started when you sit down and stopped
-with Ctrl-C. Unchanged text reads as one column at full width; each change is a row in three
-columns — the chancel (or any branch or commit) with what left struck, the file today with
-what arrived marked, and a verdict per block. The middle column is Markdown source,
-highlighted and always editable; a save is located by the text it replaces rather than by
-line number, and is refused, showing what is there now, if that text is gone. The canonical
-form that lets a re-aligned table count as unchanged decides what moved and never touches
-what is shown or written. Inside VS Code, one command starts it and opens it in the
-same window, bound to the window's lifetime.
-
-Both surfaces read the ref, not a ledger. The panel **writes the marks**: 📌 ❓ 💬 insert the
-agreed line with its placeholder selected, so the convention is the path of least resistance
-rather than something to remember.
-
-The claim queue that preceded this — parsing documents into claims, approving by hash,
-triage and conflicts — was removed in the same change. It answered a different question and
-having two models on screen was the confusion this design set out to end; git history keeps
-it, and `tools/migrar_ledger.py` (deleted with it) carried the block ledger into the ref.
-
-## Still open
-
-- **Deleting a passage that never had a chancel.** `km restore --hunk` on a pure addition
-  already removes it, because reverting the hunk is removing the text; `restore` only
-  refuses when the file has no chancel at all. What is still missing is the reason going
-  anywhere but the commit message.
-- **WYSIWYG.** Any serialising editor rewrites Markdown on save. With the chancel as text,
-  that shows up as a diff of the whole file rather than as silent loss — better than under
-  the hash model, still noisy. CodeMirror with live preview avoids it entirely.
+The panel, `km serve`, and the VS Code extension read the same ref; neither keeps a ledger
+of its own. How the panel edits without changing a byte is in
+[live-preview.md](live-preview.md).
 
 ## Measured, so nobody re-derives it
 

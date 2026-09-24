@@ -1,21 +1,9 @@
 # Live preview: editing that looks like the document
 
-Status: **built** (2026-09-23), on the branch `live-preview`.
-
-## Where this work happens
-
-In a separate git worktree, `~/knowledge-manager/.worktrees/live-preview`, on the branch
-`live-preview`. The author uses the current version every day — the panel on
-`127.0.0.1:8431`, the `km` on the PATH and the VS Code extension all run from `master` — so
-nothing here touches `master` until the author chooses to merge. The new version is tried on
-its own panel, started from the worktree on port **8451**.
-
 ## What this is for
 
 While editing in the panel, the text looks like formatted Markdown — typing `## Título`
-becomes a heading as you type — without the display ever changing a byte of the file. Today
-the second column is a `contenteditable` whose highlighting is computed by the server when
-the page loads, so nothing typed is formatted until it is saved.
+becomes a heading as you type — without the display ever changing a byte of the file.
 
 The constraint that decides everything: **the chancel is a byte copy, and the diff is the
 product.** A WYSIWYG editor (TipTap, Milkdown — ProseMirror underneath) parses Markdown into
@@ -30,10 +18,10 @@ break. So the editor must hold the source itself, and formatting must be a displ
 |---|---|
 | **CodeMirror 6 with a live-preview layer** — the model Obsidian uses | the document is always the exact source; formatting is decoration, so save, diff and partial approval see the file's bytes |
 | **Markers hidden off the cursor line** | reads like a document; the markers come back where you click, and are always in the file |
-| **Hard-wrapped paragraph lines joined** into one flowing paragraph, real breaks shown when the cursor enters it | reads like a document; *fallback:* if joining makes the cursor jump, misplaces a selection or misaligns the two columns and that is not fixed within half a day, ship the file's own lines instead and say so |
+| **Hard-wrapped paragraph lines joined** into one flowing paragraph, real breaks shown when the cursor enters it | reads like a document |
 | **Tables rendered as a grid** off the cursor, with **add/remove row and column** controls | the documents are table-heavy; a wide table becomes readable without horizontal scrolling; every control rewrites the table's source lines, so what you see is what is saved |
 | **The action column is sticky** within its change | on a long change you do not scroll back up for *Aprovar* |
-| **One editor per page segment; a MergeView per change** | unchanged text is one full-width editor; each change is CodeMirror's own side-by-side comparison, which aligns the columns and marks the difference live while you type — replacing the server-made diff and the ghost lines |
+| **One editor per page segment; a MergeView per change** | unchanged text is one full-width editor; each change is CodeMirror's own side-by-side comparison, which aligns the columns and marks the difference live while you type |
 
 ## Architecture
 
@@ -58,6 +46,8 @@ Served as static files from `km/painel/`:
 | `tabela.js` | pure functions over a table's source lines — parse cells, add/remove row, add/remove column |
 | `paragrafo.js` | pure function: the newline ranges inside paragraphs to show as spaces, given the cursor |
 | `editores.js` | creates the editors for the page's segments and connects them to save, dirty tracking, selection and marks |
+| `marcas.js` | the three marks' exact forms and the line each button inserts — pure |
+| `pontos.js` | converts CodeMirror's UTF-16 offsets to the server's code points — pure |
 
 The pure modules have no DOM and no CodeMirror imports, so they are tested with `node --test`.
 
@@ -65,8 +55,9 @@ The pure modules have no DOM and no CodeMirror imports, so they are tested with 
 
 `serve.segmentos` returns plain text, no HTML:
 
-- unchanged stretch: `{"tipo": "igual", "linha", "texto"}`;
-- change: `{"tipo": "mudanca", "n", "titulo", "linha", "antes", "agora", "unidades": [{sha, tipo, ini, fim}], "sumidas"}` — `antes` is the chancel's text of the passage, `agora` today's, and `unidades` the block offsets inside `agora`, as today.
+- unchanged stretch: `{"tipo": "igual", "linha", "texto", "n_linhas"}`;
+- change: `antes`, the chancel's text of the passage; `agora`, today's; `unidades`, each
+  block's `sha` and its offsets inside `agora`; and the marks it removes.
 
 ## The live preview
 
@@ -80,7 +71,7 @@ Off the cursor line:
 | `- item`, `1. item` | a bullet or the number, with the item's indentation |
 | `- [ ]` / `- [x]` | ☐ / ☑ — display only; click the line to change it |
 | `> quote` | a bar on the left, `>` hidden |
-| `> 📌 **to_do · …**` · `> ❓ **to_validate by …**` · `> 💬 **comment**` | blue, amber and neutral boxes — only in the exact form; an overdue ❓ highlights its date (local time) |
+| `> 📌 **to_do · …**` · `> ❓ **to_validate by …**` · `> 💬 …` | blue, amber and neutral boxes — only in the exact form; an overdue ❓ highlights its date (local time) |
 | fenced code | its own background, fence lines hidden |
 | `---` | a horizontal rule |
 
@@ -133,34 +124,17 @@ table. In the Código mode there is no grid and CodeMirror's own marks show.
 - **Change:** a MergeView, left read-only, right editable, and the action column.
 - **Sticky actions:** the action cell's contents stick just under the top bar while the change
   is on screen, and leave with it.
-- **Saving:** the same as today — *Salvar no arquivo* and Ctrl+S, the save located by the text
+- **Saving:** *Salvar no arquivo* and Ctrl+S, the save located by the text
   it replaces, the refusal that shows what is in the file now. Dirty means the editor's text
   differs from the original.
 - **Approving a selection:** the selection's offsets come from the right editor, and are turned
-  into "this part of this block" with the `unidades` offsets, as today.
+  into "this part of this block" with the `unidades` offsets.
 - **📌 ❓ 💬 at the cursor:** a transaction inserting the mark after the block the cursor is in,
   with one blank line before and after, and `add your comment here` selected.
 - **Undo:** Ctrl+Z inside an editor undoes text (CodeMirror's history). In the *Arquivos* view,
   Ctrl+Z still undoes the config.
 
-## What this removes
-
-- The `contenteditable` columns, the ghost lines and their read-back (`textoDaColuna`), and the
-  offset computation over the page (`deslocamento`).
-- The server-side highlighting and diff: `marcar`, `realcar`, `so_esquerda`, `_casar`,
-  `_palavras`, `realce_linha`, `realce_inline`, `_classe_da_linha`, and their tests.
-- The CSS that made tables scroll sideways.
-
 ## Tests
 
-1. **Pure modules, `node --test`:** table parsing with `\|`; add/remove row and column,
-   including the refusals (header, separator, last column); the paragraph newline ranges with
-   the cursor inside and outside.
-2. **Byte identity, in the browser:** for each tracked document of `demo-sla-project`, build the
-   editors, read their text back, and require it to be identical to the file — the test that
-   guards the chancel.
-3. **Browser checks:** `## Título` becomes a heading while typing; approving a selection writes
-   only that part; each table control writes the expected table; the action column sticks until
-   its change leaves the screen; a paragraph joins and opens on click without the cursor
-   jumping (else the fallback above).
-4. **Python:** segments carry plain text; the removed functions no longer exist.
+The pure modules — tables, paragraph ranges, marks, offsets — run under `node --test`
+(`tests/js/`), with the bundled CodeMirror for the live-preview decorations.

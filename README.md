@@ -40,6 +40,10 @@ on screen, are in the language they were written in.
    (`Ctrl+Alt+P`). The first time, the **Arquivos** tab is where you tick the files and folders
    to review; `km serve --port 8451` runs a second panel next to the first.
 
+6. **Working with AI agents:** point them to [docs/agents.md](docs/agents.md) — how to move
+   files, handle the marks and never approve for you. It ends with the three lines to paste
+   into a repository's `CLAUDE.md` or `AGENTS.md`.
+
 ## The chancel
 
 **A copy of each file, as you last endorsed it, kept in `refs/km/chancela`.** Reviewing is
@@ -126,8 +130,8 @@ Keyboard: `j` `k` move between changes, `a` approves the change in focus.
 **abrir no VS Code**, in the document header, runs `code <file>` (or `code -g <file>:<line>` at the change in focus) — under WSL, Windows VS Code in WSL mode; `code` must be on the PATH of whoever started `km serve`.
 
 The server does not stay up: you start it when you sit down to review. Inside VS Code, the
-command **km: abrir o painel da chancela** (`Ctrl+Alt+P`) starts it and opens it in the same
-window, and it dies with the window.
+command **km: abrir o painel da chancela** (`Ctrl+Alt+P`) starts it and opens it in your
+default browser, and it dies with the window.
 
 ## The convention
 
@@ -173,6 +177,7 @@ km pendente --novos              # tracked files that never had a chancel
 km chancela regras.md --hunk 2   # change 2 into the ref; `--hunk 2.1` only its first block
 km chancela regras.md --all      # the file as it stands today
 km restore  regras.md --hunk 2.1 # put the chancelled text of that block back on disk
+km mv docs guides                # git mv, and the chancel and the config entries follow; --dry-run
 km lint                          # ❓ past its date · a mark still saying `add your comment here` · a mark that vanished
 km marcas                        # ❓ and 📌 in every Markdown file git knows; --todas adds 💬, --tipo, --json
 km quando   regras.md --trecho "colunas"   # when that passage last had a chancel
@@ -181,8 +186,16 @@ km install-hooks                 # one line after every commit, saying where you
 ```
 
 `chancela`, `pendente`, `marcas` and `quando` also answer to `chancel`, `pending`, `marks` and
-`when`. `km marcas` reads every Markdown file git knows about, tracked or not — a to-do is
+`when`; `mv` answers to `mover`. `km marcas` reads every Markdown file git knows about, tracked or not — a to-do is
 written for whoever passes by. `--json` gives `[{file, line, kind, date, text, overdue}]`.
+
+**Moving a reviewed file is `km mv`, not `git mv`.** The chancel is keyed by path: after a
+plain `git mv` the file reads as never reviewed and the old path as a deletion. `km mv
+<from> <to>` takes a file or a folder, runs `git mv`, rewrites the entries of
+`.km/config.json` equal to or under `<from>`, and re-keys the chancel in one commit on the
+ref. The content is untouched, so a pure move leaves nothing to approve; edits not yet
+committed move along and stay pending. A move never untracks a file. It refuses `..`,
+absolute paths, a destination that exists, and a source git does not know.
 
 ## What git gives for free
 
@@ -210,8 +223,8 @@ The extension in [`vscode/`](vscode/), on a Markdown file the chancel covers:
 ## What it does not do
 
 - It decides nothing. No LLM call, no network, no telemetry.
-- It does not write in your documents except when you ask: `restore`, the marks, and editing
-  a passage in the panel.
+- It does not write in your documents except when you ask: `restore`, `mv`, the marks, and
+  editing a passage in the panel.
 - It does not lock or coordinate sessions. Concurrency is handled where it already is: the
   editor refuses stale writes, git merges, and the panel shows both texts when the file
   moved under you.
@@ -224,6 +237,8 @@ recipe to rebuild it is in [tools/build-cm/](tools/build-cm/README.md). Installi
 
 ## Documentation
 
+- [docs/agents.md](docs/agents.md) — the guide to hand an AI agent working in a repository
+  km tracks.
 - [docs/chancel.md](docs/chancel.md) — the model, with the measurements behind it.
 - [docs/tracked-files.md](docs/tracked-files.md) — which documents the chancel covers.
 - [docs/live-preview.md](docs/live-preview.md) — how the panel edits without changing a byte.
