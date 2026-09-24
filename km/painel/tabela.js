@@ -81,15 +81,20 @@ function posicoes(linha) {
 }
 
 // O texto de cada célula em trechos marcados ou não, dadas as faixas mudadas da linha em
-// posições da linha ([de, até), até exclusivo). Só para mostrar: nada aqui escreve na linha.
+// posições da linha ([de, até), até exclusivo). Uma faixa vazia é um ponto — o que este lado
+// não tem e o outro tem — e vira um trecho vazio marcado, no seu lugar, dentro da célula.
+// Só para mostrar: nada aqui escreve na linha.
 export function segmentos(linha, faixas) {
+  const pontos = faixas.filter(([a, b]) => a === b).map(([a]) => a);
   return posicoes(linha).map(({ texto, ini }) => {
     const out = [];
-    for (let k = 0; k < texto.length; k++) {
+    for (let k = 0; k <= texto.length; k++) {
       const pos = ini + k;
+      if (k > 0 && k < texto.length && pontos.includes(pos)) out.push({ t: '', m: true });
+      if (k === texto.length) break;
       const m = faixas.some(([a, b]) => pos >= a && pos < b);
       const ult = out[out.length - 1];
-      if (ult && ult.m === m) ult.t += texto[k]; else out.push({ t: texto[k], m });
+      if (ult && ult.m === m && ult.t !== '') ult.t += texto[k]; else out.push({ t: texto[k], m });
     }
     return out;
   });
