@@ -104,7 +104,34 @@ def atual(root: Path, rel: str) -> str | None:
 
 
 def escrever(root: Path, mudancas: dict[str, str | None], mensagem: str) -> str:
-    """Advance the ref, with plumbing only.
+    """Advance the ref, with plumbing only: each path gets this text, or leaves (None)."""
+    def aplicar(env: dict) -> None:
+        for rel, texto in mudancas.items():
+            if texto is None:
+                _ok(root, "update-index", "--force-remove", "--", rel, env=env)
+                continue
+            sha = _ok(root, "hash-object", "-w", "--stdin", entrada=texto).strip()
+            _ok(root, "update-index", "--add", "--cacheinfo",
+                f"100644,{sha},{rel}", env=env)
+    return _avancar(root, aplicar, mensagem)
+
+
+def mover(root: Path, pares: dict[str, str], mensagem: str) -> str:
+    """Re-key chancelled files to new paths, in one commit on the ref.
+
+    The blob is carried as it is, not read and written back as text, so the chancel of a
+    moved file is byte for byte the chancel it had.
+    """
+    def aplicar(env: dict) -> None:
+        for de, para in pares.items():
+            sha = _ok(root, "rev-parse", f"{REF}:{de}").strip()
+            _ok(root, "update-index", "--force-remove", "--", de, env=env)
+            _ok(root, "update-index", "--add", "--cacheinfo", f"100644,{sha},{para}", env=env)
+    return _avancar(root, aplicar, mensagem)
+
+
+def _avancar(root: Path, aplicar, mensagem: str) -> str:
+    """A commit on the ref: its tree, changed by `aplicar`, with the previous one as parent.
 
     A temporary index file is used so that the repository's own index — which a routine
     `git add -A` from another session can forge — is never involved.
@@ -119,13 +146,7 @@ def escrever(root: Path, mudancas: dict[str, str | None], mensagem: str) -> str:
         if existe(root):
             _ok(root, "read-tree", REF, env=env)
             pais = ["-p", REF]
-        for rel, texto in mudancas.items():
-            if texto is None:
-                _ok(root, "update-index", "--force-remove", "--", rel, env=env)
-                continue
-            sha = _ok(root, "hash-object", "-w", "--stdin", entrada=texto).strip()
-            _ok(root, "update-index", "--add", "--cacheinfo",
-                f"100644,{sha},{rel}", env=env)
+        aplicar(env)
         arvore = _ok(root, "write-tree", env=env).strip()
         commit = _ok(root, "commit-tree", arvore, *pais, "-m", mensagem).strip()
         _ok(root, "update-ref", REF, commit)

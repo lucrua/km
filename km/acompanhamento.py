@@ -194,6 +194,34 @@ def desmarcar(cfg: dict, caminho: str, pasta: bool) -> dict:
     return normalizar(novo)
 
 
+def renomear(caminho: str, origem: str, destino: str) -> str:
+    """`caminho` after `origem` moves to `destino`: equal to it or under it follows it."""
+    if caminho == origem:
+        return destino
+    if caminho.startswith(origem + "/"):
+        return destino + caminho[len(origem):]
+    return caminho
+
+
+def mover(cfg: dict, origem: str, destino: str, pasta: bool, acompanhados: list[str]) -> dict:
+    """The config after `origem` moves to `destino`.
+
+    Every entry equal to or under `origem` takes the new prefix. A move never untracks: a
+    folder that was covered by a rule above it takes that rule along as its own, and a
+    document tracked before (`acompanhados`, old paths) that the new place would leave out
+    is listed on its own. A move into a tracked folder is taken by that folder's rule,
+    as any new file there would be.
+    """
+    novo = {k: [renomear(p, origem, destino) for p in cfg[k]] for k in CHAVES}
+    if pasta and origem not in cfg["except"] and herdado(origem, cfg):
+        novo["folders"].append(destino)
+    for rel in acompanhados:
+        depois = renomear(rel, origem, destino)
+        if not decisao(depois, novo):
+            novo["files"].append(depois)
+    return normalizar(novo)
+
+
 def rotulo(root: Path, antes: dict, depois: dict, caminho: str, pasta: bool, marcou: bool) -> str:
     """One line saying what the click did, in terms of files."""
     from . import chancela as ch

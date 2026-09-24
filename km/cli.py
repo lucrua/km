@@ -2,7 +2,7 @@
 
 The page (`km serve`) is the place to review; these commands are how the same thing is
 done in a terminal, and how a script or an agent reads the state. Only `restore` writes in
-a document, and only the chancel ref is ever advanced.
+a document, only `mv` moves one, and only the chancel ref is ever advanced.
 """
 
 from __future__ import annotations
@@ -365,6 +365,98 @@ def cmd_marcas(args) -> int:
     return 0
 
 
+def _relativo(arg: str) -> str:
+    """A repository-relative path, the way the config and the ref spell it."""
+    if Path(arg).is_absolute():
+        raise SystemExit(f"{arg}: o caminho tem que ser relativo à raiz do repositório")
+    partes = [p for p in arg.split("/") if p not in ("", ".")]
+    if ".." in partes:
+        raise SystemExit(f"{arg}: sem .. — o caminho é relativo à raiz do repositório")
+    if not partes:
+        raise SystemExit(f"{arg}: a raiz do repositório não se move")
+    return "/".join(partes)
+
+
+def cmd_mv(args) -> int:
+    """Move a file or a folder, and its chancel and its place in the config with it.
+
+    A plain `git mv` leaves the chancel under the old path: the moved file reads as never
+    reviewed and the old one as deleted. Here the content is not touched, so a pure move
+    leaves nothing to approve.
+    """
+    root = _root(args)
+    de, para = _relativo(args.origem), _relativo(args.destino)
+    if de == para:
+        raise SystemExit(f"{de}: mover um caminho para ele mesmo não faz nada")
+    if para.startswith(de + "/"):
+        raise SystemExit(f"{para} fica dentro de {de} — uma pasta não se move para dentro de si")
+    if (root / para).exists() or (root / para).is_symlink():
+        raise SystemExit(f"{para} já existe — o km mv não escreve por cima")
+    no_git = subprocess.run(["git", "ls-files", "--error-unmatch", "--", de], cwd=root,
+                            capture_output=True, text=True)
+    if no_git.returncode != 0:
+        raise SystemExit(f"{de} não está no git — o km mv usa `git mv`, para o histórico seguir"
+                         f" o arquivo; faça `git add {de}` antes")
+    na_ref = ch.arquivos(root)
+    ocupados = [r for r in na_ref if r == para or r.startswith(para + "/")]
+    if ocupados:
+        raise SystemExit(f"{para} ainda tem chancela guardada ({ocupados[0]}, apagado do disco)"
+                         f" — aprove a remoção no painel antes de mover algo para lá")
+    pasta = (root / de).is_dir()
+
+    cfg = ac.carregar(root)
+    acompanhados = [d for d in ac.documentos(root, cfg) if d == de or d.startswith(de + "/")]
+    novo_cfg = ac.mover(cfg, de, para, pasta, acompanhados)
+    antigo_cfg = ac.normalizar(cfg)
+    pares = {r: ac.renomear(r, de, para) for r in na_ref if r == de or r.startswith(de + "/")}
+    entram = [ac.renomear(c, de, para) for c in ac.candidatos(root)
+              if (c == de or c.startswith(de + "/")) and c not in acompanhados
+              and ac.decisao(ac.renomear(c, de, para), novo_cfg)]
+
+    print(f"{de} → {para}" + ("  (pasta)" if pasta else ""))
+    print(f"  git mv {de} {para}")
+    if novo_cfg != antigo_cfg:
+        print("  .km/config.json")
+        for chave in ac.CHAVES:
+            sai = [x for x in antigo_cfg[chave] if x not in novo_cfg[chave]]
+            entra = [x for x in novo_cfg[chave] if x not in antigo_cfg[chave]]
+            if sai or entra:
+                print(f"    {chave:<8} " + "  ".join([f"- {x}" for x in sai] + [f"+ {x}" for x in entra]))
+    elif not acompanhados:
+        print("  não acompanhado — .km/config.json não muda")
+    if pares:
+        print(f"  chancela: {len(pares)} arquivo(s) levados para o caminho novo")
+        for velho, novo in pares.items():
+            print(f"    {velho} → {novo}")
+    else:
+        print("  sem chancela — nada a levar no ref")
+    for rel in entram:
+        print(f"  {rel} passa a ser acompanhado, pela regra da pasta — sem chancela")
+
+    if args.dry_run:
+        print("simulação: nada foi escrito")
+        return 0
+
+    faltam = []
+    pai = (root / para).parent
+    while not pai.exists():
+        faltam.append(pai)
+        pai = pai.parent
+    for d in reversed(faltam):
+        d.mkdir()
+    r = subprocess.run(["git", "mv", "--", de, para], cwd=root, capture_output=True, text=True)
+    if r.returncode != 0:
+        for d in faltam:
+            d.rmdir()
+        raise SystemExit(f"git mv {de} {para}: {r.stderr.strip()}")
+    if novo_cfg != antigo_cfg:
+        ac.gravar(root, novo_cfg)
+    if pares:
+        ch.mover(root, pares, f"km mv {de} → {para}")
+    print("movido — o conteúdo não mudou, então não há nada novo a aprovar")
+    return 0
+
+
 def cmd_baseline(args) -> int:
     """The left-hand column: the document as you last endorsed it."""
     texto = ch.chancelado(_root(args), args.file)
@@ -464,6 +556,14 @@ def main(argv: list[str]) -> int:
     s.add_argument("--all", action="store_true")
     s.add_argument("-m", "--message", help="por que a mudança não serve")
     s.set_defaults(func=cmd_restore)
+
+    s = sub.add_parser("mv", aliases=["mover"],
+                       help="mover um arquivo ou pasta com git mv, levando a chancela e a"
+                            " configuração junto")
+    s.add_argument("origem", help="arquivo ou pasta, relativo à raiz do repositório")
+    s.add_argument("destino", help="o caminho novo; não pode existir")
+    s.add_argument("--dry-run", action="store_true", help="mostrar o que aconteceria, sem escrever")
+    s.set_defaults(func=cmd_mv)
 
     s = sub.add_parser("lint", help="a convenção das marcas: ❓ vencida, texto de exemplo, marca sumida")
     s.add_argument("file", nargs="?")

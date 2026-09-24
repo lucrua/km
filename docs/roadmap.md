@@ -4,9 +4,10 @@ Ordered by what unlocks the next thing. Nothing here is committed to a date.
 
 ## Now — the chancel
 
-`serve · pendente · chancela · restore · lint · quando · baseline`, over
-`refs/km/chancela`: a reviewed copy of each file, compared with `git diff`. The local panel
-and the VS Code extension read the same state. The model is in [chancel.md](chancel.md).
+`serve · pendente · chancela · restore · mv · lint · marcas · quando · baseline`, over
+`refs/km/chancela`: a reviewed copy of each file, compared with `git diff`, for the files
+chosen in the panel's *Arquivos* view. The local panel and the VS Code extension read the
+same state; agents follow [agents.md](agents.md). The model is in [chancel.md](chancel.md).
 
 ## Next
 
