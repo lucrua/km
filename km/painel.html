@@ -2,7 +2,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>km · chancela</title><style>
 /* Escuro por decisao, nao por preferencia do sistema: e onde o autor trabalha. */
-:root{color-scheme:dark;--bg:#0F1419;--card:#141B22;--ink:#DCE3EA;--mut:#8695A2;--rule:#232D36;--acc:#6EA8D8;
+:root{--h-topo:45px;--h-cab:29px;color-scheme:dark;--bg:#0F1419;--card:#141B22;--ink:#DCE3EA;--mut:#8695A2;--rule:#232D36;--acc:#6EA8D8;
 --ok:#7BC49A;--ok-bg:#16301F;--ace:#E0B463;--ace-bg:#2E2513;--neg:#E09A9A;--neg-bg:#331F1F;
 --val:#6EA8D8;--val-bg:#152433;--pend:#8695A2;--pend-bg:#1C242B}
 *{box-sizing:border-box}
@@ -22,8 +22,8 @@ border-bottom:1px solid var(--rule)}
 .recado.ruim{background:var(--neg-bg);color:var(--neg)}
 .corpo{display:flex;align-items:flex-start;--lado:248px}
 /* A régua da esquerda: a árvore dos arquivos revisados. A largura é --lado, que o divisor muda. */
-.lado{width:var(--lado);flex:0 0 var(--lado);padding:6px 0 16px;position:sticky;top:45px;
-max-height:calc(100vh - 45px);overflow:auto;overscroll-behavior:contain;scrollbar-width:thin;
+.lado{width:var(--lado);flex:0 0 var(--lado);padding:6px 0 16px;position:sticky;top:var(--h-topo);
+max-height:calc(100vh - var(--h-topo));overflow:auto;overscroll-behavior:contain;scrollbar-width:thin;
 scrollbar-color:var(--rule) transparent}
 .ramo{font-size:13px;line-height:24px}
 .ramo .no{display:flex;align-items:center;height:24px;position:relative;cursor:pointer;
@@ -50,7 +50,7 @@ font-variant-numeric:tabular-nums;letter-spacing:.01em}
 .ramo .est .ponto{display:inline-block;width:5px;height:5px;border-radius:50%;background:currentColor;margin-right:3px;vertical-align:1.5px}
 .ramo .nome .sep{color:var(--mut);padding:0 1px}
 /* O divisor entre a régua e o documento: um fio de 1px, com 7px de área para pegar. */
-.divisor{flex:0 0 1px;position:sticky;top:45px;height:calc(100vh - 45px);background:var(--rule);
+.divisor{flex:0 0 1px;position:sticky;top:var(--h-topo);height:calc(100vh - var(--h-topo));background:var(--rule);
 cursor:col-resize;z-index:3;outline:0;touch-action:none}
 /* Nada a revisar: sem régua, a mensagem toma a largura. */
 .corpo.sem-docs .lado,.corpo.sem-docs .divisor{display:none}
@@ -65,7 +65,7 @@ letter-spacing:.08em;color:var(--mut)}
    o que separa um trecho do outro e uma regua fina, nao um cartao. */
 .doc{flex:1;min-width:0;display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr) 196px;
 align-items:stretch}
-.cabgrade{position:sticky;top:45px;background:var(--bg);border-bottom:1px solid var(--rule);
+.cabgrade{position:sticky;top:var(--h-topo);background:var(--bg);border-bottom:1px solid var(--rule);
 padding:6px 14px;z-index:4}
 .cabgrade .abrir-code{font:inherit;margin-left:8px;padding:1px 7px;border-radius:5px;cursor:pointer;
 background:transparent;border:1px solid var(--rule);color:var(--mut)}
@@ -196,7 +196,7 @@ background:var(--ok-bg);color:var(--ok)}
 .col.mudanca-cm .cm-merge-b .cm-alvo-mudou{text-decoration-color:var(--ok)}
 .cm-alvo-mudou::after{content:'\2197';font-size:.75em;color:var(--mut);margin-left:1px}
 .col.mudanca-cm .cm-mergeView .cm-editor .cm-changedLine,.col.mudanca-cm .cm-mergeView .cm-editor .cm-deletedChunk{background:transparent}
-.grudado{position:sticky;top:46px;display:flex;flex-direction:column;gap:4px}
+.grudado{position:sticky;top:calc(var(--h-topo) + var(--h-cab) + 8px);display:flex;flex-direction:column;gap:4px}
 /* O projeto: o nome no topo troca de projeto; a lista mostra quanto falta em cada um. */
 .projeto{position:relative;display:inline-flex}
 .topo #repo{font-size:15px;font-weight:600;padding:2px 8px 2px 6px;border-color:transparent;
@@ -270,8 +270,10 @@ border:1px solid var(--ok-bg);background:var(--ok-bg);color:var(--ok)}
   <button onmousedown="event.preventDefault()" onclick="noCursor('comment')" title="comment — para quem ler depois">💬</button>
   <span style="width:10px"></span>
   <span class="q">comparar com</span><select id="base" onchange="trocarBase()"></select>
-  <button onclick="setVer('tudo')" id="v-tudo">texto inteiro</button>
-  <button onclick="setVer('mudou')" id="v-mudou">só as mudanças</button>
+  <span class="modo">
+    <button onclick="setVer('tudo')" id="v-tudo">texto inteiro</button>
+    <button onclick="setVer('mudou')" id="v-mudou">só as mudanças</button>
+  </span>
   <span class="modo" title="Formatado: o documento como se lê · Código: o Markdown como está no arquivo">
     <button onmousedown="event.preventDefault()" onclick="setModo(false)" id="m-formatado">Formatado</button>
     <button onmousedown="event.preventDefault()" onclick="setModo(true)" id="m-codigo">Código</button>
@@ -567,6 +569,7 @@ function salvarCel(chave){
   let out = `<span class="chip e-mexido">editado aqui</span>
     <button class="pri" onclick="salvar('${chave}')">Salvar no arquivo</button>
     <button onclick="descartar('${chave}')">Descartar</button>
+    ${botoesDeMarca(chave)}
     <div class="q">Ctrl+S salva · Esc descarta</div>`;
   if (conflito && conflito.chave === chave) {
     out += `<div class="nota"><b>esse texto mudou no arquivo</b>
@@ -595,10 +598,7 @@ function acoesDaMudanca(m){
   if (!naChancela()) return `<span class="chip e-pendente">${rotulo}</span>`;
   const js = esc(JSON.stringify(shas));
   // As marcas entram logo depois do trecho, como texto seu: nada é aprovado no clique.
-  const marcas = m.agora ? `<div class="marcas">
-      <button onmousedown="event.preventDefault()" onclick="marcaNaMudanca('${chave}','to_do')" title="to_do — para o agente">📌</button>
-      <button onmousedown="event.preventDefault()" onclick="marcaNaMudanca('${chave}','to_validate')" title="to_validate — com prazo">❓</button>
-      <button onmousedown="event.preventDefault()" onclick="marcaNaMudanca('${chave}','comment')" title="comment — para quem ler depois">💬</button></div>` : '';
+  const marcas = m.agora ? botoesDeMarca(chave) : '';
   return `<span class="chip ${m.geral==='saiu'?'e-negado':(m.geral==='novo'?'e-aprovado':'e-mexido')}">${rotulo}</span>
     <button class="pri" onclick="aprovar(${js})">${m.geral==='saiu'?'Aprovar a remoção':'Aprovar'}</button>
     <button onclick="abrirForm('${chave}','reverter',${js})">${m.geral==='saiu'?'Trazer de volta':'Reverter'}</button>
@@ -670,6 +670,7 @@ function desenhar(){
   }
   $('doc').innerHTML = html;
   montarEditores();
+  medirCabecalho();
   if (desenhado === d.file) scrollTo(0, y);
   desenhado = d.file;
   const campo = $('f-texto');
@@ -722,10 +723,28 @@ function noCursor(tipo){
   if (!chave) { recado = '✕ clique no texto, onde a marca deve entrar, e depois no botão'; return desenhar(); }
   km.inserirMarca(chave, tipo);
 }
+// O que gruda no topo (a régua, a linha dos rótulos, os botões de cada mudança) fica logo
+// abaixo do que já está grudado: a barra quebra em duas linhas em tela estreita, então a altura
+// é medida, não fixa.
+function medirCabecalho(){
+  const raiz = document.documentElement.style, cab = document.querySelector('.cabgrade');
+  // Para baixo: a linha de baixo encosta por baixo da de cima em vez de deixar uma fresta
+  // de fração de pixel por onde o texto aparece.
+  raiz.setProperty('--h-topo', Math.floor(document.querySelector('.topo').getBoundingClientRect().height) + 'px');
+  if (cab) raiz.setProperty('--h-cab', Math.floor(cab.getBoundingClientRect().height) + 'px');
+}
+new ResizeObserver(medirCabecalho).observe(document.querySelector('.topo'));
+
+// No trecho em que você está escrevendo, a marca entra onde está o cursor; num trecho em que
+// você não clicou, depois do trecho.
 function marcaNaMudanca(chave, tipo){
-  km.focarFim(chave);
+  if (km.focado() !== chave) km.focarFim(chave);
   km.inserirMarca(chave, tipo);
 }
+const botoesDeMarca = (chave) => `<div class="marcas">
+      <button onmousedown="event.preventDefault()" onclick="marcaNaMudanca('${chave}','to_do')" title="to_do — para o agente">📌</button>
+      <button onmousedown="event.preventDefault()" onclick="marcaNaMudanca('${chave}','to_validate')" title="to_validate — com prazo">❓</button>
+      <button onmousedown="event.preventDefault()" onclick="marcaNaMudanca('${chave}','comment')" title="comment — para quem ler depois">💬</button></div>`;
 // ---- aprovar parte de um bloco ----------------------------------------------------
 // Como aceitar metade de um hunk numa revisão de código: selecione, na coluna do texto
 // de hoje, o pedaço cuja mudança você aceita. O resto do bloco continua pendente.
