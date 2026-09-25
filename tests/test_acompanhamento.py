@@ -389,10 +389,14 @@ class OrigemTest(unittest.TestCase):
         import threading
         from http.server import ThreadingHTTPServer
         from km import serve
-        self.dir = Path(tempfile.mkdtemp())
+        from km import projetos as pj
+        self.dir = Path(tempfile.mkdtemp()).resolve()
         git(self.dir, "init", "-q", "-b", "main")
-        serve.Handler.root, serve.Handler.by = self.dir, "t"
-        self.srv = ThreadingHTTPServer(("127.0.0.1", 0), serve.Handler)
+        ac.gravar(self.dir, ac.vazia())
+        pj.gravar(pj.carregar() + [str(self.dir)])
+        self.addCleanup(lambda: pj.gravar([c for c in pj.carregar() if c != str(self.dir)]))
+        handler = type("H", (serve.Handler,), {"by": "t"})
+        self.srv = ThreadingHTTPServer(("127.0.0.1", 0), handler)
         self.porta = self.srv.server_address[1]
         threading.Thread(target=self.srv.serve_forever, daemon=True).start()
 
@@ -404,8 +408,8 @@ class OrigemTest(unittest.TestCase):
     def post(self, **cabecalhos):
         import urllib.request, urllib.error
         req = urllib.request.Request(f"http://127.0.0.1:{self.porta}/api/arquivos",
-                                     data=json.dumps({"caminho": "a.md", "pasta": False, "marcar": True,
-                                                      "sha": ac.sha_config(ac.vazia())}).encode(),
+                                     data=json.dumps({"projeto": self.dir.name, "caminho": "a.md", "pasta": False,
+                                                      "marcar": True, "sha": ac.sha_config(ac.vazia())}).encode(),
                                      headers=cabecalhos, method="POST")
         try:
             return urllib.request.urlopen(req).status
@@ -416,7 +420,7 @@ class OrigemTest(unittest.TestCase):
         self.assertEqual(self.post(**{"Content-Type": "application/json",
                                       "Origin": "http://mal.example"}), 403)
         self.assertEqual(self.post(**{"Content-Type": "text/plain"}), 403)
-        self.assertFalse((self.dir / ".km" / "config.json").exists())
+        self.assertEqual(ac.carregar(self.dir), ac.vazia())
 
     def test_the_panel_through_a_forwarded_port_can(self):
         self.assertEqual(self.post(**{"Content-Type": "application/json", "Host": "localhost:9999",
