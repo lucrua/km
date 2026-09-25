@@ -36,49 +36,67 @@ function porta() {
   return vscode.workspace.getConfiguration('km').get('port') || 8431;
 }
 
-// Responde, e responde sobre ESTE repositorio: um painel de outra pasta na mesma porta
-// mostraria arquivos que nao sao os que voce esta olhando.
+// Quem responde nesta porta: o painel de projetos ('km'), nada (null) ou outra coisa
+// ('outro' — um programa qualquer, ou um km antigo, de um repositório só).
 function quemAtende(p) {
   return new Promise((ok) => {
-    const req = http.get({ host: '127.0.0.1', port: p, path: '/api/state' }, (res) => {
-      if (res.statusCode !== 200) { res.resume(); return ok(null); }
+    const req = http.get({ host: '127.0.0.1', port: p, path: '/api/projetos' }, (res) => {
       let corpo = '';
       res.on('data', (d) => { corpo += d; });
-      res.on('end', () => { try { ok(JSON.parse(corpo).root || ''); } catch (e) { ok(null); } });
+      res.on('end', () => {
+        try { ok(res.statusCode === 200 && Array.isArray(JSON.parse(corpo).projetos) ? 'km' : 'outro'); }
+        catch (e) { ok('outro'); }
+      });
     });
     req.on('error', () => ok(null));
-    req.setTimeout(1500, () => { req.destroy(); ok(null); });
+    req.setTimeout(1500, () => { req.destroy(); ok('outro'); });
   });
 }
 
+// O repositório desta pasta entra na lista do painel (se usa o km), e o painel abre nele.
+// Um servidor só atende todos os projetos: se já há um na porta, esta janela só abre a URL.
 async function abrirPainel() {
   const uri = arquivoAtivo();
   const pasta = (uri && vscode.workspace.getWorkspaceFolder(uri))
     || (vscode.workspace.workspaceFolders || [])[0];
   if (!pasta) { vscode.window.showWarningMessage('km: abra uma pasta primeiro'); return; }
   const dir = pasta.uri.fsPath;
-  const inicial = porta();
+  let topo = null;
+  try {
+    topo = cp.execFileSync('git', ['rev-parse', '--show-toplevel'], { cwd: dir, encoding: 'utf8' }).trim();
+  } catch (e) { topo = null; }
 
+  let nome = null;
+  if (topo && fs.existsSync(path.join(topo, '.km', 'config.json'))) {
+    try { nome = JSON.parse(km(['projects', 'add', topo, '--json'], topo)).nome; }
+    catch (e) { vscode.window.showErrorMessage('km: ' + ((e.stderr || '').trim() || e.message)); return; }
+  } else {
+    vscode.window.showInformationMessage(
+      'km: esta pasta ainda não usa o km — no painel, aba Projetos, adicione-a com "km init se ainda não tiver".');
+  }
+
+  const inicial = porta();
   let p = null, jaEsta = false;
   for (let tentativa = 0; tentativa < 10; tentativa++) {
     const quem = await quemAtende(inicial + tentativa);
-    if (quem === null || quem === dir) { p = inicial + tentativa; jaEsta = quem === dir; break; }
+    if (quem === 'km' || quem === null) { p = inicial + tentativa; jaEsta = quem === 'km'; break; }
   }
   if (p === null) { vscode.window.showErrorMessage('km: não achei porta livre'); return; }
 
   if (!jaEsta) {
     const bin = vscode.workspace.getConfiguration('km').get('path')
       || path.join(os.homedir(), 'knowledge-manager', 'bin', 'km');
-    // Preso a esta janela de proposito: fechar o VS Code encerra o servidor, e ninguem
-    // fica com um processo esquecido escutando numa porta.
-    painel = cp.spawn(bin, ['serve', '--port', String(p)], { cwd: dir });
+    // Preso a esta janela de propósito: fechar o VS Code encerra o servidor — e com ele o
+    // painel de todos os projetos, também para as outras janelas que o usavam. Nelas, o
+    // próximo Ctrl+Alt+P sobe outro. Ninguém fica com um processo esquecido numa porta.
+    painel = cp.spawn(bin, ['serve', '--port', String(p)], { cwd: topo || dir });
     let erro = '';
     painel.stderr?.on('data', (d) => { erro += d; });
     painel.on('error', (e) => vscode.window.showErrorMessage('km: ' + e.message));
     let subiu = false;
     for (let i = 0; i < 25 && !subiu; i++) {
       await new Promise((r) => setTimeout(r, 150));
-      subiu = (await quemAtende(p)) === dir;
+      subiu = (await quemAtende(p)) === 'km';
     }
     if (!subiu) {
       vscode.window.showErrorMessage('km: o painel não subiu. ' + (erro.trim() || 'veja o comando `km serve` no terminal'));
@@ -87,8 +105,8 @@ async function abrirPainel() {
   }
   // O VS Code aqui roda no WSL e o navegador no Windows: asExternalUri encaminha a porta,
   // sem ele o 127.0.0.1 seria o do Windows e o painel nao apareceria.
-  const externo = await vscode.env.asExternalUri(
-    vscode.Uri.parse('http://127.0.0.1:' + p + '/'));
+  const externo = await vscode.env.asExternalUri(vscode.Uri.parse(
+    'http://127.0.0.1:' + p + '/' + (nome ? '?projeto=' + encodeURIComponent(nome) : '')));
   await vscode.env.openExternal(externo);
 }
 

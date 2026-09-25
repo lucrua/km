@@ -511,7 +511,7 @@ def run(port: int = 8431, by: str = "", inicial: Path | None = None, abrir: bool
             f"projetos registrados: abra {endereco}\n"
             f"ou suba outro nesta: km serve --port {port + 1}")
     n = len(pj.carregar())
-    print(f"km · {n} projeto(s)  ·  {endereco}  ·  Ctrl-C encerra")
+    print(f"km · {n} projeto(s)  ·  {endereco}  ·  Ctrl-C encerra", flush=True)
     if abrir:
         webbrowser.open(endereco)
     try:

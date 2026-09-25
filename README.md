@@ -32,13 +32,16 @@ on screen, are in the language they were written in.
 
    Then *Developer: Reload Window*.
 
-4. **In the repository you want to review, once:** `km init` writes `.km/config.json` with
+4. **In each repository you want to review, once:** `km init` writes `.km/config.json` with
    nothing tracked.
 
-5. **Open the panel** from inside that repository — `km serve`, then
-   <http://127.0.0.1:8431> — or, in VS Code, **km: abrir o painel da chancela**
-   (`Ctrl+Alt+P`). The first time, the **Arquivos** tab is where you tick the files and folders
-   to review; `km serve --port 8451` runs a second panel next to the first.
+5. **Start the panel once, for every repository** — `km serve`, then
+   <http://127.0.0.1:8431>. Started inside a repository that uses km, it adds it to your
+   list of projects and opens on it; add the others with `km projects add <path>` or in the
+   panel's **Projetos** view (its *km init se ainda não tiver* box does step 4 for you). In
+   VS Code, **km: abrir o painel da chancela** (`Ctrl+Alt+P`) adds the window's repository and
+   opens the panel on it. The first time, a project's **Arquivos** tab is where you tick the
+   files and folders to review. The model: [docs/projects.md](docs/projects.md).
 
 6. **Working with AI agents:** point them to [docs/agents.md](docs/agents.md) — how to move
    files, handle the marks and never approve for you. It ends with the three lines to paste
@@ -62,8 +65,19 @@ design: [docs/tracked-files.md](docs/tracked-files.md).
 ## The panel
 
 ```bash
-km serve          # binds 127.0.0.1:8431 — Ctrl-C ends it
+km serve          # binds 127.0.0.1:8431, from any folder — Ctrl-C ends it
 ```
+
+**One panel for every project.** The repository name at the left of the top bar is a
+switcher: it lists your projects with how much each has to approve (`12% a aprovar`, `em
+dia`) and changes the whole page — rail, summary, Arquivos — to the one you pick, asking
+first if you have text not yet saved. The address carries the project (`?projeto=<name>`),
+so a reload, a bookmark or the VS Code extension land on it, and the browser remembers the
+last one. The third view, **Projetos**, is the list: name, path, what is left and how many
+files each tracks; a row opens its project, **×** takes it off the list (the repository, its
+config and its chancel stay as they are), and a path at the bottom adds one — with *km init
+se ainda não tiver* ticked, a repository that never used km. The list lives in
+`~/.config/km/projects.json`; the rules are in [docs/projects.md](docs/projects.md).
 
 The document, whole, from top to bottom. **Text that did not change is just text**: one
 column, full width, no buttons — headings cut nothing. **Each change is one passage**:
@@ -138,8 +152,9 @@ Keyboard: `j` `k` move between changes, `a` approves the change in focus.
 **abrir no VS Code**, in the document header, runs `code <file>` (or `code -g <file>:<line>` at the change in focus) — under WSL, Windows VS Code in WSL mode; `code` must be on the PATH of whoever started `km serve`.
 
 The server does not stay up: you start it when you sit down to review. Inside VS Code, the
-command **km: abrir o painel da chancela** (`Ctrl+Alt+P`) starts it and opens it in your
-default browser, and it dies with the window.
+command **km: abrir o painel da chancela** (`Ctrl+Alt+P`) opens it on the window's
+repository in your default browser, starting it if no panel answers on the port; a server the
+extension started dies with that window — for every project.
 
 ## The convention
 
@@ -180,6 +195,9 @@ script or an agent reads the state.
 
 ```bash
 km init                          # creates .km/config.json with nothing tracked
+km projects                      # the projects the panel shows, and what each has to approve
+km projects add ~/repo [--init]  # add a repository root to the panel; --init runs km init first
+km projects rm repo              # take it off the list — the repository is not touched
 km pendente                      # what changed since the chancel, and what never had one
 km pendente --novos              # tracked files that never had a chancel
 km chancela regras.md --hunk 2   # change 2 into the ref; `--hunk 2.1` only its first block
@@ -194,7 +212,8 @@ km install-hooks                 # one line after every commit, saying where you
 ```
 
 `chancela`, `pendente`, `marcas` and `quando` also answer to `chancel`, `pending`, `marks` and
-`when`; `mv` answers to `mover`. `km marcas` reads every Markdown file git knows about, tracked or not — a to-do is
+`when`; `mv` answers to `mover`; `projects` (`add`, `rm`) to `projetos` (`adicionar`,
+`remover`). Every command except `projects` and `serve` works on the repository you are in. `km marcas` reads every Markdown file git knows about, tracked or not — a to-do is
 written for whoever passes by. `--json` gives `[{file, line, kind, date, text, overdue}]`.
 
 **Moving a reviewed file is `km mv`, not `git mv`.** The chancel is keyed by path: after a
@@ -225,8 +244,10 @@ The extension in [`vscode/`](vscode/), on a Markdown file the chancel covers:
   Markdown Editor, where the top line and the border cannot be drawn;
 - `Ctrl+Alt+K` approves or reverts the change under the cursor — the same verdicts as the
   panel's; a command opens the diff against `km baseline`;
-- `Ctrl+Alt+P`, the top line or the status bar starts `km serve` and opens the panel in your
-  default browser (from WSL, the port is forwarded). The marks are written in the panel.
+- `Ctrl+Alt+P`, the top line or the status bar adds the repository to the panel's projects
+  (when it has `.km/config.json`) and opens the panel on it in your default browser, starting
+  `km serve` if none answers on the port (from WSL, the port is forwarded). A server it
+  started lives as long as the window. The marks are written in the panel.
 
 ## What it does not do
 
@@ -249,6 +270,8 @@ recipe to rebuild it is in [tools/build-cm/](tools/build-cm/README.md). Installi
   km tracks.
 - [docs/chancel.md](docs/chancel.md) — the model, with the measurements behind it.
 - [docs/tracked-files.md](docs/tracked-files.md) — which documents the chancel covers.
+- [docs/projects.md](docs/projects.md) — one panel for every repository: the registry and its
+  rules.
 - [docs/live-preview.md](docs/live-preview.md) — how the panel edits without changing a byte.
 - [docs/roadmap.md](docs/roadmap.md) — what comes next, and what is deliberately out of
   scope.
@@ -257,4 +280,5 @@ recipe to rebuild it is in [tools/build-cm/](tools/build-cm/README.md). Installi
 
 The chancel is in use. Everything it holds lives in `refs/km/chancela` — `git update-ref -d
 refs/km/chancela` undoes it completely — and the only file written in the target repository
-is `.km/config.json`.
+is `.km/config.json`. The list of projects is yours, outside every repository:
+`~/.config/km/projects.json`.

@@ -41,6 +41,9 @@ to `pending`, `marks` and `chancel`.
    and discards whatever changed since, including other people's edits.
 5. **Never delete or rewrite a mark** except as this guide says for each kind.
 6. Leave `km serve` alone: do not start, stop or restart the author's panel.
+7. **Never edit the project registry** (`~/.config/km/projects.json`). Run
+   `km projects add <repository root>` only when the author tells you to — and never
+   `km projects rm`.
 
 ## Moving and renaming
 

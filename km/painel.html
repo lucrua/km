@@ -197,11 +197,69 @@ background:var(--ok-bg);color:var(--ok)}
 .cm-alvo-mudou::after{content:'\2197';font-size:.75em;color:var(--mut);margin-left:1px}
 .col.mudanca-cm .cm-mergeView .cm-editor .cm-changedLine,.col.mudanca-cm .cm-mergeView .cm-editor .cm-deletedChunk{background:transparent}
 .grudado{position:sticky;top:46px;display:flex;flex-direction:column;gap:4px}
+/* O projeto: o nome no topo troca de projeto; a lista mostra quanto falta em cada um. */
+.projeto{position:relative;display:inline-flex}
+.topo #repo{font-size:15px;font-weight:600;padding:2px 8px 2px 6px;border-color:transparent;
+display:inline-flex;align-items:center;gap:6px;max-width:320px}
+.topo #repo:hover,.topo #repo[aria-expanded=true]{border-color:var(--rule);background:var(--card)}
+.topo #repo .nome-p{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.topo #repo .seta-p{color:var(--mut);font-size:10px;font-weight:400}
+#menu-projetos{position:absolute;top:34px;left:0;z-index:30;min-width:300px;max-width:460px;display:flex;
+flex-direction:column;background:var(--card);border:1px solid var(--rule);border-radius:8px;padding:4px;
+box-shadow:0 8px 24px #0008}
+#menu-projetos button{display:flex;gap:14px;align-items:baseline;text-align:left;border:0;border-radius:5px;
+padding:6px 10px;background:transparent;color:var(--ink);cursor:pointer;font-size:13px}
+#menu-projetos button:hover,#menu-projetos button:focus-visible{background:var(--bg);outline:0}
+#menu-projetos button[aria-checked=true]{box-shadow:inset 2px 0 0 var(--acc)}
+#menu-projetos button[aria-checked=true] .nome-p{color:#F2F6FA;font-weight:600}
+#menu-projetos .nome-p{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#menu-projetos .sep{height:1px;background:var(--rule);margin:4px 2px}
+#menu-projetos .gerir{color:var(--mut)}
+.sit{font-size:12px;white-space:nowrap;font-variant-numeric:tabular-nums;color:var(--mut)}
+.sit.ace{color:var(--ace)}.sit.ok{color:color-mix(in srgb,var(--ok) 70%,var(--mut))}
+.sit.ruim{color:var(--neg)}.sit.mut{opacity:.75}
+.projetos{padding:12px 18px 60px;max-width:1100px}
+.lista-p{display:flex;flex-direction:column;font-size:13px}
+.lista-p .linha-p{display:grid;grid-template-columns:minmax(0,1fr) 170px 90px 28px;gap:12px;align-items:center;
+padding:7px 10px;border-radius:5px;cursor:pointer;outline:0}
+.lista-p .linha-p:hover{background:var(--card)}
+.lista-p .linha-p:focus-visible{box-shadow:inset 0 0 0 1px var(--acc)}
+.lista-p .linha-p[aria-current=true]{background:var(--card);box-shadow:inset 2px 0 0 var(--acc)}
+.lista-p .cab-p{cursor:default;padding-top:0;padding-bottom:4px}
+.lista-p .cab-p:hover{background:transparent}
+.lista-p .cab-p .quantos{font-size:10px}
+.lista-p .quem{min-width:0;display:flex;flex-direction:column}
+.lista-p .quem b{color:#EDF2F7;font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.lista-p .onde{font:12px/1.4 ui-monospace,Menlo,monospace;color:var(--mut);overflow:hidden;text-overflow:ellipsis;
+white-space:nowrap;direction:rtl;text-align:left}
+.lista-p .quantos{color:var(--mut);font-size:12px;text-align:right;font-variant-numeric:tabular-nums}
+.lista-p .tirar{font:inherit;font-size:14px;line-height:1;width:24px;height:24px;border-radius:5px;cursor:pointer;
+border:1px solid transparent;background:transparent;color:var(--mut);visibility:hidden}
+.lista-p .linha-p:hover .tirar,.lista-p .tirar:focus-visible{visibility:visible}
+.lista-p .tirar:hover,.lista-p .tirar:focus-visible{border-color:var(--neg);color:var(--neg);outline:0}
+.vazio-p{padding:18px 10px;color:var(--mut)}
+.novo-p{margin-top:22px;padding-top:16px;border-top:1px solid var(--rule);display:flex;flex-wrap:wrap;gap:8px 12px;
+align-items:center}
+.novo-p .rot{flex-basis:100%}
+.novo-p input[type=text]{font:12.5px ui-monospace,Menlo,monospace;padding:5px 9px;border-radius:6px;min-width:0;
+flex:1 1 360px;max-width:560px;border:1px solid var(--rule);background:var(--bg);color:var(--ink)}
+.novo-p input[type=text]:focus{outline:0;border-color:var(--acc)}
+.novo-p label.caixa-p{color:var(--mut);font-size:12.5px;display:inline-flex;gap:6px;align-items:center;cursor:pointer}
+.novo-p button{font:inherit;font-size:12.5px;padding:4px 12px;border-radius:6px;cursor:pointer;
+border:1px solid var(--ok-bg);background:var(--ok-bg);color:var(--ok)}
+.novo-p .q{flex-basis:100%;font-family:system-ui,sans-serif}
+#erro-p{margin-top:10px;border-radius:6px;border:0}
+.vistas button[disabled]{opacity:.4;cursor:not-allowed}
 </style></head><body>
-<div class="topo"><b id="repo">km</b>
+<div class="topo"><div class="projeto">
+  <button id="repo" aria-haspopup="menu" aria-expanded="false" aria-controls="menu-projetos"
+    onclick="alternarMenuProjetos()" title="trocar de projeto"><span class="nome-p">km</span><span class="seta-p">▾</span></button>
+  <div id="menu-projetos" role="menu" aria-label="projetos" hidden></div>
+</div>
 <div class="vistas" role="tablist">
   <button role="tab" id="aba-revisar" aria-selected="true" onclick="mostrar('revisar')">Revisar</button>
   <button role="tab" id="aba-arquivos" aria-selected="false" onclick="mostrar('arquivos')">Arquivos</button>
+  <button role="tab" id="aba-projetos" aria-selected="false" onclick="mostrar('projetos')">Projetos</button>
 </div>
 <span class="n" id="resumo"></span>
 <div class="dir">
@@ -238,7 +296,20 @@ background:var(--ok-bg);color:var(--ok)}
   aria-label="largura da lista de arquivos" aria-valuemin="160"
   title="arraste para mudar a largura · duplo clique volta ao padrão"></div><main class="doc" id="doc"></main></div>
 <main id="arquivos" class="arquivos" hidden></main>
-<script type="module">import * as arvore from '/static/painel/arvore.js'; window.arvore = arvore;</script>
+<main id="projetos" class="projetos" hidden>
+  <div class="lista-p" id="lista-p" role="list" aria-label="projetos"></div>
+  <form class="novo-p" id="novo-p" onsubmit="adicionarProjeto(event)">
+    <span class="rot">adicionar um repositório</span>
+    <input type="text" id="p-caminho" placeholder="/caminho/do/repositório  ou  ~/repositório"
+      aria-label="caminho da raiz do repositório" autocomplete="off" spellcheck="false">
+    <label class="caixa-p"><input type="checkbox" id="p-init"> km init se ainda não tiver</label>
+    <button type="submit">Adicionar</button>
+    <span class="q">a raiz de um repositório git · sem km init, ele precisa já ter .km/config.json</span>
+  </form>
+  <div class="recado ruim" id="erro-p" hidden></div>
+</main>
+<script type="module">import * as arvore from '/static/painel/arvore.js'; import * as pjs from '/static/painel/projetos.js';
+window.arvore = arvore; window.pjs = pjs; window.dispatchEvent(new Event('modulos-prontos'));</script>
 <script type="module" src="/static/painel/editores.js"></script>
 <script>
 const $ = (id) => document.getElementById(id);
@@ -247,6 +318,9 @@ const kmPronto = new Promise((ok) => window.km ? ok() : window.addEventListener(
 const esc = s => (s==null?'':String(s)).replace(/[&<>"]/g,m=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[m]));
 const neg = s => esc(s).replace(/\*\*(.+?)\*\*/g, '<b>$1</b>');
 
+// O projeto selecionado (o nome que o servidor dá) e a lista; tudo abaixo age sobre ele.
+let P = null, Pcaminho = null, PROJETOS = [], INICIAL = null;
+const modulosProntos = new Promise((ok) => window.pjs ? ok() : window.addEventListener('modulos-prontos', ok, { once: true }));
 let D = null, doc = 0, ver = 'tudo', base = null, foco = null;
 let form = null, recado = '', conflito = null;
 // O texto que você escreveu e ainda não salvou, por pedaço da tela. Enquanto houver algo
@@ -259,18 +333,29 @@ const naChancela = () => !D || D.base === 'refs/km/chancela';
 const mesmo = (a, b) => (a||'').replace(/\s+$/, '') === (b||'').replace(/\s+$/, '');
 
 let carregando = false;
-async function carregar(arquivo){
-  if (carregando && !arquivo) return;   // um pedido de cada vez: não empilhar recargas
+async function carregar(arquivo, forcar){
+  if (carregando && !arquivo && !forcar) return;   // um pedido de cada vez: não empilhar recargas
   carregando = true;
   try { return await _carregar(arquivo); } finally { carregando = false; }
 }
+// Um POST que responde JSON, com o erro do servidor como frase.
+async function postar(url, corpo){
+  const r = await fetch(url, {method: 'POST', headers: {'Content-Type': 'application/json'}, body: JSON.stringify(corpo)});
+  const t = await r.text();
+  try { return JSON.parse(t); } catch (e) { return {ok: false, erro: `${r.status} ${t}`}; }
+}
 async function _carregar(arquivo){
+  if (!P) return;
   // Só o documento aberto vem com o texto; o resto é a régua lateral.
-  const q = new URLSearchParams();
+  const p = P, q = new URLSearchParams({projeto: P});
   if (base) q.set('base', base);
   const alvo = arquivo || (D && D.docs[doc] ? D.docs[doc].file : '');
   if (alvo) q.set('file', alvo);
-  const nova = await (await fetch('/api/state?' + q)).json();
+  const r = await fetch('/api/state?' + q);
+  // Trocou de projeto enquanto a resposta vinha: ela é do outro.
+  if (p !== P) return;
+  const nova = await r.json();
+  if (!r.ok) { recado = '✕ ' + (nova.erro || 'não deu'); desenharRecado(); return; }
   base = nova.base;
   const i = nova.docs.findIndex(d => d.file === alvo);
   const antigo = JSON.stringify(D), velho = D, docVelho = doc;
@@ -288,10 +373,8 @@ async function _carregar(arquivo){
 }
 
 async function agir(corpo){
-  const r = await fetch('/api/act', {method:'POST', headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({...corpo, file: D.docs[doc].file,
-                          base: naChancela() ? '' : base})});
-  const j = await r.json();
+  const j = await postar('/api/act', {...corpo, projeto: P, file: D.docs[doc].file,
+                                     base: naChancela() ? '' : base});
   if (j.estado) D = j.estado;
   recado = j.ok ? '✓ ' + (j.msg || 'feito') : '✕ ' + (j.erro || 'não deu');
   if (j.conflito) conflito = {chave: corpo.chave, atual: j.conflito.atual};
@@ -309,14 +392,14 @@ const achar = (n) => mudancas().find(m => m.n === n);
 // que você abriu ou fechou ficam como você deixou, também depois de recarregar.
 let ARVL = null, abertasL = new Set(), linhasL = [], focoL = null, atualL = null;
 let escolhas = {}, escolhasDe = null;
-const chaveEscolhas = () => 'km-lado-pastas:' + D.repo;
+const chaveEscolhas = () => 'km-lado-pastas:' + P;
 function gravarEscolhas(){ try { localStorage.setItem(chaveEscolhas(), JSON.stringify(escolhas)); } catch (e) {} }
 const SETA = '<svg viewBox="0 0 10 10" aria-hidden="true"><path d="M3.5 1.5 7 5l-3.5 3.5" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linecap="round" stroke-linejoin="round"/></svg>';
 
 function lado(){
   const A = window.arvore;
-  if (escolhasDe !== D.repo) {
-    escolhasDe = D.repo;
+  if (escolhasDe !== P) {
+    escolhasDe = P;
     try { escolhas = JSON.parse(localStorage.getItem(chaveEscolhas()) || '{}') || {}; } catch (e) { escolhas = {}; }
   }
   ARVL = A.montarArvore(D.docs);
@@ -538,10 +621,7 @@ function desenhar(){
   // lugar: destruir os editores encolhe a página e o navegador leva a rolagem para o topo.
   // A posição é lida antes de qualquer coisa ser destruída.
   const y = scrollY;
-  $('repo').textContent = D.repo;
-  // A aba diz o repositório primeiro: o ActivityWatch grava o título da janela, e o
-  // /activity da esteira cobra o tempo ao projeto que vem antes de ` · `. É contrato.
-  document.title = `${D.repo} · km chancela`;
+  desenharTopo();
   const em = D.docs.filter(d => d.rastreado && !d.pendente).length;
   const sem = D.docs.filter(d => !d.rastreado).length;
   $('resumo').textContent = `${D.docs.length} arquivos · ${em} em dia · `
@@ -605,9 +685,7 @@ function abrir(i){
 // O VS Code abre no arquivo, na linha da mudança em foco (j/k) se houver uma.
 async function abrirNoCode(){
   const m = foco && foco.startsWith('m:') ? achar(Number(foco.slice(2))) : null;
-  const r = await fetch('/api/abrir', {method:'POST', headers:{'Content-Type':'application/json'},
-    body: JSON.stringify({file: D.docs[doc].file, ...(m ? {line: m.linha} : {})})});
-  const j = r.ok ? await r.json() : {ok: false, erro: await r.text()};
+  const j = await postar('/api/abrir', {projeto: P, file: D.docs[doc].file, ...(m ? {line: m.linha} : {})});
   recado = j.ok ? '✓ ' + j.msg : '✕ ' + j.erro;
   // Só o recado muda: redesenhar tiraria o cursor de quem está no meio de um texto.
   const el = $('recado'); el.hidden = false; el.textContent = recado;
@@ -731,7 +809,7 @@ document.addEventListener('keydown', (e)=>{
 
 // O arquivo muda por fora: um agente escreve, o editor salva. A tela se atualiza sozinha
 // quando você não está no meio de escrever nada.
-setInterval(()=>{ if (vista === 'revisar' && !form && !temSujo()) carregar(); }, 8000);
+setInterval(()=>{ if (vista === 'revisar' && P && !form && !temSujo()) carregar(); }, 8000);
 // ---- a vista Arquivos --------------------------------------------------------------
 let vista = 'revisar', ARV = null, abertas = new Set(), focoArq = '.';
 // Os últimos 5 passos, e o que foi desfeito, para refazer. Vive na página: a árvore
@@ -739,19 +817,25 @@ let vista = 'revisar', ARV = null, abertas = new Set(), focoArq = '.';
 let passos = [], refeitos = [];
 
 function mostrar(v){
+  if (!P) v = 'projetos';                        // sem projeto, não há o que revisar
   vista = v;
-  $('aba-revisar').setAttribute('aria-selected', v === 'revisar');
-  $('aba-arquivos').setAttribute('aria-selected', v === 'arquivos');
+  for (const x of ['revisar', 'arquivos', 'projetos']) $('aba-' + x).setAttribute('aria-selected', v === x);
   $('so-revisar').hidden = v !== 'revisar';
   $('so-arquivos').hidden = v !== 'arquivos';
   $('resumo').hidden = v !== 'revisar';        // o resumo é da revisão; na árvore, cada linha diz o seu
   document.querySelector('.corpo').hidden = v !== 'revisar';
   $('arquivos').hidden = v !== 'arquivos';
-  if (v === 'arquivos') carregarArvore(); else carregar();
+  $('projetos').hidden = v !== 'projetos';
+  desenharTopo();
+  if (v === 'arquivos') carregarArvore(); else if (v === 'revisar') carregar(null, true); else abrirProjetos();
 }
 
 async function carregarArvore(){
-  ARV = await (await fetch('/api/arquivos')).json();
+  const p = P, r = await fetch('/api/arquivos?' + new URLSearchParams({projeto: P}));
+  if (p !== P) return;
+  const j = await r.json();
+  if (!r.ok) { recado = '✕ ' + (j.erro || 'não deu'); desenharRecado(); return; }
+  ARV = j;
   if (!abertas.size) abrirOndeHa(ARV.raiz);
   desenharArvore();
 }
@@ -834,8 +918,9 @@ function alternar(caminho){
 async function clicar(caminho){
   const n = acharNo(caminho); if (!n) return;
   focoArq = caminho;
-  const r = await (await fetch('/api/arquivos', {method: 'POST', headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({caminho, pasta: n.tipo === 'pasta', marcar: n.marcado !== 'sim', sha: ARV.sha})})).json();
+  const r = await postar('/api/arquivos', {projeto: P, caminho, pasta: n.tipo === 'pasta',
+                                         marcar: n.marcado !== 'sim', sha: ARV.sha});
+  if (!r.arvore) { recado = '✕ ' + r.erro; return desenharRecado(); }
   ARV = r.arvore;
   recado = r.ok ? '✓ ' + r.msg : '✕ ' + r.erro;
   if (r.ok) { passos.push(r.passo); passos = passos.slice(-5); refeitos = []; }
@@ -843,9 +928,8 @@ async function clicar(caminho){
 }
 
 async function trocar(config, esperado){
-  const r = await (await fetch('/api/arquivos/desfazer', {method: 'POST',
-    headers: {'Content-Type': 'application/json'}, body: JSON.stringify({config, esperado})})).json();
-  ARV = r.arvore;
+  const r = await postar('/api/arquivos/desfazer', {projeto: P, config, esperado});
+  if (r.arvore) ARV = r.arvore;
   if (!r.ok) { recado = '✕ ' + r.erro; passos = []; refeitos = []; }
   return r.ok;
 }
@@ -893,5 +977,171 @@ document.addEventListener('keydown', (e) => {
   else if (e.key === ' ') { e.preventDefault(); clicar(focoArq); }
 });
 
-carregar();
+// ---- os projetos -------------------------------------------------------------------
+// Um servidor para todos os projetos registrados. O selecionado vai na URL (?projeto=),
+// para recarregar, guardar nos favoritos e a extensão do VS Code abrirem nele, e fica
+// lembrado neste navegador para quando a URL não disser.
+function desenharTopo(){
+  $('repo').querySelector('.nome-p').textContent = P || 'km';
+  $('repo').title = P ? `${P} · trocar de projeto` : 'escolher um projeto';
+  $('aba-revisar').disabled = $('aba-arquivos').disabled = !P;
+  // A aba diz o repositório primeiro: o ActivityWatch grava o título da janela, e o
+  // /activity da esteira cobra o tempo ao projeto que vem antes de ` · `. É contrato.
+  if (window.pjs) document.title = pjs.tituloDaAba(P);
+}
+
+async function carregarProjetos(){
+  const j = await (await fetch('/api/projetos')).json();
+  if (j.erro) { recado = '✕ ' + j.erro; desenharRecado(); return; }
+  PROJETOS = j.projetos; INICIAL = j.inicial;
+  // Um projeto novo com o mesmo nome de pasta muda o nome deste (app → work/app): segue o caminho.
+  if (P && !PROJETOS.some(p => p.nome === P)) {
+    const mesmo = PROJETOS.find(p => p.caminho === Pcaminho);
+    if (mesmo) { P = mesmo.nome; lembrar(); desenharTopo(); } else desmarcarProjeto();
+  }
+}
+
+function lembrar(){
+  const u = new URL(location.href);
+  if (P) u.searchParams.set('projeto', P); else u.searchParams.delete('projeto');
+  history.replaceState(null, '', u);
+  try { P ? localStorage.setItem('km-projeto', P) : localStorage.removeItem('km-projeto'); } catch (e) {}
+}
+
+// Tudo que a tela guardava era do projeto anterior: a árvore, as edições, o desfazer.
+function esquecerProjeto(){
+  sujos = {}; originais = {}; conflito = null; form = null; foco = null; recado = '';
+  D = null; doc = 0; base = null; desenhado = null; atualL = null; focoL = null; escolhasDe = null;
+  ARV = null; abertas = new Set(); focoArq = '.'; passos = []; refeitos = [];
+  if (window.km && km.destruirTodos) km.destruirTodos();
+  $('doc').innerHTML = ''; $('lado').innerHTML = ''; $('resumo').textContent = ''; $('arquivos').innerHTML = '';
+  desenharRecado();
+}
+function desmarcarProjeto(){ P = null; Pcaminho = null; esquecerProjeto(); lembrar(); desenharTopo(); }
+
+function selecionar(nome, v){
+  esquecerProjeto();
+  P = nome; Pcaminho = (PROJETOS.find(p => p.nome === nome) || {}).caminho || null;
+  lembrar();
+  mostrar(v || (vista === 'arquivos' ? 'arquivos' : 'revisar'));
+}
+function trocarProjeto(nome, v){
+  fecharMenuProjetos();
+  if (nome === P) { if (v || vista === 'projetos') mostrar(v || 'revisar'); return; }
+  if (temSujo() && !confirm('Há texto editado e não salvo. Sair mesmo assim?')) return;
+  selecionar(nome, v);
+}
+
+// O menu no nome do projeto: a lista que já se tem aparece na hora, e se atualiza em seguida.
+function alternarMenuProjetos(){
+  const m = $('menu-projetos');
+  if (!m.hidden) return fecharMenuProjetos();
+  m.hidden = false; $('repo').setAttribute('aria-expanded', 'true');
+  desenharMenuProjetos();
+  (m.querySelector('[aria-checked="true"]') || m.querySelector('button'))?.focus();
+  carregarProjetos().then(() => { if (!m.hidden) desenharMenuProjetos(true); });
+}
+function fecharMenuProjetos(){
+  $('menu-projetos').hidden = true; $('repo').setAttribute('aria-expanded', 'false');
+}
+function desenharMenuProjetos(manterFoco){
+  const m = $('menu-projetos');
+  const focado = manterFoco && m.contains(document.activeElement) ? document.activeElement.dataset.projeto : null;
+  m.innerHTML = PROJETOS.map((p) => {
+    const s = pjs.situacao(p);
+    return `<button role="menuitemradio" aria-checked="${p.nome === P}" data-projeto="${esc(p.nome)}" title="${esc(p.caminho)}">
+      <span class="nome-p">${esc(p.nome)}</span><span class="sit ${s.classe}">${esc(s.texto)}</span></button>`;
+  }).join('') + `${PROJETOS.length ? '<div class="sep" role="separator"></div>' : ''}
+    <button role="menuitem" class="gerir" data-gerir="1">Gerenciar projetos…</button>`;
+  if (focado) m.querySelector(`[data-projeto="${CSS.escape(focado)}"]`)?.focus();
+}
+$('menu-projetos').addEventListener('click', (e) => {
+  const b = e.target.closest('button'); if (!b) return;
+  if (b.dataset.gerir) { fecharMenuProjetos(); mostrar('projetos'); }
+  else trocarProjeto(b.dataset.projeto);
+});
+$('menu-projetos').addEventListener('keydown', (e) => {
+  const itens = [...$('menu-projetos').querySelectorAll('button')], i = itens.indexOf(document.activeElement);
+  if (e.key === 'ArrowDown') { e.preventDefault(); itens[(i + 1) % itens.length].focus(); }
+  else if (e.key === 'ArrowUp') { e.preventDefault(); itens[(i - 1 + itens.length) % itens.length].focus(); }
+  else if (e.key === 'Escape') { e.preventDefault(); fecharMenuProjetos(); $('repo').focus(); }
+});
+document.addEventListener('mousedown', (e) => {
+  if (!$('menu-projetos').hidden && !e.target.closest('.projeto')) fecharMenuProjetos();
+});
+
+// ---- a vista Projetos --------------------------------------------------------------
+let erroP = '';
+async function abrirProjetos(){
+  desenharProjetos();
+  await carregarProjetos();
+  if (vista === 'projetos') desenharProjetos();
+}
+function desenharProjetos(){
+  const cab = `<div class="linha-p cab-p rot" role="presentation"><span>projeto</span><span>situação</span>
+    <span class="quantos">arquivos</span><span></span></div>`;
+  const linhas = PROJETOS.map((p) => {
+    const s = pjs.situacao(p);
+    return `<div class="linha-p" role="listitem" tabindex="0" data-projeto="${esc(p.nome)}" ${p.nome === P ? 'aria-current="true"' : ''}
+        title="abrir ${esc(p.nome)}">
+      <span class="quem"><b>${esc(p.nome)}</b><span class="onde" title="${esc(p.caminho)}"><bdi>${esc(p.caminho)}</bdi></span></span>
+      <span class="sit ${s.classe}">${esc(s.texto)}</span>
+      <span class="quantos">${p.erro ? '' : p.n}</span>
+      <button class="tirar" data-tirar="${esc(p.nome)}" title="tirar ${esc(p.nome)} da lista — o repositório fica como está"
+        aria-label="tirar ${esc(p.nome)} da lista">×</button></div>`;
+  }).join('');
+  $('lista-p').innerHTML = PROJETOS.length ? cab + linhas
+    : `<div class="vazio-p">Nenhum projeto ainda. Adicione a raiz de um repositório abaixo — ou rode
+       <code>km serve</code> dentro dele, que ele entra sozinho.</div>`;
+  const e = $('erro-p'); e.hidden = !erroP; e.textContent = erroP ? '✕ ' + erroP : '';
+  desenharTopo();
+}
+// Os nomes vêm de atributos, nunca de código montado com eles.
+$('lista-p').addEventListener('click', (e) => {
+  const x = e.target.closest('[data-tirar]');
+  if (x) { e.stopPropagation(); return removerProjeto(x.dataset.tirar); }
+  const l = e.target.closest('[data-projeto]');
+  if (l) trocarProjeto(l.dataset.projeto, 'revisar');
+});
+$('lista-p').addEventListener('keydown', (e) => {
+  const l = e.target.closest?.('.linha-p[data-projeto]');
+  if (l && e.target === l && (e.key === 'Enter' || e.key === ' ')) { e.preventDefault(); trocarProjeto(l.dataset.projeto, 'revisar'); }
+});
+async function adicionarProjeto(e){
+  e.preventDefault();
+  const campo = $('p-caminho'), caminho = campo.value.trim();
+  if (!caminho) { campo.focus(); return; }
+  const r = await postar('/api/projetos', {caminho, init: $('p-init').checked});
+  erroP = r.ok ? '' : r.erro;
+  if (!r.ok) { recado = ''; desenharRecado(); }   // o erro é deste pedido; o recado anterior sai
+  await carregarProjetos();
+  if (r.ok) {
+    campo.value = ''; $('p-init').checked = false;
+    if (!P) selecionar(r.nome, 'projetos');        // o primeiro projeto já fica escolhido
+    recado = '✓ ' + r.msg; desenharRecado();
+  }
+  desenharProjetos();
+}
+async function removerProjeto(nome){
+  if (!confirm(`Tirar ${nome} da lista de projetos?\n\nSó a lista muda: o repositório, o .km/config.json e a chancela ficam como estão.`)) return;
+  const r = await postar('/api/projetos/remover', {nome});
+  erroP = r.ok ? '' : r.erro;
+  recado = r.ok ? '✓ ' + r.msg : ''; desenharRecado();
+  if (r.ok && nome === P) desmarcarProjeto();
+  await carregarProjetos();
+  desenharProjetos();
+}
+
+async function iniciar(){
+  await modulosProntos;
+  await carregarProjetos();
+  let lembrado = null;
+  try { lembrado = localStorage.getItem('km-projeto'); } catch (e) {}
+  const {nome, aviso} = pjs.escolherInicial(PROJETOS, {param: new URLSearchParams(location.search).get('projeto'),
+                                                       lembrado, inicial: INICIAL});
+  if (nome) selecionar(nome, 'revisar');
+  else { lembrar(); mostrar('projetos'); }
+  if (aviso) { recado = '✕ ' + aviso; desenharRecado(); }
+}
+iniciar();
 </script></body></html>

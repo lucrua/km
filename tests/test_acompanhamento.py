@@ -372,9 +372,17 @@ class RevisaoFinalTest(RepoTest):
         # ActivityWatch reads the window title, and the esteira's /activity attributes the
         # time to the project named before ` · `. A title without the repo is time billed
         # to nobody.
+        # The name is the selected project's folder (tests/js/projetos.test.mjs), and the
+        # page sets it wherever the project or the view changes.
         pagina = (Path(__file__).parent.parent / "km" / "painel.html").read_text(encoding="utf-8")
         codigo = "\n".join(l for l in pagina.splitlines() if not l.strip().startswith("//"))
-        self.assertIn("document.title = `${D.repo} · ", codigo)
+        self.assertEqual(codigo.count("document.title ="), 1)
+        self.assertIn("document.title = pjs.tituloDaAba(P);", codigo)
+        corpo = lambda nome: codigo.split(f"function {nome}(", 1)[1].split("\n}", 1)[0]
+        self.assertIn("desenharTopo()", corpo("desenhar"))
+        self.assertIn("desenharTopo()", corpo("mostrar"))
+        modulo = (Path(__file__).parent.parent / "km" / "painel" / "projetos.js").read_text(encoding="utf-8")
+        self.assertIn("`${projeto.split('/').pop()} · km chancela`", modulo)
 
     def test_the_tree_never_puts_a_path_inside_a_js_string(self):
         pagina = (Path(__file__).parent.parent / "km" / "painel.html").read_text(encoding="utf-8")

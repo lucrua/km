@@ -45,7 +45,7 @@
         "km.port": {
           "type": "number",
           "default": 8431,
-          "description": "Porta do painel local (`km serve`). Ele sobe quando você abre o painel e morre com a janela."
+          "description": "Porta do painel local (`km serve`), um só para todos os projetos. Se nenhum painel responde nela, ele sobe quando você abre o painel e morre com a janela."
         }
       }
     },

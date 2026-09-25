@@ -498,7 +498,7 @@ def cmd_serve(args) -> int:
     if raiz is not None and (raiz / ac.KM_DIR / ac.CONFIG).exists():
         r = pj.adicionar(str(raiz))
         if r["novo"]:
-            print(f"registrado: {r['nome']}  ·  {r['caminho']}")
+            print(f"registrado: {r['nome']}  ·  {r['caminho']}", flush=True)
         inicial = raiz
     elif raiz is not None:
         print(f"{raiz.name} não usa o km (falta .km/config.json) — não entra no painel.\n"
