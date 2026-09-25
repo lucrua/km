@@ -557,6 +557,12 @@ def cmd_projects(args) -> int:
     return 0
 
 
+def cmd_boot(args) -> int:
+    """The panel starts with the machine: a generated systemd user unit, like the esteira's."""
+    from . import boot
+    return boot.executar(args.apply, args.port)
+
+
 def cmd_install_hooks(args) -> int:
     """So nothing has to be memorised: the repository tells you where it stands."""
     root = _root(args)
@@ -673,6 +679,12 @@ def main(argv: list[str]) -> int:
     s = sub.add_parser("baseline", help="o documento como você o chancelou (coluna da esquerda)")
     s.add_argument("file")
     s.set_defaults(func=cmd_baseline)
+
+    s = sub.add_parser("boot", help="o painel sobe com a máquina: a unidade systemd de usuário "
+                       "(sem --apply, só mostra)")
+    s.add_argument("--apply", action="store_true", help="escrever a unidade, ligar e (re)iniciar")
+    s.add_argument("--port", type=int, default=8431)
+    s.set_defaults(func=cmd_boot)
 
     sub.add_parser("install-hooks", help="uma linha depois de cada commit, dizendo onde você está"
                    ).set_defaults(func=cmd_install_hooks)

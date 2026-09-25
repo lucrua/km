@@ -94,4 +94,6 @@ next one.
 
 The server the extension starts **belongs to that window**: closing the window ends it — the
 panel of every project, also for other windows that were using it. In those, the next
-`Ctrl+Alt+P` starts a new one. A `km serve` started in a terminal lives until Ctrl-C.
+`Ctrl+Alt+P` starts a new one. A `km serve` started in a terminal lives until Ctrl-C. The one
+`km boot --apply` installs ([boot.md](boot.md)) starts with the machine and is found by the
+extension, which then never starts its own.

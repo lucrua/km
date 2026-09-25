@@ -15,7 +15,8 @@ on screen, are in the language they were written in.
    ```
 
 2. **Under WSL, put VS Code's `code` on the same PATH**, for the panel's *abrir no VS Code*
-   (adjust the Windows user name):
+   when you start `km serve` from a terminal (adjust the Windows user name; `km boot` in
+   step 5 finds it on its own):
 
    ```bash
    echo 'export PATH="$PATH:/mnt/c/Users/<you>/AppData/Local/Programs/Microsoft VS Code/bin"' >> ~/.bashrc
@@ -35,8 +36,10 @@ on screen, are in the language they were written in.
 4. **In each repository you want to review, once:** `km init` writes `.km/config.json` with
    nothing tracked.
 
-5. **Start the panel once, for every repository** — `km serve`, then
-   <http://127.0.0.1:8431>. Started inside a repository that uses km, it adds it to your
+5. **Start the panel with the machine, for every repository** — `km boot` shows what it would
+   do, `km boot --apply` installs it as a systemd user unit, like the esteira's; after
+   updating km, run `km boot --apply` again. Details: [docs/boot.md](docs/boot.md). Without
+   it, `km serve` in a terminal does the same until Ctrl-C. Then <http://127.0.0.1:8431>. Started inside a repository that uses km, it adds it to your
    list of projects and opens on it; add the others with `km projects add <path>` or in the
    panel's **Projetos** view (its *km init se ainda não tiver* box does step 4 for you). In
    VS Code, **km: abrir o painel da chancela** (`Ctrl+Alt+P`) adds the window's repository and
@@ -208,6 +211,7 @@ km lint                          # ❓ past its date · a mark still saying `add
 km marcas                        # ❓ and 📌 in every Markdown file git knows; --todas adds 💬, --tipo, --json
 km quando   regras.md --trecho "colunas"   # when that passage last had a chancel
 km baseline regras.md            # the chancelled copy, for a diff's left-hand column
+km boot [--apply]                # the panel starts with the machine (systemd user unit)
 km install-hooks                 # one line after every commit, saying where you stand
 ```
 
@@ -266,6 +270,7 @@ recipe to rebuild it is in [tools/build-cm/](tools/build-cm/README.md). Installi
 
 ## Documentation
 
+- [docs/boot.md](docs/boot.md) — the panel starting with the machine (`km boot`).
 - [docs/agents.md](docs/agents.md) — the guide to hand an AI agent working in a repository
   km tracks.
 - [docs/chancel.md](docs/chancel.md) — the model, with the measurements behind it.
