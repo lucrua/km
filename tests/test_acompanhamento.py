@@ -372,9 +372,17 @@ class RevisaoFinalTest(RepoTest):
         # ActivityWatch reads the window title, and the esteira's /activity attributes the
         # time to the project named before ` · `. A title without the repo is time billed
         # to nobody.
+        # The name is the selected project's folder (tests/js/projetos.test.mjs), and the
+        # page sets it wherever the project or the view changes.
         pagina = (Path(__file__).parent.parent / "km" / "painel.html").read_text(encoding="utf-8")
         codigo = "\n".join(l for l in pagina.splitlines() if not l.strip().startswith("//"))
-        self.assertIn("document.title = `${D.repo} · ", codigo)
+        self.assertEqual(codigo.count("document.title ="), 1)
+        self.assertIn("document.title = pjs.tituloDaAba(P);", codigo)
+        corpo = lambda nome: codigo.split(f"function {nome}(", 1)[1].split("\n}", 1)[0]
+        self.assertIn("desenharTopo()", corpo("desenhar"))
+        self.assertIn("desenharTopo()", corpo("mostrar"))
+        modulo = (Path(__file__).parent.parent / "km" / "painel" / "projetos.js").read_text(encoding="utf-8")
+        self.assertIn("`${projeto.split('/').pop()} · km chancela`", modulo)
 
     def test_the_tree_never_puts_a_path_inside_a_js_string(self):
         pagina = (Path(__file__).parent.parent / "km" / "painel.html").read_text(encoding="utf-8")
@@ -389,10 +397,14 @@ class OrigemTest(unittest.TestCase):
         import threading
         from http.server import ThreadingHTTPServer
         from km import serve
-        self.dir = Path(tempfile.mkdtemp())
+        from km import projetos as pj
+        self.dir = Path(tempfile.mkdtemp()).resolve()
         git(self.dir, "init", "-q", "-b", "main")
-        serve.Handler.root, serve.Handler.by = self.dir, "t"
-        self.srv = ThreadingHTTPServer(("127.0.0.1", 0), serve.Handler)
+        ac.gravar(self.dir, ac.vazia())
+        pj.gravar(pj.carregar() + [str(self.dir)])
+        self.addCleanup(lambda: pj.gravar([c for c in pj.carregar() if c != str(self.dir)]))
+        handler = type("H", (serve.Handler,), {"by": "t"})
+        self.srv = ThreadingHTTPServer(("127.0.0.1", 0), handler)
         self.porta = self.srv.server_address[1]
         threading.Thread(target=self.srv.serve_forever, daemon=True).start()
 
@@ -404,8 +416,8 @@ class OrigemTest(unittest.TestCase):
     def post(self, **cabecalhos):
         import urllib.request, urllib.error
         req = urllib.request.Request(f"http://127.0.0.1:{self.porta}/api/arquivos",
-                                     data=json.dumps({"caminho": "a.md", "pasta": False, "marcar": True,
-                                                      "sha": ac.sha_config(ac.vazia())}).encode(),
+                                     data=json.dumps({"projeto": self.dir.name, "caminho": "a.md", "pasta": False,
+                                                      "marcar": True, "sha": ac.sha_config(ac.vazia())}).encode(),
                                      headers=cabecalhos, method="POST")
         try:
             return urllib.request.urlopen(req).status
@@ -416,7 +428,7 @@ class OrigemTest(unittest.TestCase):
         self.assertEqual(self.post(**{"Content-Type": "application/json",
                                       "Origin": "http://mal.example"}), 403)
         self.assertEqual(self.post(**{"Content-Type": "text/plain"}), 403)
-        self.assertFalse((self.dir / ".km" / "config.json").exists())
+        self.assertEqual(ac.carregar(self.dir), ac.vazia())
 
     def test_the_panel_through_a_forwarded_port_can(self):
         self.assertEqual(self.post(**{"Content-Type": "application/json", "Host": "localhost:9999",

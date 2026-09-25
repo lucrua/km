@@ -485,9 +485,76 @@ def cmd_quando(args) -> int:
 
 
 def cmd_serve(args) -> int:
+    """One panel for every registered project, from wherever you are.
+
+    Started inside a repository that uses km, it registers it — serving it means you want to
+    see it — and opens on it.
+    """
+    from . import projetos as pj
     from . import serve
 
-    return serve.run(_root(args), port=args.port, by=args.by)
+    inicial = None
+    raiz = pj.raiz_git(Path(args.repo).expanduser().resolve())
+    if raiz is not None and (raiz / ac.KM_DIR / ac.CONFIG).exists():
+        r = pj.adicionar(str(raiz))
+        if r["novo"]:
+            print(f"registrado: {r['nome']}  ·  {r['caminho']}", flush=True)
+        inicial = raiz
+    elif raiz is not None:
+        print(f"{raiz.name} não usa o km (falta .km/config.json) — não entra no painel.\n"
+              f"para entrar: km projects add {raiz} --init")
+    return serve.run(port=args.port, by=args.by, inicial=inicial)
+
+
+def _situacao_projeto(p: dict) -> str:
+    if p["erro"]:
+        return "—"
+    return f"{p['pct']} a aprovar" if p["pct"] else "em dia"
+
+
+def cmd_projects(args) -> int:
+    """The projects `km serve` shows. Only the list changes; no repository is touched."""
+    from . import projetos as pj
+
+    acao = getattr(args, "acao", None)
+    if acao in ("add", "adicionar"):
+        caminho = os.path.join(args.repo, os.path.expanduser(args.caminho))
+        try:
+            r = pj.adicionar(caminho, init=args.init)
+        except pj.Recusado as e:
+            raise SystemExit(f"km: {e}")
+        if args.json:
+            print(json.dumps(r, ensure_ascii=False))
+            return 0
+        if r["iniciado"]:
+            print(f"criado {r['caminho']}/.km/config.json — nada é acompanhado ainda")
+        print(("registrado: " if r["novo"] else "já estava registrado: ")
+              + f"{r['nome']}  ·  {r['caminho']}")
+        return 0
+    if acao in ("rm", "remover"):
+        try:
+            r = pj.remover(args.alvo)
+        except pj.Recusado as e:
+            raise SystemExit(f"km: {e}")
+        print(f"fora da lista: {r['nome']}  ·  {r['caminho']}")
+        print("o repositório, o .km/config.json e a chancela não foram mexidos")
+        return 0
+
+    lista = pj.listar()
+    if args.json:
+        print(json.dumps(lista, ensure_ascii=False))
+        return 0
+    if not lista:
+        print(f"nenhum projeto registrado ({pj.arquivo()})")
+        print("adicionar: km projects add <caminho>   ·   ou km serve dentro do repositório")
+        return 0
+    largura = max(len(p["nome"]) for p in lista)
+    for p in lista:
+        linha = f"{p['nome']:<{largura}}  {_situacao_projeto(p):<15} {p['caminho']}"
+        if p["erro"]:
+            linha += f"  ({p['erro']})"
+        print(linha)
+    return 0
 
 
 def cmd_install_hooks(args) -> int:
@@ -524,10 +591,26 @@ def main(argv: list[str]) -> int:
                    ).set_defaults(func=cmd_init)
 
     s = sub.add_parser("serve", aliases=["painel"],
-                       help="a tela da revisão, num servidor local sob demanda")
+                       help="a tela da revisão de todos os projetos, num servidor local sob demanda")
     s.add_argument("--port", type=int, default=8431)
     s.add_argument("--by", default=quem)
     s.set_defaults(func=cmd_serve)
+
+    s = sub.add_parser("projects", aliases=["projetos"],
+                       help="os projetos que o km serve mostra: listar, adicionar, tirar da lista")
+    s.add_argument("--json", action="store_true",
+                   help="lista de {nome, caminho, pct, n, pendentes, erro}")
+    s.set_defaults(func=cmd_projects)
+    acoes = s.add_subparsers(dest="acao")
+    a = acoes.add_parser("add", aliases=["adicionar"],
+                         help="registrar a raiz de um repositório git que usa o km")
+    a.add_argument("caminho")
+    a.add_argument("--init", action="store_true",
+                   help="criar .km/config.json vazio se ainda não houver (como km init)")
+    a.add_argument("--json", action="store_true", help="{nome, caminho, novo, iniciado}")
+    a = acoes.add_parser("rm", aliases=["remover"],
+                         help="tirar da lista; o repositório, a config e a chancela ficam")
+    a.add_argument("alvo", help="o nome, como km projects mostra, ou o caminho")
 
     s = sub.add_parser("pendente", aliases=["pending"],
                        help="o que mudou desde a chancela, e o que nunca teve uma")

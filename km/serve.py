@@ -4,9 +4,11 @@ Plain HTML served from this file, bound to localhost, no build step and no depen
 It reads `refs/km/chancela` and the files on disk, and every action goes through the same
 functions the CLI uses — the page is a surface, not a second implementation.
 
-It is started when you sit down to review and stopped with Ctrl-C. Nothing runs in the
-background, nothing is written except what you ask for: the ref, or a passage you edited
-here — a mark included.
+One server shows every project in the registry (km/projetos.py): each request names its
+project, and the root is found through the registry, never taken from the request. It is
+started when you sit down to review and stopped with Ctrl-C. Nothing runs in the
+background, nothing is written except what you ask for: the ref, a passage you edited
+here — a mark included —, a project's `.km/config.json`, or the list of projects.
 """
 
 from __future__ import annotations
@@ -19,10 +21,12 @@ import webbrowser
 from datetime import date
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
+from urllib.parse import quote
 
 from . import acompanhamento as ac
 from . import chancela as ch
 from . import cli
+from . import projetos as pj
 
 PAGINA = Path(__file__).with_name("painel.html")
 
@@ -326,9 +330,48 @@ def abrir_no_code(root: Path, pedido: dict) -> dict:
 
 # ---- the server ----------------------------------------------------------------------
 
+class SemProjeto(Exception):
+    """The request names no project, or one the registry does not have."""
+
+    def __init__(self, codigo: int, erro: str):
+        super().__init__(erro)
+        self.codigo, self.erro = codigo, erro
+
+
+def projeto(nome: object) -> tuple[str, Path]:
+    """name → root, through the registry only: a path is never taken from the request."""
+    if not isinstance(nome, str) or not nome:
+        raise SemProjeto(400, "falta o projeto — ?projeto=<nome> (GET) ou \"projeto\" (POST)")
+    raiz = pj.resolver(nome)
+    if raiz is None:
+        raise SemProjeto(404, f"projeto desconhecido: {nome} — veja a aba Projetos")
+    if not raiz.is_dir():
+        raise SemProjeto(404, f"{nome}: {raiz} não existe mais — tire-o da lista na aba Projetos")
+    return nome, raiz
+
+
+def projetos_adicionar(pedido: dict) -> dict:
+    try:
+        r = pj.adicionar(pedido.get("caminho") or "", init=bool(pedido.get("init")))
+    except (pj.Recusado, ac.ConfigInvalida) as e:
+        return {"ok": False, "erro": str(e)}
+    msg = (f"{r['nome']} entrou na lista" if r["novo"] else f"{r['nome']} já estava na lista")
+    if r["iniciado"]:
+        msg += " · .km/config.json criado, nada acompanhado ainda"
+    return {"ok": True, "msg": msg, **r}
+
+
+def projetos_remover(pedido: dict) -> dict:
+    try:
+        r = pj.remover(pedido.get("nome") or "")
+    except (pj.Recusado, ac.ConfigInvalida) as e:
+        return {"ok": False, "erro": str(e)}
+    return {"ok": True, "msg": f"{r['nome']} saiu da lista · o repositório não foi mexido", **r}
+
+
 class Handler(BaseHTTPRequestHandler):
-    root: Path
     by: str
+    inicial: Path | None = None      # o repositório de onde o km serve foi chamado
 
     def _envia(self, corpo: bytes, tipo: str, codigo: int = 200) -> None:
         self.send_response(codigo)
@@ -341,7 +384,14 @@ class Handler(BaseHTTPRequestHandler):
         self._envia(json.dumps(dados, ensure_ascii=False).encode("utf-8"),
                     "application/json; charset=utf-8", codigo)
 
+    def _estado(self, nome: str, raiz: Path, **kw) -> dict:
+        e = estado(raiz, self.by, **kw)
+        e["projeto"] = nome
+        return e
+
     def do_GET(self) -> None:  # noqa: N802
+        from urllib.parse import parse_qs, urlparse
+
         if self.path.startswith("/static/"):
             alvo = arquivo_estatico(self.path)
             if alvo is None or alvo.suffix not in TIPOS:
@@ -349,17 +399,27 @@ class Handler(BaseHTTPRequestHandler):
             else:
                 self._envia(alvo.read_bytes(), TIPOS[alvo.suffix])
             return
-        if self.path.startswith("/api/arquivos"):
-            self._json(ac.arvore(self.root))
-        elif self.path.startswith("/api/state"):
-            from urllib.parse import parse_qs, urlparse
-            q = parse_qs(urlparse(self.path).query)
-            self._json(estado(self.root, self.by, base=q.get("base", [None])[0],
-                              arquivo=q.get("file", [None])[0]))
-        elif self.path in ("/", "/index.html"):
-            self._envia(PAGINA.read_bytes(), "text/html; charset=utf-8")
-        else:
-            self._envia(b"nao encontrado", "text/plain; charset=utf-8", 404)
+        url = urlparse(self.path)
+        q = parse_qs(url.query)
+        try:
+            if url.path in ("/", "/index.html"):
+                self._envia(PAGINA.read_bytes(), "text/html; charset=utf-8")
+            elif url.path == "/api/projetos":
+                inicial = pj.nome_de(self.inicial) if self.inicial else None
+                self._json({"projetos": pj.listar(), "inicial": inicial})
+            elif url.path == "/api/arquivos":
+                _, raiz = projeto(q.get("projeto", [None])[0])
+                self._json(ac.arvore(raiz))
+            elif url.path == "/api/state":
+                nome, raiz = projeto(q.get("projeto", [None])[0])
+                self._json(self._estado(nome, raiz, base=q.get("base", [None])[0],
+                                        arquivo=q.get("file", [None])[0]))
+            else:
+                self._envia(b"nao encontrado", "text/plain; charset=utf-8", 404)
+        except SemProjeto as e:
+            self._json({"ok": False, "erro": e.erro}, e.codigo)
+        except ac.ConfigInvalida as e:          # o registro quebrado: uma frase, não um 500 mudo
+            self._json({"ok": False, "erro": str(e)}, 500)
 
     def _de_outro_site(self) -> bool:
         """This server writes documents and the chancel. A page from anywhere else must not
@@ -378,53 +438,82 @@ class Handler(BaseHTTPRequestHandler):
         local = urlparse("//" + host).hostname in ("127.0.0.1", "localhost")
         return not (local and urlparse(origem).netloc == host)
 
+    ROTAS_DO_PROJETO = ("/api/abrir", "/api/arquivos/desfazer", "/api/arquivos", "/api/act")
+
     def do_POST(self) -> None:  # noqa: N802
+        from urllib.parse import urlparse
+
         if self._de_outro_site():
             self._envia(b"origem recusada", "text/plain; charset=utf-8", 403)
             return
+        caminho = urlparse(self.path).path
         tamanho = int(self.headers.get("Content-Length", 0))
-        pedido = json.loads(self.rfile.read(tamanho) or b"{}")
-        if self.path.startswith("/api/abrir"):
-            self._json(abrir_no_code(self.root, pedido))
+        try:
+            pedido = json.loads(self.rfile.read(tamanho) or b"{}")
+        except ValueError:
+            pedido = None
+        if not isinstance(pedido, dict):
+            self._json({"ok": False, "erro": "o pedido tem que ser um objeto JSON"}, 400)
             return
-        if self.path.startswith("/api/arquivos/desfazer"):
-            self._json(arquivos_trocar(self.root, pedido))
+        if caminho == "/api/projetos":
+            self._json(projetos_adicionar(pedido))
             return
-        if self.path.startswith("/api/arquivos"):
-            self._json(arquivos_clicar(self.root, pedido))
+        if caminho == "/api/projetos/remover":
+            self._json(projetos_remover(pedido))
             return
-        if not self.path.startswith("/api/act"):
+        if caminho not in self.ROTAS_DO_PROJETO:
             self._envia(b"nao encontrado", "text/plain; charset=utf-8", 404)
             return
         try:
-            resposta = agir(self.root, pedido, self.by)
+            nome, raiz = projeto(pedido.get("projeto"))
+        except SemProjeto as e:
+            self._json({"ok": False, "erro": e.erro}, e.codigo)
+            return
+        except ac.ConfigInvalida as e:
+            self._json({"ok": False, "erro": str(e)}, 500)
+            return
+        if caminho == "/api/abrir":
+            self._json(abrir_no_code(raiz, pedido))
+            return
+        if caminho == "/api/arquivos/desfazer":
+            self._json(arquivos_trocar(raiz, pedido))
+            return
+        if caminho == "/api/arquivos":
+            self._json(arquivos_clicar(raiz, pedido))
+            return
+        try:
+            resposta = agir(raiz, pedido, self.by)
         except Exception as e:                      # o servidor é local; o erro vai à tela
             resposta = {"ok": False, "erro": f"{type(e).__name__}: {e}"}
-        resposta["estado"] = estado(self.root, self.by,
-                                    base=pedido.get("base") or None,
-                                    arquivo=pedido.get("file"))
+        resposta["estado"] = self._estado(nome, raiz, base=pedido.get("base") or None,
+                                          arquivo=pedido.get("file"))
         self._json(resposta)
 
     def log_message(self, *args) -> None:           # sem ruído no terminal
         return
 
 
-def run(root: Path, port: int = 8431, by: str = "", abrir: bool = False) -> int:
-    Handler.root = root
+def run(port: int = 8431, by: str = "", inicial: Path | None = None, abrir: bool = False) -> int:
+    """One server for every registered project. The registry is read on each request, so a
+    project added by `km projects add` in another terminal shows up without a restart."""
     Handler.by = by
+    Handler.inicial = inicial
+    url = f"http://127.0.0.1:{port}"
+    nome = pj.nome_de(inicial) if inicial else None
+    endereco = url + (f"/?projeto={quote(nome)}" if nome else "/")
     try:
         servidor = ThreadingHTTPServer(("127.0.0.1", port), Handler)
     except OSError as e:
         if e.errno != 98:
             raise
         raise SystemExit(
-            f"a porta {port} já está ocupada — provavelmente por um painel que ficou aberto.\n"
-            f"abra http://127.0.0.1:{port} para ver de qual repositório ele é,\n"
-            f"ou suba este em outra: km serve --port {port + 1}")
-    url = f"http://127.0.0.1:{port}"
-    print(f"km · {root.name}  ·  {url}  ·  Ctrl-C encerra")
+            f"a porta {port} já está ocupada — provavelmente pelo painel, que mostra todos os\n"
+            f"projetos registrados: abra {endereco}\n"
+            f"ou suba outro nesta: km serve --port {port + 1}")
+    n = len(pj.carregar())
+    print(f"km · {n} projeto(s)  ·  {endereco}  ·  Ctrl-C encerra", flush=True)
     if abrir:
-        webbrowser.open(url)
+        webbrowser.open(endereco)
     try:
         servidor.serve_forever()
     except KeyboardInterrupt:

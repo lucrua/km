@@ -94,7 +94,10 @@ class RotaAbrirTest(AbrirTest):
 
     def setUp(self):
         super().setUp()
-        handler = type("H", (serve.Handler,), {"root": self.dir, "by": "teste"})
+        from km import projetos as pj
+        pj.gravar(pj.carregar() + [str(self.dir)])
+        self.addCleanup(lambda: pj.gravar([c for c in pj.carregar() if c != str(self.dir)]))
+        handler = type("H", (serve.Handler,), {"by": "teste"})
         self.srv = ThreadingHTTPServer(("127.0.0.1", 0), handler)
         self.porta = self.srv.server_address[1]
         threading.Thread(target=self.srv.serve_forever, daemon=True).start()
@@ -111,7 +114,8 @@ class RotaAbrirTest(AbrirTest):
         elif origem:
             cab["Origin"] = origem
         req = urllib.request.Request(f"http://127.0.0.1:{self.porta}/api/abrir",
-                                     data=json.dumps(corpo).encode(), headers=cab, method="POST")
+                                     data=json.dumps({"projeto": self.dir.name, **corpo}).encode(),
+                                     headers=cab, method="POST")
         with mock.patch.object(serve.shutil, "which", lambda nome: CODE), \
              mock.patch.object(serve, "_lancar", self.chamadas.append):
             try:
