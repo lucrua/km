@@ -160,6 +160,21 @@ def documentos(root: Path, cfg: dict | None = None) -> list[str]:
     return sorted(achados)
 
 
+def documentos_em(root: Path, rev: str, cfg: dict) -> list[str]:
+    """`documentos`, for a branch nobody has checked out: its committed Markdown files, under
+    this folder's config. A file named in `files` counts only if the branch has it."""
+    from . import chancela as ch
+
+    # ls-tree não entende glob no pathspec: o filtro do .md é aqui.
+    r = subprocess.run(["git", "ls-tree", "-r", "-z", "--name-only", rev],
+                       cwd=root, capture_output=True)
+    no_branch = ({p for p in r.stdout.decode("utf-8").split("\0") if p.endswith(".md")}
+                 if r.returncode == 0 else set())
+    achados = {c for c in no_branch if decisao(c, cfg)}
+    achados |= {f for f in ch.arquivos(root) if decisao(f, cfg)}
+    return sorted(achados)
+
+
 def _abaixo(caminho: str, outro: str) -> bool:
     return caminho == "." or outro.startswith(caminho + "/")
 

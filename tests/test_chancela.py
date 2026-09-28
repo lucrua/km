@@ -77,6 +77,31 @@ class RefTest(RepoTest):
         # and the temporary index it used is gone
         self.assertFalse((self.dir / ".git" / "km-chancela-index").exists())
 
+    def test_an_approval_of_another_file_in_the_middle_is_kept(self):
+        # Duas abas, dois worktrees: outra aprovação chega entre ler a chancela e gravá-la.
+        ch.escrever(self.dir, {"regras.md": DOC}, "primeira")
+        chegou = []
+
+        def no_meio(env):
+            if not chegou:
+                chegou.append(ch.escrever(self.dir, {"outro.md": "# Outro\n"}, "no meio"))
+            sha = git(self.dir, "hash-object", "-w", "--stdin", entrada="novo\n").strip()
+            git_env = subprocess.run(["git", "update-index", "--add", "--cacheinfo",
+                                      f"100644,{sha},regras.md"], cwd=self.dir, env=env)
+            assert git_env.returncode == 0
+        ch._avancar(self.dir, no_meio, "a minha", ["regras.md"])
+        self.assertEqual(ch.chancelado(self.dir, "outro.md"), "# Outro\n")
+        self.assertEqual(ch.chancelado(self.dir, "regras.md"), "novo\n")
+
+    def test_an_approval_of_the_same_file_in_the_middle_is_not_overwritten(self):
+        ch.escrever(self.dir, {"regras.md": DOC}, "primeira")
+
+        def no_meio(env):
+            ch.escrever(self.dir, {"regras.md": "a da outra aba\n"}, "no meio")
+        with self.assertRaises(ch.Concorrencia):
+            ch._avancar(self.dir, no_meio, "a minha", ["regras.md"])
+        self.assertEqual(ch.chancelado(self.dir, "regras.md"), "a da outra aba\n")
+
     def test_history_answers_when_a_passage_was_chancelled(self):
         ch.escrever(self.dir, {"regras.md": DOC}, "chancela: tudo")
         novo = DOC.replace("Onze colunas", "Doze colunas")
@@ -599,12 +624,173 @@ class PainelTest(RepoTest):
         self.assertTrue(r["ok"], r)
         self.assertIn("O prazo conta em dias corridos.", self.texto())
 
+    def test_an_approval_can_be_undone_and_the_passage_is_pending_again(self):
+        self.escrever(DOC.replace("horas úteis", "dias corridos"))
+        [m] = self.mudancas()
+        r = self.agir(acao="aprovar", shas=[u["sha"] for u in m["unidades"]])
+        self.assertTrue(r["ok"], r)
+        self.assertIn("dias corridos", ch.chancelado(self.dir, "regras.md"))
+        r = self.agir(acao="desfazer", commit=r["desfazer"])
+        self.assertTrue(r["ok"], r)
+        self.assertEqual(ch.chancelado(self.dir, "regras.md"), DOC)
+        self.assertIn("dias corridos", self.texto())        # o arquivo não é mexido
+        self.assertEqual(len(self.mudancas()), 1)
+
+    def test_undoing_the_first_approval_of_a_file_makes_it_new_again(self):
+        (self.dir / "novo.md").write_text("# Novo\n\nTexto.\n", encoding="utf-8")
+        s = ch.situacao(self.dir, "novo.md")
+        r = self.agir(acao="aprovar", file="novo.md", shas=[u.sha for u in s.unidades])
+        self.assertTrue(r["ok"], r)
+        self.assertIsNotNone(ch.chancelado(self.dir, "novo.md"))
+        r = self.agir(acao="desfazer", file="novo.md", commit=r["desfazer"])
+        self.assertTrue(r["ok"], r)
+        self.assertIsNone(ch.chancelado(self.dir, "novo.md"))
+        self.assertEqual(ch.chancelado(self.dir, "regras.md"), DOC)
+
+    def test_undo_is_refused_once_the_file_was_approved_again(self):
+        self.escrever(DOC.replace("horas úteis", "dias corridos").replace("Onze", "Doze"))
+        primeiro, _ = self.mudancas()
+        r1 = self.agir(acao="aprovar", shas=[u["sha"] for u in primeiro["unidades"]])
+        [segundo] = self.mudancas()
+        r2 = self.agir(acao="aprovar", shas=[u["sha"] for u in segundo["unidades"]])
+        r = self.agir(acao="desfazer", commit=r1["desfazer"])
+        self.assertFalse(r["ok"])
+        self.assertIn("dias corridos", ch.chancelado(self.dir, "regras.md"))
+        # De trás para frente, cada um volta.
+        self.assertTrue(self.agir(acao="desfazer", commit=r2["desfazer"])["ok"])
+        self.assertTrue(self.agir(acao="desfazer", commit=r1["desfazer"])["ok"])
+        self.assertEqual(ch.chancelado(self.dir, "regras.md"), DOC)
+
+    def test_undo_ignores_approvals_of_other_files_made_after(self):
+        self.escrever(DOC.replace("horas úteis", "dias corridos"))
+        [m] = self.mudancas()
+        r = self.agir(acao="aprovar", shas=[u["sha"] for u in m["unidades"]])
+        (self.dir / "outro.md").write_text("# Outro\n", encoding="utf-8")
+        s = ch.situacao(self.dir, "outro.md")
+        self.agir(acao="aprovar", file="outro.md", shas=[u.sha for u in s.unidades])
+        self.assertTrue(self.agir(acao="desfazer", commit=r["desfazer"])["ok"])
+        self.assertEqual(ch.chancelado(self.dir, "regras.md"), DOC)
+        self.assertEqual(ch.chancelado(self.dir, "outro.md"), "# Outro\n")
+
+    def test_undo_refuses_a_commit_that_is_not_an_approval_of_this_file(self):
+        r = self.agir(acao="desfazer", commit="HEAD")
+        self.assertFalse(r["ok"])
+        self.assertEqual(ch.chancelado(self.dir, "regras.md"), DOC)
+
     def test_the_rail_speaks_in_percent_not_counts(self):
         self.escrever(DOC.replace("horas úteis", "horas corridas"))
         d = self.serve.estado(self.dir)["docs"][0]
         self.assertTrue(d["pct"].endswith("%"))
         self.assertNotIn("blocos", d)
         self.assertNotIn("mudancas", d)
+
+
+class LendoTest(RepoTest):
+    """The right-hand side can be another worktree or a branch, against the one chancel."""
+
+    def setUp(self):
+        super().setUp()
+        from km import serve
+        self.serve = serve
+        ch.escrever(self.dir, {"regras.md": DOC}, "chancela")
+        # Um worktree com o arquivo mexido, sem .km/config.json — como os de verdade.
+        self.wt = Path(tempfile.mkdtemp()) / "wt"
+        git(self.dir, "worktree", "add", "-q", "-b", "wt", str(self.wt))
+        (self.wt / "regras.md").write_text(DOC.replace("horas úteis", "horas do worktree"),
+                                           encoding="utf-8")
+        # Um branch sem worktree, com um arquivo que só existe nele.
+        git(self.dir, "checkout", "-q", "-b", "solto")
+        self.escrever(DOC.replace("Onze", "Doze"))
+        (self.dir / "so-no-branch.md").write_text("# Só aqui\n", encoding="utf-8")
+        git(self.dir, "add", "-A")
+        git(self.dir, "commit", "-qm", "solto")
+        git(self.dir, "checkout", "-q", "main")
+
+    def tearDown(self):
+        shutil.rmtree(self.wt.parent)
+        super().tearDown()
+
+    def fontes(self):
+        return {f["id"]: f for f in self.serve.fontes(self.dir)}
+
+    def test_lists_this_folder_the_other_worktrees_and_the_loose_branches(self):
+        f = self.fontes()
+        self.assertEqual(f[""]["tipo"], "pasta")
+        wt = [x for x in f.values() if x["tipo"] == "worktree"]
+        self.assertEqual([x["rotulo"].split(" · ")[0] for x in wt], ["wt"])
+        self.assertIn("br:solto", f)
+        self.assertNotIn("br:main", f)          # checado aqui mesmo
+        self.assertNotIn("br:wt", f)            # checado no worktree: vale o disco dele
+
+    def test_an_unknown_source_is_refused(self):
+        for lendo in ["wt:/etc", "br:nao-existe", "br:main", "../x"]:
+            r = self.serve.agir(self.dir, {"acao": "aprovar", "file": "regras.md",
+                                           "shas": [], "lendo": lendo}, by="t")
+            self.assertFalse(r["ok"], lendo)
+
+    def test_a_worktree_is_read_from_its_disk_with_this_projects_config(self):
+        wt = next(i for i, x in self.fontes().items() if x["tipo"] == "worktree")
+        e = self.serve.estado(self.dir, arquivo="regras.md", lendo=wt)
+        [d] = e["docs"]
+        [m] = [s for s in d["segmentos"] if s["tipo"] == "mudanca"]
+        self.assertIn("horas do worktree", m["agora"])
+        self.assertFalse(e["so_aprovar"])
+        self.assertEqual(e["pasta"], str(self.wt))
+
+    def test_approving_in_a_worktree_writes_the_one_chancel(self):
+        wt = next(i for i, x in self.fontes().items() if x["tipo"] == "worktree")
+        e = self.serve.estado(self.dir, arquivo="regras.md", lendo=wt)
+        [m] = [s for s in e["docs"][0]["segmentos"] if s["tipo"] == "mudanca"]
+        r = self.serve.agir(self.dir, {"acao": "aprovar", "file": "regras.md", "lendo": wt,
+                                       "shas": [u["sha"] for u in m["unidades"]]}, by="t")
+        self.assertTrue(r["ok"], r)
+        self.assertIn("horas do worktree", ch.chancelado(self.dir, "regras.md"))
+        # Aqui, onde o arquivo ainda diz horas úteis, isso vira pendência.
+        self.assertTrue(ch.situacao(self.dir, "regras.md").mudancas)
+
+    def test_reverting_in_a_worktree_writes_the_worktree_file(self):
+        wt = next(i for i, x in self.fontes().items() if x["tipo"] == "worktree")
+        e = self.serve.estado(self.dir, arquivo="regras.md", lendo=wt)
+        [m] = [s for s in e["docs"][0]["segmentos"] if s["tipo"] == "mudanca"]
+        r = self.serve.agir(self.dir, {"acao": "reverter", "file": "regras.md", "lendo": wt,
+                                       "shas": [u["sha"] for u in m["unidades"]]}, by="t")
+        self.assertTrue(r["ok"], r)
+        self.assertEqual((self.wt / "regras.md").read_text(encoding="utf-8"), DOC)
+        self.assertEqual((self.dir / "regras.md").read_text(encoding="utf-8"), DOC)
+
+    def test_a_branch_is_read_from_its_last_commit_files_included(self):
+        e = self.serve.estado(self.dir, arquivo="regras.md", lendo="br:solto")
+        self.assertTrue(e["so_aprovar"])
+        self.assertIn("so-no-branch.md", [d["file"] for d in e["docs"]])
+        d = next(d for d in e["docs"] if d["file"] == "regras.md")
+        [m] = [s for s in d["segmentos"] if s["tipo"] == "mudanca"]
+        self.assertIn("Doze", m["agora"])
+
+    def test_a_branch_can_be_approved_and_undone_but_nothing_is_written_to_disk(self):
+        e = self.serve.estado(self.dir, arquivo="regras.md", lendo="br:solto")
+        d = next(d for d in e["docs"] if d["file"] == "regras.md")
+        [m] = [s for s in d["segmentos"] if s["tipo"] == "mudanca"]
+        shas = [u["sha"] for u in m["unidades"]]
+        for acao in ("reverter", "salvar"):
+            r = self.serve.agir(self.dir, {"acao": acao, "file": "regras.md", "lendo": "br:solto",
+                                           "shas": shas, "original": "x", "texto": "y"}, by="t")
+            self.assertFalse(r["ok"], acao)
+        r = self.serve.agir(self.dir, {"acao": "aprovar", "file": "regras.md", "lendo": "br:solto",
+                                       "shas": shas}, by="t")
+        self.assertTrue(r["ok"], r)
+        self.assertIn("Doze colunas", ch.chancelado(self.dir, "regras.md"))
+        self.assertEqual((self.dir / "regras.md").read_text(encoding="utf-8"), DOC)
+        r = self.serve.agir(self.dir, {"acao": "desfazer", "file": "regras.md", "lendo": "br:solto",
+                                       "commit": r["desfazer"]}, by="t")
+        self.assertTrue(r["ok"], r)
+        self.assertEqual(ch.chancelado(self.dir, "regras.md"), DOC)
+
+    def test_a_file_only_on_the_branch_can_be_approved_whole(self):
+        s = ch.situacao(self.dir, "so-no-branch.md", rev="solto")
+        r = self.serve.agir(self.dir, {"acao": "aprovar", "file": "so-no-branch.md",
+                                       "lendo": "br:solto", "shas": [u.sha for u in s.unidades]}, by="t")
+        self.assertTrue(r["ok"], r)
+        self.assertEqual(ch.chancelado(self.dir, "so-no-branch.md"), "# Só aqui\n")
 
 
 if __name__ == "__main__":

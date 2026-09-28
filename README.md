@@ -93,6 +93,15 @@ paragraph in a row are one thing to read — placed where it happened, in three 
 | **now** | the file today, editable, with what differs marked live as you type |
 | **what to do** | one set of verdicts for the passage |
 
+**The second column can read from elsewhere.** The chancel is one for every branch and
+worktree of the repository, so **lendo**, in the top bar, puts another source on the right
+against the same chancel: this folder, another **worktree** of the repository — its files on
+disk, uncommitted work included, with every action writing there — or a **branch no worktree
+has checked out**, read from its last commit, where a passage can only be approved whole (and
+undone): there is no file to write to. The files listed are this project's `.km/config.json`
+applied to that source. Approving from any of them moves the one chancel, so a file here that
+differs from what you approved there shows as pending here.
+
 **To approve less than the passage, select it.** In the second column, select a paragraph,
 a table row, or a few words: a bar offers *Aprovar seleção* and *Reverter seleção*, and only
 the changes inside the selection are taken — like staging half a hunk in a code review. A
@@ -129,6 +138,13 @@ removed.
 | **Reverter** | puts the chancel's text back in the file |
 | **📌 · ❓ · 💬** | write a [mark](#the-convention) right after the passage, as a block of its own, with `add your comment here` selected so what you type replaces it. Nothing is approved: the mark is your text, saved like any edit |
 
+**An approval can be undone.** Its message carries *↶ desfazer*, and **↶ Desfazer
+aprovação** in the top bar (or Ctrl+Z outside the text) takes back the last ones of the
+session, newest first — a whole file approved by mistake goes back to *novo*. Undoing is a new
+commit on the ref that puts back the chancel the file had before, so approvals of other files
+made since stay; it is refused if that file was approved again after, until the newer one is
+undone. The file on disk is not touched.
+
 On a long passage the actions **stay on screen** under the top bar while you scroll it, and
 leave with the passage.
 
@@ -152,7 +168,7 @@ remembers the width.
 
 Keyboard: `j` `k` move between changes, `a` approves the change in focus.
 
-**abrir no VS Code**, in the document header, runs `code <file>` (or `code -g <file>:<line>` at the change in focus) — under WSL, Windows VS Code in WSL mode; `code` must be on the PATH of whoever started `km serve`.
+**abrir no VS Code**, in the document header, runs `code <file>` (or `code -g <file>:<line>` at the change in focus) — under WSL, Windows VS Code in WSL mode; `code` must be on the PATH of whoever started `km serve`. **copiar caminho**, beside it, copies the file's path in the repository; Shift+click, the full path.
 
 The server does not stay up: you start it when you sit down to review. Inside VS Code, the
 command **km: abrir o painel da chancela** (`Ctrl+Alt+P`) opens it on the window's

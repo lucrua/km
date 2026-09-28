@@ -23,6 +23,16 @@ A branch would show up in `git branch`, invite a checkout, and tangle with the f
 branches already in use. A ref under `refs/km/` is invisible to the normal flow, interferes
 with no merge, and disappears with one command.
 
+### Why not a copy in `.km/`
+
+A folder of approved copies next to `.km/config.json` would be simpler to see, and loses what
+the ref gives: every approval kept, with its parent, message and author — which is what undo
+and `km quando` stand on; one store shared by every worktree, where `.km/` belongs to one
+folder; out of reach of `git clean -X`, of an agent's `grep -r` or search-and-replace and of an
+editor, where a gitignored copy of every document is none of those; and the same text stored
+once, packed as deltas. A blob *is* a copy of the file, compressed and named by its content —
+built in `.km/` with history, dedup and sharing, it would be git's object store again.
+
 ## What git gives for free
 
 | Question | Answer |
