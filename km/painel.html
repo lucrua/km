@@ -375,9 +375,12 @@ async function _carregar(arquivo){
 }
 
 async function agir(corpo){
-  const j = await postar('/api/act', {...corpo, projeto: P, file: D.docs[doc].file,
+  const arquivo = D.docs[doc].file;
+  const j = await postar('/api/act', {...corpo, projeto: P, file: arquivo,
                                      base: naChancela() ? '' : base});
-  if (j.estado) D = j.estado;
+  // A lista vem com os acompanhados primeiro: a primeira aprovação de um arquivo o muda de
+  // lugar. O arquivo aberto se reencontra pelo nome, não pela posição.
+  if (j.estado) { D = j.estado; const i = D.docs.findIndex(d => d.file === arquivo); if (i >= 0) doc = i; }
   recado = j.ok ? '✓ ' + (j.msg || 'feito') : '✕ ' + (j.erro || 'não deu');
   if (j.conflito) conflito = {chave: corpo.chave, atual: j.conflito.atual};
   else { conflito = null; form = null; if (j.ok && corpo.chave) delete sujos[corpo.chave]; }
