@@ -14,6 +14,7 @@ here — a mark included —, a project's `.km/config.json`, or the list of proj
 from __future__ import annotations
 
 import json
+import os
 import shutil
 import subprocess
 import threading
@@ -141,25 +142,93 @@ def _trecho_mudado(s: ch.Situacao, m: ch.Mudanca) -> dict:
             "unidades": unidades, "sumidas": m.sumidas}
 
 
+# ---- what the right-hand side reads -------------------------------------------------
+
+class FonteDesconhecida(Exception):
+    """The page asked to read from a worktree or branch this repository does not have."""
+
+
+def fontes(root: Path) -> list[dict]:
+    """What the right-hand side can read: this folder, the repository's other worktrees, and
+    the branches no worktree has checked out. The chancel is one for all of them.
+
+    A branch checked out in a worktree is read from that worktree's disk — its uncommitted
+    work is what you want to review — so it is listed as the worktree, not again as a branch.
+    """
+    raiz = os.path.realpath(root)
+    wts, atual = [], {}
+    for linha in ch._ok(root, "worktree", "list", "--porcelain").splitlines() + [""]:
+        if linha.startswith("worktree "):
+            atual = {"caminho": os.path.realpath(linha[len("worktree "):])}
+        elif linha.startswith("branch refs/heads/"):
+            atual["branch"] = linha[len("branch refs/heads/"):]
+        elif not linha and atual:
+            wts.append(atual)
+            atual = {}
+    meu = next((w for w in wts if w["caminho"] == raiz), {})
+    out = [{"id": "", "tipo": "pasta", "rotulo": f"esta pasta · {meu.get('branch') or 'sem branch'}",
+            "caminho": raiz}]
+    for w in wts:
+        if w["caminho"] != raiz and Path(w["caminho"]).is_dir():
+            out.append({"id": "wt:" + w["caminho"], "tipo": "worktree", "caminho": w["caminho"],
+                        "rotulo": f"{Path(w['caminho']).name} · {w.get('branch') or 'sem branch'}"})
+    checados = {w.get("branch") for w in wts}
+    for b in ch._ok(root, "for-each-ref", "--sort=-committerdate", "--format=%(refname:short)",
+                    "refs/heads").splitlines():
+        if b.strip() and b not in checados:
+            out.append({"id": "br:" + b, "tipo": "branch", "rotulo": f"{b} · branch, só aprovar"})
+    return out
+
+
+def fonte(root: Path, lendo: object) -> tuple[Path, str | None]:
+    """id → (the folder to read and write, the branch to read from). Only an id from
+    `fontes`: a path or a branch name is never taken from the request as it came."""
+    if not lendo:
+        return root, None
+    f = next((x for x in fontes(root) if x["id"] == lendo), None)
+    if f is None:
+        raise FonteDesconhecida(f"{lendo}: não é um worktree nem um branch solto deste repositório"
+                                " — a lista foi atualizada")
+    if f["tipo"] == "branch":
+        return root, f["id"][len("br:"):]
+    return Path(f["caminho"]), None
+
+
+def _documentos(root: Path, pasta: Path, rev: str | None) -> list[str]:
+    """The files under review, with this project's config, wherever the right side reads."""
+    cfg = ac.carregar(root)
+    return ac.documentos_em(root, rev, cfg) if rev else ac.documentos(pasta, cfg)
+
+
 def estado(root: Path, by: str = "", base: str | None = None,
-           arquivo: str | None = None) -> dict:
+           arquivo: str | None = None, lendo: str | None = None) -> dict:
     """The state for the page.
 
     The heavy part — every line of the document, highlighted and marked — is built only
-    for the document being read. The rail on the left is counts.
+    for the document being read. The rail on the left is counts. `lendo` picks what the
+    right-hand side reads: this folder, another worktree, or a branch.
     """
     hoje = date.today().isoformat()
     docs = []
     soma_pend = soma_total = 0
+    lista = fontes(root)
+    aviso = ""
     try:
-        acompanhados = ac.documentos(root)
+        pasta, rev = fonte(root, lendo)
+    except FonteDesconhecida as e:
+        # O worktree foi removido, o branch apagado: volta para esta pasta, e diz.
+        pasta, rev, lendo, aviso = root, None, "", str(e)
+    extra = {"fontes": lista, "lendo": lendo or "", "so_aprovar": bool(rev), "pasta": str(pasta),
+             **({"aviso": aviso} if aviso else {})}
+    try:
+        acompanhados = _documentos(root, pasta, rev)
     except ac.ConfigInvalida as e:
         # Uma config quebrada vira um aviso na tela, não uma página que não carrega.
         return {"repo": root.name, "root": str(root), "docs": [], "hoje": hoje, "by": by,
                 "base": base or ch.REF, "revisoes": ch.revisoes(root), "pct": "",
-                "erro": str(e)}
+                "erro": str(e), **extra}
     for rel in acompanhados:
-        s = ch.situacao(root, rel, hoje, base=base)
+        s = ch.situacao(pasta, rel, hoje, base=base, rev=rev)
         if not s.depois.strip():
             continue
         cheio = rel == arquivo
@@ -176,16 +245,17 @@ def estado(root: Path, by: str = "", base: str | None = None,
     docs.sort(key=lambda d: (not d["rastreado"], d["file"]))
     return {"repo": root.name, "root": str(root), "docs": docs, "hoje": hoje, "by": by,
             "base": base or ch.REF, "revisoes": ch.revisoes(root),
-            "pct": ch.percentual(soma_pend, soma_total) if soma_pend else ""}
+            "pct": ch.percentual(soma_pend, soma_total) if soma_pend else "", **extra}
 
 
 # ---- the actions ---------------------------------------------------------------------
 
-def _unidades(root: Path, rel: str, shas: list[str]) -> tuple[ch.Situacao, list[ch.Unidade]]:
+def _unidades(root: Path, rel: str, shas: list[str],
+              rev: str | None = None) -> tuple[ch.Situacao, list[ch.Unidade]]:
     """The blocks the page asked for, found by content. If any is missing the file moved
     under the page, and acting on the rest would be acting on something you did not see.
     Blocks with the same text share a sha, so one sha can find several blocks."""
-    s = ch.situacao(root, rel)
+    s = ch.situacao(root, rel, rev=rev)
     achadas = ch.unidades_por_sha(s.mudancas, set(shas))
     if {u.sha for u in achadas} != set(shas):
         raise LookupError("o arquivo mudou enquanto você olhava — a tela foi atualizada")
@@ -196,8 +266,18 @@ def agir(root: Path, pedido: dict, by: str) -> dict:
     """One place for every verdict, so the page and the CLI cannot drift apart."""
     acao = pedido.get("acao")
     rel = pedido.get("file", "")
-    if rel not in ac.documentos(root):
+    # Tudo abaixo age em `root`: a pasta de onde o lado direito lê — esta, ou outro worktree,
+    # que divide a mesma chancela. Um branch sem worktree não tem disco: só se aprova.
+    projeto_raiz = root
+    try:
+        root, rev = fonte(projeto_raiz, pedido.get("lendo"))
+    except FonteDesconhecida as e:
+        return {"ok": False, "erro": str(e)}
+    if rel not in _documentos(projeto_raiz, root, rev):
         return {"ok": False, "erro": f"{rel} não é acompanhado — escolha na aba Arquivos"}
+    if rev and acao not in ("aprovar", "desfazer"):
+        return {"ok": False, "erro": f"{rev} é um branch sem worktree: aqui só se aprova —"
+                " para editar ou reverter, abra um worktree dele"}
 
     if acao == "salvar":
         try:
@@ -208,11 +288,26 @@ def agir(root: Path, pedido: dict, by: str) -> dict:
                     "conflito": {"atual": e.atual}}
         return {"ok": True, "msg": "salvo no arquivo"}
 
+    if acao == "desfazer":
+        # Uma aprovação volta atrás: a chancela deste arquivo fica como estava antes dela.
+        commit = pedido.get("commit")
+        if not isinstance(commit, str) or not commit:
+            return {"ok": False, "erro": "falta qual aprovação desfazer"}
+        try:
+            ch.desfazer(root, rel, commit, f"chancela: {rel} · desfeita a aprovação "
+                        f"{commit[:8]}\n\npor: {by}\n")
+        except ch.NaoDesfaz as e:
+            return {"ok": False, "erro": str(e)}
+        depois = ch.situacao(root, rel, rev=rev)
+        falta = (f"falta {ch.percentual(*ch.pendencia_do_arquivo(depois))} deste arquivo"
+                 if depois.tem_chancela else "o arquivo voltou a não ter chancela")
+        return {"ok": True, "msg": f"aprovação {commit[:8]} desfeita · {falta}"}
+
     # Uma seleção vem como {sha, ini, fim}: só as mudanças dentro daquele pedaço do texto
     # novo daquele bloco. É o "aceitar metade do hunk" de uma revisão de código.
     selecao = pedido.get("parciais") or []
     try:
-        s, alvos = _unidades(root, rel, (pedido.get("shas") or []) + [x["sha"] for x in selecao])
+        s, alvos = _unidades(root, rel, (pedido.get("shas") or []) + [x["sha"] for x in selecao], rev)
     except LookupError as e:
         return {"ok": False, "erro": str(e)}
     if not alvos:
@@ -229,13 +324,13 @@ def agir(root: Path, pedido: dict, by: str) -> dict:
     if acao == "aprovar":
         commit = cli.chancelar(root, rel, inteiras, s, pedido.get("motivo"), by, parciais)
         saiu = sum(len(u.sumidas) for u in inteiras)
-        depois = ch.situacao(root, rel)
+        depois = ch.situacao(root, rel, rev=rev)
         msg = (f"na chancela ({commit[:8]})" + (" — só a parte selecionada" if parciais else "")
                + (f" · falta {ch.percentual(*ch.pendencia_do_arquivo(depois))} deste arquivo"
                   if depois.mudancas else " · arquivo em dia"))
         if saiu:
             msg += f" · {saiu} marca(s) removida(s) aprovada(s) junto"
-        return {"ok": True, "msg": msg}
+        return {"ok": True, "msg": msg, "desfazer": commit}
 
     return {"ok": False, "erro": f"ação desconhecida: {acao}"}
 
@@ -299,11 +394,18 @@ def abrir_no_code(root: Path, pedido: dict) -> dict:
     rel = pedido.get("file")
     if not isinstance(rel, str) or not rel:
         return {"ok": False, "erro": "nenhum arquivo pedido"}
+    projeto_raiz = root
+    try:
+        root, rev = fonte(projeto_raiz, pedido.get("lendo"))
+    except FonteDesconhecida as e:
+        return {"ok": False, "erro": str(e)}
+    if rev:
+        return {"ok": False, "erro": f"{rev} é um branch sem worktree: não há arquivo para abrir"}
     partes = Path(rel).parts
     if Path(rel).is_absolute() or "\\" in rel or ".." in partes:
         return {"ok": False, "erro": f"{rel}: só um caminho relativo, dentro do repositório"}
     try:
-        conhecidos = set(ac.documentos(root))
+        conhecidos = set(ac.documentos(root, ac.carregar(projeto_raiz)))
     except ac.ConfigInvalida:
         conhecidos = set()
     conhecidos |= set(ac.candidatos(root))
@@ -413,7 +515,8 @@ class Handler(BaseHTTPRequestHandler):
             elif url.path == "/api/state":
                 nome, raiz = projeto(q.get("projeto", [None])[0])
                 self._json(self._estado(nome, raiz, base=q.get("base", [None])[0],
-                                        arquivo=q.get("file", [None])[0]))
+                                        arquivo=q.get("file", [None])[0],
+                                        lendo=q.get("lendo", [None])[0]))
             else:
                 self._envia(b"nao encontrado", "text/plain; charset=utf-8", 404)
         except SemProjeto as e:
@@ -483,10 +586,12 @@ class Handler(BaseHTTPRequestHandler):
             return
         try:
             resposta = agir(raiz, pedido, self.by)
+        except ch.Concorrencia as e:                # outra aba aprovou o mesmo arquivo antes
+            resposta = {"ok": False, "erro": str(e)}
         except Exception as e:                      # o servidor é local; o erro vai à tela
             resposta = {"ok": False, "erro": f"{type(e).__name__}: {e}"}
         resposta["estado"] = self._estado(nome, raiz, base=pedido.get("base") or None,
-                                          arquivo=pedido.get("file"))
+                                          arquivo=pedido.get("file"), lendo=pedido.get("lendo"))
         self._json(resposta)
 
     def log_message(self, *args) -> None:           # sem ruído no terminal

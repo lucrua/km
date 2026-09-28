@@ -15,8 +15,10 @@ from __future__ import annotations
 import hashlib
 import json
 import os
+import random
 import re
 import subprocess
+import time
 from dataclasses import dataclass, field
 from datetime import date
 from difflib import SequenceMatcher
@@ -113,7 +115,7 @@ def escrever(root: Path, mudancas: dict[str, str | None], mensagem: str) -> str:
             sha = _ok(root, "hash-object", "-w", "--stdin", entrada=texto).strip()
             _ok(root, "update-index", "--add", "--cacheinfo",
                 f"100644,{sha},{rel}", env=env)
-    return _avancar(root, aplicar, mensagem)
+    return _avancar(root, aplicar, mensagem, list(mudancas))
 
 
 def mover(root: Path, pares: dict[str, str], mensagem: str) -> str:
@@ -127,33 +129,95 @@ def mover(root: Path, pares: dict[str, str], mensagem: str) -> str:
             sha = _ok(root, "rev-parse", f"{REF}:{de}").strip()
             _ok(root, "update-index", "--force-remove", "--", de, env=env)
             _ok(root, "update-index", "--add", "--cacheinfo", f"100644,{sha},{para}", env=env)
-    return _avancar(root, aplicar, mensagem)
+    return _avancar(root, aplicar, mensagem, [*pares, *pares.values()])
 
 
-def _avancar(root: Path, aplicar, mensagem: str) -> str:
+class NaoDesfaz(Exception):
+    """That approval cannot be undone as it stands: the file was approved again since."""
+
+
+def _blob(root: Path, rev: str, rel: str) -> str | None:
+    r = _git(root, "rev-parse", "--verify", "--quiet", f"{rev}:{rel}")
+    return r.stdout.strip() if r.returncode == 0 else None
+
+
+def desfazer(root: Path, rel: str, commit: str, mensagem: str) -> str:
+    """Undo one approval of `rel`: its chancel goes back to what it was before `commit`.
+
+    A new commit on the ref, not a rewind — approvals of other files made after it stay,
+    and the history keeps both. Only if the file's chancel is still exactly what `commit`
+    left: if it was approved again since, undoing this one would throw that one away too,
+    so the later one has to be undone first. The file on disk is not touched.
+    """
+    if not existe(root) or _git(root, "merge-base", "--is-ancestor", commit, REF).returncode:
+        raise NaoDesfaz(f"{commit[:8]} não é uma aprovação da chancela")
+    deixou = _blob(root, commit, rel)
+    tinha = _blob(root, f"{commit}^", rel)
+    if deixou == tinha:
+        raise NaoDesfaz(f"{commit[:8]} não aprovou nada em {rel}")
+    if _blob(root, REF, rel) != deixou:
+        raise NaoDesfaz(f"{rel} foi aprovado de novo depois — desfaça a aprovação mais nova antes")
+
+    def aplicar(env: dict) -> None:
+        if tinha is None:
+            _ok(root, "update-index", "--force-remove", "--", rel, env=env)
+        else:
+            _ok(root, "update-index", "--add", "--cacheinfo", f"100644,{tinha},{rel}", env=env)
+    return _avancar(root, aplicar, mensagem, [rel])
+
+
+class Concorrencia(Exception):
+    """Another approval of the same file reached the ref while this one was being written."""
+
+
+def _ref_em(root: Path) -> str | None:
+    r = _git(root, "rev-parse", "--verify", "--quiet", REF)
+    return r.stdout.strip() if r.returncode == 0 else None
+
+
+def _avancar(root: Path, aplicar, mensagem: str, caminhos: list[str]) -> str:
     """A commit on the ref: its tree, changed by `aplicar`, with the previous one as parent.
 
     A temporary index file is used so that the repository's own index — which a routine
-    `git add -A` from another session can forge — is never involved.
+    `git add -A` from another session can forge — is never involved. It has a name of its
+    own per call: two approvals at once, from two tabs or two worktrees, would otherwise
+    build their trees in the same file.
+
+    The ref only moves if it still points where it was read (`update-ref` with the old
+    value). If another approval got there first and touched none of `caminhos`, this one is
+    rebuilt on top of it; if it touched one of them, what `aplicar` writes was worked out
+    from a chancel that no longer exists, and it is refused rather than written over.
     """
     git_dir = Path(_ok(root, "rev-parse", "--absolute-git-dir").strip())
-    indice = git_dir / "km-chancela-index"
+    indice = git_dir / f"km-chancela-index-{os.getpid()}-{os.urandom(4).hex()}"
     env = {**os.environ, "GIT_INDEX_FILE": str(indice)}
-    try:
-        if indice.exists():
-            indice.unlink()
-        pais: list[str] = []
-        if existe(root):
-            _ok(root, "read-tree", REF, env=env)
-            pais = ["-p", REF]
-        aplicar(env)
-        arvore = _ok(root, "write-tree", env=env).strip()
-        commit = _ok(root, "commit-tree", arvore, *pais, "-m", mensagem).strip()
-        _ok(root, "update-ref", REF, commit)
-        return commit
-    finally:
-        if indice.exists():
-            indice.unlink()
+    lido = _ref_em(root)
+    for tentativa in range(30):
+        try:
+            pais: list[str] = []
+            if lido:
+                _ok(root, "read-tree", lido, env=env)
+                pais = ["-p", lido]
+            aplicar(env)
+            arvore = _ok(root, "write-tree", env=env).strip()
+            commit = _ok(root, "commit-tree", arvore, *pais, "-m", mensagem).strip()
+            r = _git(root, "update-ref", REF, commit, lido or "0" * len(commit))
+            if r.returncode == 0:
+                return commit
+        finally:
+            if indice.exists():
+                indice.unlink()
+        agora = _ref_em(root)
+        # O ref no mesmo lugar e sem trava de outro: não foi corrida, é outro erro do git.
+        if agora == lido and "lock" not in r.stderr:
+            raise SystemExit(f"git update-ref {REF}: {r.stderr.strip()}")
+        if any((_blob(root, lido, c) if lido else None) != (_blob(root, agora, c) if agora else None)
+               for c in caminhos):
+            raise Concorrencia("o arquivo foi aprovado em outro lugar ao mesmo tempo —"
+                               " a tela foi atualizada, confira e aprove de novo")
+        lido = agora
+        time.sleep(random.uniform(0.005, 0.03) * (1 + tentativa))   # quem perdeu dá a vez
+    raise Concorrencia("a chancela não parou de mudar enquanto eu gravava — tente de novo")
 
 
 def historico(root: Path, rel: str, trecho: "Trecho | None" = None,
@@ -700,6 +764,7 @@ class Situacao:
     depois: str
     mudancas: list[Mudanca]
     vencidas: list[tuple[int, str, str]]
+    sumiu: bool = False         # the file is not there any more — on disk, or in the branch
 
     @property
     def em_dia(self) -> bool:
@@ -711,16 +776,19 @@ class Situacao:
 
 
 def situacao(root: Path, rel: str, hoje: str | None = None,
-             base: str | None = None) -> Situacao:
+             base: str | None = None, rev: str | None = None) -> Situacao:
     """The file against its chancel — or against any other revision, to read it side by side.
 
     The verdicts always act on the chancel; `base` only changes what you are comparing with.
+    `rev` reads the file from a branch's last commit instead of the disk: a branch nobody
+    has checked out can still be approved, since the chancel is one for every branch.
     """
     antes = chancelado(root, rel) if base in (None, REF) else conteudo_em(root, base, rel)
-    depois = atual(root, rel) or ""
+    lido = conteudo_em(root, rev, rel) if rev else atual(root, rel)
+    depois = lido or ""
     return Situacao(arquivo=rel, tem_chancela=antes is not None, antes=antes or "",
                     depois=depois, mudancas=mudancas(antes or "", depois),
-                    vencidas=vencidas(depois, hoje))
+                    vencidas=vencidas(depois, hoje), sumiu=lido is None)
 
 
 # ---- writing in the document ---------------------------------------------------------

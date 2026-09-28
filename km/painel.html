@@ -20,6 +20,8 @@ border:1px solid var(--rule);background:var(--bg);color:var(--ink);cursor:pointe
 .recado{padding:7px 16px;font-size:13px;background:var(--ok-bg);color:var(--ok);
 border-bottom:1px solid var(--rule)}
 .recado.ruim{background:var(--neg-bg);color:var(--neg)}
+.recado button{font:inherit;font-size:12.5px;margin-left:10px;padding:1px 9px;border-radius:6px;cursor:pointer;
+border:1px solid currentColor;background:transparent;color:inherit}
 .corpo{display:flex;align-items:flex-start;--lado:248px}
 /* A régua da esquerda: a árvore dos arquivos revisados. A largura é --lado, que o divisor muda. */
 .lado{width:var(--lado);flex:0 0 var(--lado);padding:6px 0 16px;position:sticky;top:var(--h-topo);
@@ -278,7 +280,10 @@ border:1px solid var(--ok-bg);background:var(--ok-bg);color:var(--ok)}
   <button onmousedown="event.preventDefault()" onclick="noCursor('to_validate')" title="to_validate — com prazo">❓</button>
   <button onmousedown="event.preventDefault()" onclick="noCursor('comment')" title="comment — para quem ler depois">💬</button>
   <span style="width:10px"></span>
+  <button id="btn-desfazer-ap" onclick="desfazerAprovacao()" disabled title="nenhuma aprovação a desfazer">↶ Desfazer aprovação</button>
   <span class="q">comparar com</span><select id="base" onchange="trocarBase()"></select>
+  <span class="q">lendo</span><select id="lendo" onchange="trocarLendo()"
+    title="o lado direito: esta pasta, outro worktree ou um branch — a chancela é uma só para todos"></select>
   <span class="modo">
     <button onclick="setVer('tudo')" id="v-tudo">texto inteiro</button>
     <button onclick="setVer('mudou')" id="v-mudou">só as mudanças</button>
@@ -333,6 +338,10 @@ const neg = s => esc(s).replace(/\*\*(.+?)\*\*/g, '<b>$1</b>');
 let P = null, Pcaminho = null, PROJETOS = [], INICIAL = null;
 const modulosProntos = new Promise((ok) => window.pjs ? ok() : window.addEventListener('modulos-prontos', ok, { once: true }));
 let D = null, doc = 0, ver = 'tudo', base = null, foco = null;
+// De onde o lado direito lê: '' é esta pasta; 'wt:…' outro worktree; 'br:…' um branch sem
+// worktree, que só se aprova. O servidor só aceita um id da lista que ele mesmo deu.
+let lendo = '';
+const soAprovar = () => !!(D && D.so_aprovar);
 let form = null, recado = '', conflito = null;
 // O texto que você escreveu e ainda não salvou, por pedaço da tela. Enquanto houver algo
 // aqui a tela não se recarrega sozinha: recarregar apagaria o que você digitou.
@@ -360,6 +369,7 @@ async function _carregar(arquivo){
   // Só o documento aberto vem com o texto; o resto é a régua lateral.
   const p = P, q = new URLSearchParams({projeto: P});
   if (base) q.set('base', base);
+  if (lendo) q.set('lendo', lendo);
   const alvo = arquivo || (D && D.docs[doc] ? D.docs[doc].file : '');
   if (alvo) q.set('file', alvo);
   const r = await fetch('/api/state?' + q);
@@ -368,6 +378,8 @@ async function _carregar(arquivo){
   const nova = await r.json();
   if (!r.ok) { recado = '✕ ' + (nova.erro || 'não deu'); desenharRecado(); return; }
   base = nova.base;
+  lendo = nova.lendo || '';
+  if (nova.aviso) recado = '✕ ' + nova.aviso;
   const i = nova.docs.findIndex(d => d.file === alvo);
   const antigo = JSON.stringify(D), velho = D, docVelho = doc;
   D = nova; doc = i >= 0 ? i : 0;
@@ -385,16 +397,42 @@ async function _carregar(arquivo){
 
 async function agir(corpo){
   const arquivo = D.docs[doc].file;
-  const j = await postar('/api/act', {...corpo, projeto: P, file: arquivo,
+  const j = await postar('/api/act', {...corpo, projeto: P, file: arquivo, lendo,
                                      base: naChancela() ? '' : base});
   // A lista vem com os acompanhados primeiro: a primeira aprovação de um arquivo o muda de
   // lugar. O arquivo aberto se reencontra pelo nome, não pela posição.
   if (j.estado) { D = j.estado; const i = D.docs.findIndex(d => d.file === arquivo); if (i >= 0) doc = i; }
   recado = j.ok ? '✓ ' + (j.msg || 'feito') : '✕ ' + (j.erro || 'não deu');
+  if (j.ok && j.desfazer) { aprovadas.push({file: arquivo, commit: j.desfazer, recado, lendo}); aprovadas = aprovadas.slice(-10); }
   if (j.conflito) conflito = {chave: corpo.chave, atual: j.conflito.atual};
   else { conflito = null; form = null; if (j.ok && corpo.chave) delete sujos[corpo.chave]; }
   desenhar();
   if (j.ok && !temSujo()) setTimeout(() => carregar(), 50);
+}
+
+// As últimas aprovações desta sessão, para desfazer de trás para frente. Desfazer é um
+// commit novo na chancela com o texto que o arquivo tinha antes — o servidor recusa se o
+// arquivo foi aprovado de novo depois, e o arquivo no disco não é mexido.
+let aprovadas = [];
+async function desfazerAprovacao(){
+  const a = aprovadas[aprovadas.length - 1];
+  if (!a) return;
+  if (temSujo() && a.file !== D.docs[doc].file && !confirm('Há texto editado e não salvo. Sair mesmo assim?')) return;
+  const j = await postar('/api/act', {acao: 'desfazer', projeto: P, file: a.file, commit: a.commit,
+                                      lendo: a.lendo, base: naChancela() ? '' : base});
+  if (j.ok) aprovadas.pop();
+  else aprovadas = aprovadas.filter(x => x.file !== a.file);   // essa e as mais velhas do mesmo arquivo não voltam mais
+  recado = j.ok ? '↶ ' + j.msg : '✕ ' + (j.erro || 'não deu');
+  if (j.estado && a.file === D.docs[doc].file && a.lendo === lendo) {
+    D = j.estado; const i = D.docs.findIndex(d => d.file === a.file); if (i >= 0) doc = i;
+    desenhar();
+  } else if (j.ok) {
+    // Desfeita num arquivo que não está aberto: ele abre, com o trecho pendente de novo.
+    sujos = {}; conflito = null; form = null; foco = null; scrollTo(0, 0);
+    lendo = a.lendo;
+    await carregar(a.file);
+    desenharRecado();
+  } else desenharRecado();
 }
 
 const segs = () => (D && D.docs[doc] && D.docs[doc].segmentos) || [];
@@ -570,8 +608,8 @@ function montarEditores(){
     const atual = sujos[chave] !== undefined ? sujos[chave] : hojeTexto;
     const mudou = (t) => mexeuTexto(chave, t);
     // Um trecho que só saiu não tem o que editar do lado de hoje.
-    if (chave.startsWith('c:')) km.editorMudanca(el, chave, s.antes, atual, naChancela() && s.geral !== 'saiu', mudou, mostrarBarraSelecao);
-    else km.editorSimples(el, chave, atual, true, mudou, null);
+    if (chave.startsWith('c:')) km.editorMudanca(el, chave, s.antes, atual, naChancela() && !soAprovar() && s.geral !== 'saiu', mudou, mostrarBarraSelecao);
+    else km.editorSimples(el, chave, atual, !soAprovar(), mudou, null);
   }
 }
 
@@ -609,6 +647,10 @@ function acoesDaMudanca(m){
   const rotulo = {novo: 'novo', saiu: 'saiu', editado: 'editado'}[m.geral];
   if (!naChancela()) return `<span class="chip e-pendente">${rotulo}</span>`;
   const js = esc(JSON.stringify(shas));
+  // Um branch sem worktree não tem arquivo para escrever: o trecho inteiro se aprova, e só.
+  if (soAprovar()) return `<span class="chip ${m.geral==='saiu'?'e-negado':(m.geral==='novo'?'e-aprovado':'e-mexido')}">${rotulo}</span>
+    <button class="pri" onclick="aprovar(${js})">${m.geral==='saiu'?'Aprovar a remoção':'Aprovar'}</button>
+    <div class="q">branch sem worktree: só aprovar, o trecho inteiro — para editar, reverter ou aprovar parte, abra um worktree dele</div>`;
   // As marcas entram logo depois do trecho, como texto seu: nada é aprovado no clique.
   const marcas = m.agora ? botoesDeMarca(chave) : '';
   return `<span class="chip ${m.geral==='saiu'?'e-negado':(m.geral==='novo'?'e-aprovado':'e-mexido')}">${rotulo}</span>
@@ -638,8 +680,11 @@ function desenhar(){
   const sem = D.docs.filter(d => !d.rastreado).length;
   $('resumo').textContent = `${D.docs.length} arquivos · ${em} em dia · `
     + (D.pct ? `${D.pct} do conteúdo a aprovar` : 'nada a aprovar') + (sem ? ` · ${sem} sem chancela` : '');
-  const r = $('recado'); r.hidden = !recado; r.textContent = recado;
-  r.className = 'recado' + (recado.startsWith('✕') ? ' ruim' : '');
+  desenharRecado();
+  $('lendo').innerHTML = (D.fontes || []).map(f =>
+    `<option value="${esc(f.id)}" ${f.id===D.lendo?'selected':''}>${esc(f.rotulo)}</option>`).join('');
+  $('lendo').hidden = (D.fontes || []).length < 2;
+  $('lendo').previousElementSibling.hidden = $('lendo').hidden;
   $('base').innerHTML = D.revisoes.map(v =>
     `<option value="${esc(v.rev)}" ${v.rev===D.base?'selected':''}>${esc(v.label)}</option>`).join('');
   $('v-tudo').setAttribute('aria-pressed', ver==='tudo');
@@ -658,9 +703,13 @@ function desenhar(){
       <button class="pri" onclick="mostrar('arquivos')">Escolher arquivos</button></div>`;
     return;
   }
+  const fonteAtual = (D.fontes || []).find(f => f.id === D.lendo);
+  const onde = D.lendo && fonteAtual ? fonteAtual.rotulo.split(' · ')[0] + (soAprovar() ? ' — último commit' : ' — agora') : 'agora';
   let html = `<div class="cabgrade rot">${naChancela() ? 'a chancela' : esc(D.base)}</div>
-    <div class="cabgrade rot">${esc(d.file)} — agora<button class="abrir-code" onclick="abrirNoCode()"
-      title="abre este arquivo no VS Code — na linha da mudança em foco, se houver">abrir no VS Code</button></div>
+    <div class="cabgrade rot">${esc(d.file)} — ${esc(onde)}${soAprovar() ? '' : `<button class="abrir-code" onclick="abrirNoCode()"
+      title="abre este arquivo no VS Code — na linha da mudança em foco, se houver">abrir no VS Code</button>`}<button
+      class="abrir-code" onclick="copiarCaminho(event)"
+      title="copia o caminho dentro do repositório · Shift+clique copia o caminho completo">copiar caminho</button></div>
     <div class="cabgrade rot">${naChancela() ? 'o que fazer' : 'só leitura — os botões agem na chancela'}</div>`;
   if (!segs().some(s => s.tipo === 'mudanca'))
     html += `<div class="aviso-doc">${d.rastreado ? '✓ Em dia com a chancela' + (d.em ? ' de ' + esc(d.em) : '') + '. Nada a decidir neste arquivo.' : ''}</div>`;
@@ -698,11 +747,27 @@ function abrir(i){
 // O VS Code abre no arquivo, na linha da mudança em foco (j/k) se houver uma.
 async function abrirNoCode(){
   const m = foco && foco.startsWith('m:') ? achar(Number(foco.slice(2))) : null;
-  const j = await postar('/api/abrir', {projeto: P, file: D.docs[doc].file, ...(m ? {line: m.linha} : {})});
+  const j = await postar('/api/abrir', {projeto: P, file: D.docs[doc].file, lendo, ...(m ? {line: m.linha} : {})});
   recado = j.ok ? '✓ ' + j.msg : '✕ ' + j.erro;
   // Só o recado muda: redesenhar tiraria o cursor de quem está no meio de um texto.
-  const el = $('recado'); el.hidden = false; el.textContent = recado;
-  el.className = 'recado' + (j.ok ? '' : ' ruim');
+  desenharRecado();
+}
+// O caminho do arquivo aberto, para colar num terminal, num chat, num agente.
+async function copiarCaminho(e){
+  // Num branch sem worktree não há arquivo no disco: o completo é o `branch:caminho` do git.
+  const rel = D.docs[doc].file;
+  const texto = !e.shiftKey ? rel : soAprovar() ? D.lendo.slice(3) + ':' + rel : D.pasta.replace(/\/$/, '') + '/' + rel;
+  let ok = false;
+  try { await navigator.clipboard.writeText(texto); ok = true; } catch (err) {
+    // Sem a API (uma porta encaminhada que o navegador não trata como local): o jeito antigo.
+    const t = document.createElement('textarea');
+    t.value = texto; t.style.position = 'fixed'; t.style.opacity = '0';
+    document.body.append(t); t.select();
+    try { ok = document.execCommand('copy'); } catch (err2) {}
+    t.remove();
+  }
+  recado = ok ? '✓ copiado: ' + texto : '✕ não consegui copiar — o caminho é ' + texto;
+  desenharRecado();
 }
 function fechar(){ form = null; desenhar(); }
 function abrirForm(chave, tipo, shas){ form = {chave, tipo, shas}; desenhar(); }
@@ -731,6 +796,7 @@ function copiar(chave){ navigator.clipboard?.writeText(sujos[chave] || ''); reca
 // A marca entra no formato combinado, com o texto de exemplo selecionado, e vira texto seu:
 // você escreve por cima e salva como qualquer outra edição.
 function noCursor(tipo){
+  if (soAprovar()) { recado = '✕ um branch sem worktree não se edita — abra um worktree dele'; return desenhar(); }
   const chave = km.focado();
   if (!chave) { recado = '✕ clique no texto, onde a marca deve entrar, e depois no botão'; return desenhar(); }
   km.inserirMarca(chave, tipo);
@@ -812,6 +878,12 @@ function setModo(c){
 }
 setModo(codigo);
 function trocarBase(){ base = $('base').value; carregar(); }
+function trocarLendo(){
+  if (temSujo() && !confirm('Há texto editado e não salvo. Sair mesmo assim?')) { $('lendo').value = lendo; return; }
+  sujos = {}; conflito = null; form = null; foco = null; desenhado = null;
+  lendo = $('lendo').value;
+  carregar(D && D.docs[doc] ? D.docs[doc].file : null, true);
+}
 
 document.addEventListener('keydown', (e)=>{
   if (vista !== 'revisar') return;
@@ -828,6 +900,10 @@ document.addEventListener('keydown', (e)=>{
     return;   // dentro do texto, letra é letra
   }
   if (el.tagName === 'INPUT' || el.tagName === 'SELECT') { if (e.key === 'Escape') fechar(); return; }
+  // Fora do texto, Ctrl+Z desfaz a última aprovação; dentro, é o do editor.
+  if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === 'z') {
+    e.preventDefault(); return desfazerAprovacao();
+  }
   const ms = mudancas();
   if (!ms.length) return;
   const atual = foco && foco.startsWith('m:') ? Number(foco.slice(2)) : 0;
@@ -989,6 +1065,17 @@ function abrirHistorico(){
 function desenharRecado(){
   const r = $('recado'); r.hidden = !recado; r.textContent = recado;
   r.className = 'recado' + (recado.startsWith('✕') ? ' ruim' : '');
+  // O recado de uma aprovação traz o desfazer ao lado, enquanto ela for a última.
+  const ultima = aprovadas[aprovadas.length - 1];
+  if (ultima && recado === ultima.recado) {
+    const b = document.createElement('button');
+    b.textContent = '↶ desfazer'; b.onclick = desfazerAprovacao;
+    r.append(b);
+  }
+  const d = $('btn-desfazer-ap');
+  d.disabled = !aprovadas.length;
+  d.title = ultima ? `desfaz a aprovação de ${ultima.file} (${ultima.commit.slice(0, 8)}) · Ctrl+Z fora do texto`
+                   : 'nenhuma aprovação a desfazer';
 }
 
 // O teclado da árvore é o padrão WAI-ARIA: ↑ ↓ andam, ← → fecham e abrem, espaço marca.
@@ -1043,7 +1130,7 @@ function lembrar(){
 function esquecerProjeto(){
   sujos = {}; originais = {}; conflito = null; form = null; foco = null; recado = '';
   D = null; doc = 0; base = null; desenhado = null; atualL = null; focoL = null; escolhasDe = null;
-  ARV = null; abertas = new Set(); focoArq = '.'; passos = []; refeitos = [];
+  ARV = null; abertas = new Set(); focoArq = '.'; passos = []; refeitos = []; aprovadas = []; lendo = '';
   if (window.km && km.destruirTodos) km.destruirTodos();
   $('doc').innerHTML = ''; $('lado').innerHTML = ''; $('resumo').textContent = ''; $('arquivos').innerHTML = '';
   desenharRecado();
