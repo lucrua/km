@@ -195,6 +195,15 @@ background:var(--ok-bg);color:var(--ok)}
 .col.mudanca-cm .cm-merge-a .cm-alvo-mudou{text-decoration-color:var(--neg)}
 .col.mudanca-cm .cm-merge-b .cm-alvo-mudou{text-decoration-color:var(--ok)}
 .cm-alvo-mudou::after{content:'\2197';font-size:.75em;color:var(--mut);margin-left:1px}
+/* Linha inteira nova (km/painel/novas.js): uma barra na margem, sem sublinhar cada palavra.
+   A margem existe sempre no texto de hoje, para o texto não pular quando a barra some. */
+.col.mudanca-cm .cm-merge-b .cm-content{padding-left:8px}
+.col.mudanca-cm .cm-merge-b .cm-line.cm-nova{position:relative}
+.col.mudanca-cm .cm-merge-b .cm-line.cm-nova::before{content:'';position:absolute;left:-8px;top:0;bottom:0;width:3px;
+  background:var(--ok)}
+/* A grade rola na horizontal e cortaria o ::before: a barra é a borda dela, na mesma margem. */
+.col.mudanca-cm .cm-merge-b .cm-tabela.cm-nova{border-left:3px solid var(--ok);margin-left:-8px;padding-left:5px}
+.col.mudanca-cm .cm-merge-b .cm-nova .cm-changedText{background:none}
 .col.mudanca-cm .cm-mergeView .cm-editor .cm-changedLine,.col.mudanca-cm .cm-mergeView .cm-editor .cm-deletedChunk{background:transparent}
 .grudado{position:sticky;top:calc(var(--h-topo) + var(--h-cab) + 8px);display:flex;flex-direction:column;gap:4px}
 /* O projeto: o nome no topo troca de projeto; a lista mostra quanto falta em cada um. */
@@ -375,9 +384,12 @@ async function _carregar(arquivo){
 }
 
 async function agir(corpo){
-  const j = await postar('/api/act', {...corpo, projeto: P, file: D.docs[doc].file,
+  const arquivo = D.docs[doc].file;
+  const j = await postar('/api/act', {...corpo, projeto: P, file: arquivo,
                                      base: naChancela() ? '' : base});
-  if (j.estado) D = j.estado;
+  // A lista vem com os acompanhados primeiro: a primeira aprovação de um arquivo o muda de
+  // lugar. O arquivo aberto se reencontra pelo nome, não pela posição.
+  if (j.estado) { D = j.estado; const i = D.docs.findIndex(d => d.file === arquivo); if (i >= 0) doc = i; }
   recado = j.ok ? '✓ ' + (j.msg || 'feito') : '✕ ' + (j.erro || 'não deu');
   if (j.conflito) conflito = {chave: corpo.chave, atual: j.conflito.atual};
   else { conflito = null; form = null; if (j.ok && corpo.chave) delete sujos[corpo.chave]; }

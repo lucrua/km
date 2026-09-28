@@ -120,3 +120,21 @@ test('an overdue to_validate highlights its date, and a to_do date never does', 
   assert.deepEqual(vencidas, ['2020-01-01']);
   assert.equal(classes(s).filter(([, c]) => c === 'cm-vencida')[0][0], texto.indexOf('2020'));
 });
+
+test('on today\'s side, a wholly new line on screen gets the bar; a new table, the grid', () => {
+  const t = 'velho\nnovo\n\n| a |\n| - |\n| b |\n';
+  const s = EditorState.create({ doc: t, extensions: editorMarkdown() });
+  const novas = (faixas, lado = 'b') => {
+    const out = [];
+    decorar(s, true, faixas, lado).between(0, t.length, (f, _, d) => {
+      if (d.spec.class === 'cm-nova') out.push(f);
+      if (d.spec.widget?.nova) out.push('tabela');
+    });
+    return out;
+  };
+  const b = t.indexOf('novo');
+  // "novo" se emenda em "velho": a linha da tela é meio velha, então sem barra.
+  assert.deepEqual(novas([[b, t.length]]), [t.indexOf('\n| a'), 'tabela']);
+  assert.deepEqual(novas([[0, t.length]]), [0, t.indexOf('\n| a'), 'tabela']);
+  assert.deepEqual(novas([[0, t.length]], 'a'), []);   // a chancela não leva barra
+});

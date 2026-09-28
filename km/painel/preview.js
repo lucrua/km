@@ -10,6 +10,7 @@ import { EditorView, Decoration, WidgetType, StateField, StateEffect, EditorStat
 import { quebrasOcultas } from './paragrafo.js';
 import * as tabela from './tabela.js';
 import { hoje, marcaDaLinha } from './marcas.js';
+import { coberto, linhasNovas } from './novas.js';
 
 export { hoje };
 // Cada marca, a sua caixa.
@@ -162,11 +163,13 @@ function controle(rotulo, titulo, fazer) {
 
 export class Tabela extends WidgetType {
   // `realce`: por linha da tabela, as faixas mudadas em posições da linha.
-  constructor(linhas, from, editavel, realce = linhas.map(() => [])) {
-    super(); this.linhas = linhas; this.from = from; this.editavel = editavel; this.realce = realce;
+  // `nova`: a tabela inteira não existia na chancela — a grade leva a barra, não sublinhados.
+  constructor(linhas, from, editavel, realce = linhas.map(() => []), nova = false) {
+    super(); this.linhas = linhas; this.from = from; this.editavel = editavel; this.realce = realce; this.nova = nova;
   }
   eq(o) {
-    return o.from === this.from && o.editavel === this.editavel && o.linhas.join('\n') === this.linhas.join('\n')
+    return o.from === this.from && o.editavel === this.editavel && o.nova === this.nova
+      && o.linhas.join('\n') === this.linhas.join('\n')
       && JSON.stringify(o.realce) === JSON.stringify(this.realce);
   }
   ignoreEvent() { return true; }
@@ -175,7 +178,7 @@ export class Tabela extends WidgetType {
   }
   toDOM(view) {
     const caixa = document.createElement('div');
-    caixa.className = 'cm-tabela';
+    caixa.className = 'cm-tabela' + (this.nova ? ' cm-nova' : '');
     const t = document.createElement('table');
     const inicio = [];
     let p = this.from;
@@ -224,7 +227,8 @@ const foco = StateField.define({
 const OCULTAVEIS = new Set(['EmphasisMark', 'CodeMark', 'LinkMark', 'StrikethroughMark']);
 
 // `mudadas`: as faixas mudadas deste lado, pontos incluídos — por padrão, as da MergeView.
-export function decorar(state, editavel, mudadas = faixasDoLado(state, true)) {
+// `lado`: 'b' é o texto de hoje, onde as linhas inteiras novas ganham a barra (novas.js).
+export function decorar(state, editavel, mudadas = faixasDoLado(state, true), lado = getChunks(state)?.side) {
   const doc = state.doc;
   const arvore = ensureSyntaxTree(state, doc.length, 500) || syntaxTree(state);
   const ativo = editavel && state.field(foco, false) === true;
@@ -254,10 +258,17 @@ export function decorar(state, editavel, mudadas = faixasDoLado(state, true)) {
     if (ativo && cursor >= tb.from && cursor <= tb.to) continue;
     const l1 = doc.lineAt(tb.from), l2 = doc.lineAt(tb.to);
     const linhas = doc.sliceString(l1.from, l2.to).split('\n');
-    deco.push(Decoration.replace({ widget: new Tabela(linhas, l1.from, editavel, faixasDasLinhas(linhas, l1.from, mudadas)), block: true }).range(l1.from, l2.to));
+    const nova = lado === 'b' && coberto(doc.toString(), l1.from, l2.to, mudadas);
+    deco.push(Decoration.replace({ widget: new Tabela(linhas, l1.from, editavel, faixasDasLinhas(linhas, l1.from, mudadas), nova), block: true }).range(l1.from, l2.to));
     blocos.push([l1.from, l2.to]);
   }
   const numaGrade = (pos) => blocos.some(([a, b]) => pos >= a && pos <= b);
+  // A linha da tela é a que o parágrafo emendado forma: nova só se ela toda for nova.
+  if (lado === 'b') {
+    for (const p of linhasNovas(doc.toString(), juntas, mudadas)) {
+      if (!numaGrade(p)) deco.push(Decoration.line({ class: 'cm-nova' }).range(p));
+    }
+  }
   const linha = (from, to, cls) => {
     for (let n = doc.lineAt(from).number; n <= doc.lineAt(to).number; n++) {
       const l = doc.line(n);
@@ -335,6 +346,19 @@ const campo = (editavel) => StateField.define({
   provide: (f) => EditorView.decorations.from(f),
 });
 
+// No Código cada linha do arquivo é uma linha da tela; as novas ganham a barra do mesmo jeito.
+function novasCodigo(state) {
+  if (getChunks(state)?.side !== 'b') return Decoration.none;
+  return Decoration.set(linhasNovas(state.doc.toString(), new Set(), faixasDoLado(state))
+    .map((p) => Decoration.line({ class: 'cm-nova' }).range(p)));
+}
+const campoNovas = StateField.define({
+  create: novasCodigo,
+  update: (valor, tr) => (tr.docChanged || getChunks(tr.state)?.chunks !== getChunks(tr.startState)?.chunks
+    ? novasCodigo(tr.state) : valor),
+  provide: (f) => EditorView.decorations.from(f),
+});
+
 // Cores e pesos do Markdown, nos dois modos; os tamanhos e a fonte do código inline só no
 // Formatado — no Código tudo tem a mesma largura, para as tabelas alinharem.
 const cores = [
@@ -374,7 +398,7 @@ function vistaViva(editavel) {
   return [syntaxHighlighting(estiloFormatado), fonte('inherit'), foco,
           EditorView.focusChangeEffect.of((s, focando) => mudouFoco.of(focando)), campo(editavel)];
 }
-const vistaCodigo = () => [syntaxHighlighting(estiloCodigo), fonte('ui-monospace, Menlo, monospace')];
+const vistaCodigo = () => [syntaxHighlighting(estiloCodigo), fonte('ui-monospace, Menlo, monospace'), campoNovas];
 
 // O modo mora num Compartment: trocar reconfigura o editor em vez de refazê-lo, e o cursor,
 // o histórico e o que foi digitado continuam onde estavam.
