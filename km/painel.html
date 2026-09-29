@@ -325,7 +325,8 @@ border:1px solid var(--ok-bg);background:var(--ok-bg);color:var(--ok)}
   <div class="recado ruim" id="erro-p" hidden></div>
 </main>
 <script type="module">import * as arvore from '/static/painel/arvore.js'; import * as pjs from '/static/painel/projetos.js';
-window.arvore = arvore; window.pjs = pjs; window.dispatchEvent(new Event('modulos-prontos'));</script>
+import * as sjs from '/static/painel/sujos.js';
+window.arvore = arvore; window.pjs = pjs; window.sjs = sjs; window.dispatchEvent(new Event('modulos-prontos'));</script>
 <script type="module" src="/static/painel/editores.js"></script>
 <script>
 const $ = (id) => document.getElementById(id);
@@ -344,8 +345,10 @@ let lendo = '';
 const soAprovar = () => !!(D && D.so_aprovar);
 let form = null, recado = '', conflito = null;
 // O texto que você escreveu e ainda não salvou, por pedaço da tela. Enquanto houver algo
-// aqui a tela não se recarrega sozinha: recarregar apagaria o que você digitou.
-let sujos = {}, originais = {};
+// aqui a tela não se recarrega sozinha: recarregar apagaria o que você digitou. `bases` é o
+// texto do arquivo em que cada edição começou: quando os trechos mudam por baixo (aprovar
+// junta blocos iguais), a edição segue o texto, não a posição — sujos.js.
+let sujos = {}, originais = {}, bases = {};
 const temSujo = () => Object.keys(sujos).length > 0;
 const naChancela = () => !D || D.base === 'refs/km/chancela';
 // O texto do arquivo termina em quebra de linha e o da tela não; comparar sem isso evita
@@ -405,7 +408,7 @@ async function agir(corpo){
   recado = j.ok ? '✓ ' + (j.msg || 'feito') : '✕ ' + (j.erro || 'não deu');
   if (j.ok && j.desfazer) { aprovadas.push({file: arquivo, commit: j.desfazer, recado, lendo}); aprovadas = aprovadas.slice(-10); }
   if (j.conflito) conflito = {chave: corpo.chave, atual: j.conflito.atual};
-  else { conflito = null; form = null; if (j.ok && corpo.chave) delete sujos[corpo.chave]; }
+  else { conflito = null; form = null; if (j.ok && corpo.chave) { delete sujos[corpo.chave]; delete bases[corpo.chave]; } }
   desenhar();
   if (j.ok && !temSujo()) setTimeout(() => carregar(), 50);
 }
@@ -428,7 +431,7 @@ async function desfazerAprovacao(){
     desenhar();
   } else if (j.ok) {
     // Desfeita num arquivo que não está aberto: ele abre, com o trecho pendente de novo.
-    sujos = {}; conflito = null; form = null; foco = null; scrollTo(0, 0);
+    sujos = {}; bases = {}; conflito = null; form = null; foco = null; scrollTo(0, 0);
     lendo = a.lendo;
     await carregar(a.file);
     desenharRecado();
@@ -692,6 +695,7 @@ function desenhar(){
   lado();
 
   const d = D.docs[doc];
+  realocarSujos();
   originais = {};
   km.destruirTodos();
   $('selecao').hidden = true;
@@ -721,7 +725,7 @@ function desenhar(){
         continue;
       }
       html += `<div class="col agora inteiro">${lugar(chave, s.linha)}</div>
-        <div class="col acoes" data-acoes="${esc(chave)}">${salvarCel(chave)}</div>`;
+        <div class="col acoes" data-acoes="${esc(chave)}"><div class="grudado">${salvarCel(chave)}</div></div>`;
       continue;
     }
     const chave = 'c:' + s.chave;
@@ -741,7 +745,7 @@ function desenhar(){
 // ---- gestos -----------------------------------------------------------------------
 function abrir(i){
   if (temSujo() && !confirm('Há texto editado e não salvo. Sair mesmo assim?')) return;
-  sujos = {}; conflito = null; form = null; foco = null; scrollTo(0,0);
+  sujos = {}; bases = {}; conflito = null; form = null; foco = null; scrollTo(0,0);
   carregar(D.docs[i].file);
 }
 // O VS Code abre no arquivo, na linha da mudança em foco (j/k) se houver uma.
@@ -781,12 +785,13 @@ function enviar(){
   return agir({acao:'reverter', shas: form.shas, motivo: texto});
 }
 function mexeuTexto(chave, texto){
-  if (mesmo(texto, originais[chave])) delete sujos[chave]; else sujos[chave] = texto;
+  if (mesmo(texto, originais[chave])) { delete sujos[chave]; delete bases[chave]; }
+  else { if (!(chave in bases)) bases[chave] = originais[chave]; sujos[chave] = texto; }
   // Só a coluna das ações muda; o texto que você está digitando fica onde está.
   const cel = document.querySelector(`[data-acoes="${CSS.escape(chave)}"]`);
   if (!cel) return;
   const m = chave.startsWith('c:') ? mudancas().find((x) => 'c:' + x.chave === chave) : null;
-  cel.innerHTML = m ? `<div class="grudado">${acoesDaMudanca(m)}</div>` : salvarCel(chave);
+  cel.innerHTML = `<div class="grudado">${m ? acoesDaMudanca(m) : salvarCel(chave)}</div>`;
 }
 function salvar(chave){
   if (sujos[chave] === undefined) return;
@@ -803,7 +808,30 @@ function descartar(chave){
   recado = '✓ edição descartada';
   descartado = {chave, texto: sujos[chave], original: originais[chave],
                 file: D.docs[doc].file, lendo, recado};
-  delete sujos[chave]; if (conflito && conflito.chave === chave) conflito = null; desenhar();
+  delete sujos[chave]; delete bases[chave]; if (conflito && conflito.chave === chave) conflito = null; desenhar();
+}
+// Os trechos mudaram (uma aprovação, uma recarga): cada edição não salva vai para o trecho
+// onde o texto em que ela começou está agora. Sem lugar certo, ela volta para você no recado.
+// A edição em conflito fica onde está: a nota ao lado dela já mostra o que há no arquivo.
+function realocarSujos(){
+  if (!temSujo() || !window.sjs) return;
+  const trechos = segs().filter(s => s.tipo === 'igual').map(s => ({chave: 'g:' + s.linha, texto: s.texto}))
+    .concat(mudancas().filter(m => m.geral !== 'saiu').map(m => ({chave: 'c:' + m.chave, texto: m.agora})));
+  const fixo = conflito && sujos[conflito.chave] !== undefined ? conflito.chave : null;
+  const guardado = fixo ? {texto: sujos[fixo], base: bases[fixo]} : null;
+  const soltos = {...sujos}, suasBases = {...bases};
+  if (fixo) { delete soltos[fixo]; delete suasBases[fixo]; }
+  const r = sjs.realocar(soltos, suasBases, trechos.filter(t => t.chave !== fixo));
+  sujos = r.sujos; bases = r.bases;
+  if (guardado) { sujos[fixo] = guardado.texto; if (guardado.base !== undefined) bases[fixo] = guardado.base; }
+  if (r.perdidas.length) {
+    const texto = r.perdidas.join('\n\n———\n\n');
+    recado = '✕ o trecho que você editava mudou no arquivo antes de você salvar — seu texto está abaixo';
+    semLugar = {recado, texto};
+    paraAreaDeTransferencia(texto).then(ok => { if (ok && recado === semLugar.recado) {
+      recado = semLugar.recado = recado + ' e na área de transferência'; desenharRecado(); } });
+    desenharRecado();
+  }
 }
 const podeVoltarDescarte = () => !!descartado && recado === descartado.recado;
 async function voltarDescarte(){
@@ -813,7 +841,7 @@ async function voltarDescarte(){
   // O desenho refaz originais só para os trechos na tela: sem ele, o trecho sumiu.
   const igual = D && D.docs[doc] && D.docs[doc].file === x.file && lendo === x.lendo
     && originais[x.chave] !== undefined && mesmo(originais[x.chave], x.original);
-  if (igual) { sujos[x.chave] = x.texto; recado = '↶ edição de volta — ainda não salva'; return desenhar(); }
+  if (igual) { sujos[x.chave] = x.texto; bases[x.chave] = originais[x.chave]; recado = '↶ edição de volta — ainda não salva'; return desenhar(); }
   // O texto nunca some: fica no recado para você selecionar, e na área de transferência se der.
   recado = '✕ o trecho mudou no arquivo desde o descarte — seu texto está abaixo'
     + (await paraAreaDeTransferencia(x.texto) ? ' e na área de transferência' : '');
@@ -909,7 +937,7 @@ setModo(codigo);
 function trocarBase(){ base = $('base').value; carregar(); }
 function trocarLendo(){
   if (temSujo() && !confirm('Há texto editado e não salvo. Sair mesmo assim?')) { $('lendo').value = lendo; return; }
-  sujos = {}; conflito = null; form = null; foco = null; desenhado = null;
+  sujos = {}; bases = {}; conflito = null; form = null; foco = null; desenhado = null;
   lendo = $('lendo').value;
   carregar(D && D.docs[doc] ? D.docs[doc].file : null, true);
 }
@@ -1171,7 +1199,7 @@ function lembrar(){
 
 // Tudo que a tela guardava era do projeto anterior: a árvore, as edições, o desfazer.
 function esquecerProjeto(){
-  sujos = {}; originais = {}; conflito = null; form = null; foco = null; recado = '';
+  sujos = {}; bases = {}; originais = {}; conflito = null; form = null; foco = null; recado = '';
   D = null; doc = 0; base = null; desenhado = null; atualL = null; focoL = null; escolhasDe = null;
   ARV = null; abertas = new Set(); focoArq = '.'; passos = []; refeitos = []; aprovadas = []; lendo = '';
   if (window.km && km.destruirTodos) km.destruirTodos();
