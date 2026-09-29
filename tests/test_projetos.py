@@ -237,6 +237,17 @@ class ListarTest(XdgTest):
         self.assertIn("não existe", por["sumiu"]["erro"])
         self.assertEqual(por["alfa"]["erro"], "")
 
+    def test_a_repository_without_commits_is_an_error_on_its_row(self):
+        a = novo_repo(self.tmp / "alfa", {"a.md": "# A\n"})
+        vazio = self.tmp / "vazio"
+        vazio.mkdir()
+        git(vazio, "init", "-q", "-b", "main")
+        ac.gravar(vazio, ac.vazia())
+        pj.gravar([str(a), str(vazio)])
+        por = {p["nome"]: p for p in pj.listar()}
+        self.assertIn("nenhum commit", por["vazio"]["erro"])
+        self.assertEqual(por["alfa"]["erro"], "")
+
 
 class CliProjetosTest(XdgTest):
     def setUp(self):
@@ -377,6 +388,29 @@ class RotasTest(XdgTest):
         self.assertEqual([p["nome"] for p in j["projetos"]], ["alfa", "beta"])
         self.assertEqual(j["inicial"], "beta")
         self.assertEqual(j["projetos"][1]["n"], 2)
+
+    def test_a_project_without_commits_does_not_break_the_list(self):
+        vazio = self.tmp / "vazio"
+        vazio.mkdir()
+        git(vazio, "init", "-q", "-b", "main")
+        ac.gravar(vazio, ac.vazia())
+        pj.gravar(pj.carregar() + [str(vazio)])
+        c, j = self.get("/api/projetos")
+        self.assertEqual(c, 200)
+        por = {p["nome"]: p for p in j["projetos"]}
+        self.assertEqual(set(por), {"alfa", "beta", "vazio"})
+        self.assertIn("nenhum commit", por["vazio"]["erro"])
+        # Sem commits ainda dá para escolher os arquivos e revisar: só não há commits a listar.
+        c, j = self.get("/api/state?projeto=vazio")
+        self.assertEqual(c, 200)
+        self.assertNotIn("commit", [r["tipo"] for r in j["revisoes"]])
+        self.assertEqual(self.get("/api/arquivos?projeto=vazio")[0], 200)
+
+    def test_a_git_failure_is_a_sentence_not_an_empty_reply(self):
+        with mock.patch.object(serve, "estado", side_effect=SystemExit("git log: falhou")):
+            c, j = self.get("/api/state?projeto=alfa")
+        self.assertEqual(c, 500)
+        self.assertIn("git log: falhou", j["erro"])
 
     def test_approving_in_one_project_leaves_the_other_alone(self):
         ch.escrever(self.a, {"a.md": "# A\n\ntexto de a\n"}, "c\n")

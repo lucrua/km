@@ -125,6 +125,16 @@ def raiz_git(pasta: Path) -> Path | None:
     return Path(os.path.realpath(r.stdout.strip()))
 
 
+def sem_commit(raiz: Path) -> bool:
+    """A repository just made with `git init`: no HEAD yet, so nothing to compare against."""
+    r = subprocess.run(["git", "rev-parse", "--verify", "--quiet", "HEAD"], cwd=raiz,
+                       capture_output=True, text=True)
+    return r.returncode != 0
+
+
+SEM_COMMIT = "ainda não tem nenhum commit — faça o primeiro"
+
+
 def adicionar(caminho: str, init: bool = False) -> dict:
     """Register a repository root. Adding one already there is not an error.
 
@@ -189,7 +199,12 @@ def resumo(raiz: Path) -> dict:
         return {"pct": "", "n": 0, "pendentes": 0, "erro": "não é mais a raiz de um repositório git"}
     if not (raiz / ac.KM_DIR / ac.CONFIG).exists():
         return {"pct": "", "n": 0, "pendentes": 0, "erro": "sem .km/config.json"}
-    e = serve.estado(raiz)
+    if sem_commit(raiz):
+        return {"pct": "", "n": 0, "pendentes": 0, "erro": SEM_COMMIT}
+    try:
+        e = serve.estado(raiz)
+    except SystemExit as x:                 # um git que falhou: o erro fica na linha dele
+        return {"pct": "", "n": 0, "pendentes": 0, "erro": str(x)}
     return {"pct": e["pct"], "n": len(e["docs"]),
             "pendentes": sum(1 for d in e["docs"] if d["pendente"]), "erro": e.get("erro", "")}
 

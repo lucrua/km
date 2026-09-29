@@ -89,8 +89,11 @@ def revisoes(root: Path, limite: int = 15) -> list[dict]:
                      "--format=%(refname:short)", "refs/heads").splitlines():
         if linha.strip():
             out.append({"rev": linha.strip(), "label": linha.strip(), "tipo": "branch"})
-    for linha in _ok(root, "log", f"-{limite}", "--format=%h\t%ad\t%s",
-                     "--date=short", "HEAD").splitlines():
+    # Um repositório recém-criado ainda não tem HEAD: sem commits para listar, não um erro.
+    tem_head = _git(root, "rev-parse", "--verify", "--quiet", "HEAD").returncode == 0
+    log = _ok(root, "log", f"-{limite}", "--format=%h\t%ad\t%s",
+              "--date=short", "HEAD") if tem_head else ""
+    for linha in log.splitlines():
         if not linha.strip():
             continue
         sha, data, assunto = linha.split("\t", 2)

@@ -523,6 +523,8 @@ class Handler(BaseHTTPRequestHandler):
             self._json({"ok": False, "erro": e.erro}, e.codigo)
         except ac.ConfigInvalida as e:          # o registro quebrado: uma frase, não um 500 mudo
             self._json({"ok": False, "erro": str(e)}, 500)
+        except SystemExit as e:                 # um git que falhou: a frase dele, não uma resposta vazia
+            self._json({"ok": False, "erro": str(e)}, 500)
 
     def _de_outro_site(self) -> bool:
         """This server writes documents and the chancel. A page from anywhere else must not
