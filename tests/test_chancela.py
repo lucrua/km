@@ -176,6 +176,30 @@ class MudancaTest(unittest.TestCase):
         depois = DOC.replace("Onze", "Doze") + "\n## Nova\n\nx\n"
         self.assertEqual(ch.mudancas(ch.aplicar(DOC, depois, set()), DOC), [])
 
+    def test_reordered_blocks_are_never_written_twice(self):
+        # Um bloco que subiu casava com um velho que já tinha passado, e os velhos entre
+        # os dois saíam de novo como "sumiu": cada aprovação duplicava parte da chancela.
+        antes = "# T\n\nAlfa alfa alfa alfa.\n\nBeta beta beta beta.\n\nGama gama gama gama.\n"
+        depois = "# T\n\nGama gama gama gama mudado.\n\nAlfa alfa alfa alfa mudado.\n"
+        self.assertEqual(ch.aplicar(antes, depois, set()), antes)
+        ms = ch.mudancas(antes, depois)
+        self.assertEqual(ch.aplicar(antes, depois, {str(m.n) for m in ms}), depois)
+        for m in ms:
+            velhos = [u.antes.texto for u in m.unidades if u.antes]
+            self.assertEqual(len(velhos), len(set(velhos)), "um bloco velho aparece duas vezes")
+
+    def test_a_new_block_before_an_edited_one_does_not_repeat_the_old_ones(self):
+        # Um bloco novo sem par levava todos os velhos restantes como "sumiu"; o próximo
+        # casado voltava a posição e os mesmos velhos saíam de novo.
+        antes = ("# T\n\nAlfa alfa alfa alfa.\n\nBeta beta beta beta.\n\nGama gama gama gama.\n\n"
+                 "Delta delta delta delta.\n")
+        depois = "# T\n\nAlfa alfa alfa alfa mudado.\n\nNada a ver com nada.\n\nGama gama gama gama mudado.\n"
+        self.assertEqual(ch.aplicar(antes, depois, set()), antes)
+        ms = ch.mudancas(antes, depois)
+        self.assertEqual(ch.aplicar(antes, depois, {str(m.n) for m in ms}), depois)
+        velhos = [u.antes.texto for m in ms for u in m.unidades if u.antes]
+        self.assertEqual(len(velhos), len(set(velhos)), "um bloco velho aparece duas vezes")
+
     def test_accepting_one_block_of_a_change_leaves_the_rest_pending(self):
         depois = DOC.replace("Onze", "Doze").replace(
             "> 💬 a ordem veio de um print, não do export.",

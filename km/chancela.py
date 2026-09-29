@@ -457,16 +457,20 @@ def _parear(velhos: list[Bloco], novos: list[Bloco], corte: float = 0.45) -> lis
     """Which old block became which new one, in reading order.
 
     Pairing by similarity, not position: two unrelated paragraphs in the same place are one
-    that left and one that arrived, not an "edit" to be read word by word.
+    that left and one that arrived, not an "edit" to be read word by word. Pairs never
+    cross: a block that moved up is one that left and one that arrived, as in `git diff` —
+    so refusing everything gives the old text back and every old block appears once.
     """
     usados: set[int] = set()
     casos: dict[int, int] = {}
+    ultimo = -1
     for j, nb in enumerate(novos):
         melhor, nota = None, corte
         for i, vb in enumerate(velhos):
             # Só se casa bloco do mesmo tipo: um parágrafo que "virou" título porque os dois
-            # começam com a mesma palavra é um que saiu e outro que entrou.
-            if i in usados or vb.tipo != nb.tipo:
+            # começam com a mesma palavra é um que saiu e outro que entrou. E só adiante do
+            # último casado: casar para trás punha os velhos do meio duas vezes na saída.
+            if i <= ultimo or vb.tipo != nb.tipo:
                 continue
             r = _parecido(vb.texto, nb.texto, nota)
             if r >= nota:
@@ -474,19 +478,21 @@ def _parear(velhos: list[Bloco], novos: list[Bloco], corte: float = 0.45) -> lis
         if melhor is not None:
             usados.add(melhor)
             casos[j] = melhor
+            ultimo = melhor
     saida, pos = [], 0
     for j, nb in enumerate(novos):
         alvo = casos.get(j)
-        limite = alvo if alvo is not None else len(velhos)
-        while pos < limite:
+        if alvo is None:
+            # Um bloco que entrou não leva os velhos junto: os que saíram vêm antes do próximo
+            # casado, ou no fim — levá-los aqui os repetia quando o próximo casado vinha depois.
+            saida.append(("novo", None, nb))
+            continue
+        while pos < alvo:
             if pos not in usados:
                 saida.append(("sumiu", velhos[pos], None))
             pos += 1
-        if alvo is not None:
-            saida.append(("mexido", velhos[alvo], nb))
-            pos = alvo + 1
-        else:
-            saida.append(("novo", None, nb))
+        saida.append(("mexido", velhos[alvo], nb))
+        pos = alvo + 1
     while pos < len(velhos):
         if pos not in usados:
             saida.append(("sumiu", velhos[pos], None))
