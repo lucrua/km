@@ -752,21 +752,25 @@ async function abrirNoCode(){
   // Só o recado muda: redesenhar tiraria o cursor de quem está no meio de um texto.
   desenharRecado();
 }
+async function paraAreaDeTransferencia(texto){
+  try { await navigator.clipboard.writeText(texto); return true; } catch (err) {
+    // Sem a API (uma porta encaminhada que o navegador não trata como local): o jeito antigo.
+    const t = document.createElement('textarea');
+    t.value = texto; t.style.position = 'fixed'; t.style.opacity = '0';
+    document.body.append(t); t.select();
+    let ok = false;
+    try { ok = document.execCommand('copy'); } catch (err2) {}
+    t.remove();
+    return ok;
+  }
+}
+
 // O caminho do arquivo aberto, para colar num terminal, num chat, num agente.
 async function copiarCaminho(e){
   // Num branch sem worktree não há arquivo no disco: o completo é o `branch:caminho` do git.
   const rel = D.docs[doc].file;
   const texto = !e.shiftKey ? rel : soAprovar() ? D.lendo.slice(3) + ':' + rel : D.pasta.replace(/\/$/, '') + '/' + rel;
-  let ok = false;
-  try { await navigator.clipboard.writeText(texto); ok = true; } catch (err) {
-    // Sem a API (uma porta encaminhada que o navegador não trata como local): o jeito antigo.
-    const t = document.createElement('textarea');
-    t.value = texto; t.style.position = 'fixed'; t.style.opacity = '0';
-    document.body.append(t); t.select();
-    try { ok = document.execCommand('copy'); } catch (err2) {}
-    t.remove();
-  }
-  recado = ok ? '✓ copiado: ' + texto : '✕ não consegui copiar — o caminho é ' + texto;
+  recado = await paraAreaDeTransferencia(texto) ? '✓ copiado: ' + texto : '✕ não consegui copiar — o caminho é ' + texto;
   desenharRecado();
 }
 function fechar(){ form = null; desenhar(); }
@@ -790,7 +794,32 @@ function salvar(chave){
   agir({acao:'salvar', chave, original: originais[chave], texto: sujos[chave],
         linha: el ? Number(el.dataset.linha) : 1});
 }
-function descartar(chave){ delete sujos[chave]; if (conflito && conflito.chave === chave) conflito = null; desenhar(); }
+// Descartar é fácil de errar (um clique, um Esc): o último texto descartado volta com
+// ↶ desfazer no recado ou Ctrl+Z fora do texto — enquanto aquele trecho estiver na tela
+// como estava. Se o arquivo mudou por baixo, o texto vai para a área de transferência.
+let descartado = null, semLugar = null;
+function descartar(chave){
+  if (sujos[chave] === undefined) return;
+  recado = '✓ edição descartada';
+  descartado = {chave, texto: sujos[chave], original: originais[chave],
+                file: D.docs[doc].file, lendo, recado};
+  delete sujos[chave]; if (conflito && conflito.chave === chave) conflito = null; desenhar();
+}
+const podeVoltarDescarte = () => !!descartado && recado === descartado.recado;
+async function voltarDescarte(){
+  const x = descartado;
+  if (!x) return;
+  descartado = null;
+  // O desenho refaz originais só para os trechos na tela: sem ele, o trecho sumiu.
+  const igual = D && D.docs[doc] && D.docs[doc].file === x.file && lendo === x.lendo
+    && originais[x.chave] !== undefined && mesmo(originais[x.chave], x.original);
+  if (igual) { sujos[x.chave] = x.texto; recado = '↶ edição de volta — ainda não salva'; return desenhar(); }
+  // O texto nunca some: fica no recado para você selecionar, e na área de transferência se der.
+  recado = '✕ o trecho mudou no arquivo desde o descarte — seu texto está abaixo'
+    + (await paraAreaDeTransferencia(x.texto) ? ' e na área de transferência' : '');
+  semLugar = {recado, texto: x.texto};
+  desenharRecado();
+}
 function copiar(chave){ navigator.clipboard?.writeText(sujos[chave] || ''); recado = '✓ seu texto está na área de transferência'; desenhar(); }
 
 // A marca entra no formato combinado, com o texto de exemplo selecionado, e vira texto seu:
@@ -900,9 +929,10 @@ document.addEventListener('keydown', (e)=>{
     return;   // dentro do texto, letra é letra
   }
   if (el.tagName === 'INPUT' || el.tagName === 'SELECT') { if (e.key === 'Escape') fechar(); return; }
-  // Fora do texto, Ctrl+Z desfaz a última aprovação; dentro, é o do editor.
+  // Fora do texto, Ctrl+Z desfaz o descarte que acabou de acontecer, ou a última
+  // aprovação; dentro, é o do editor.
   if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === 'z') {
-    e.preventDefault(); return desfazerAprovacao();
+    e.preventDefault(); return podeVoltarDescarte() ? voltarDescarte() : desfazerAprovacao();
   }
   const ms = mudancas();
   if (!ms.length) return;
@@ -917,6 +947,8 @@ document.addEventListener('keydown', (e)=>{
 // O arquivo muda por fora: um agente escreve, o editor salva. A tela se atualiza sozinha
 // quando você não está no meio de escrever nada.
 setInterval(()=>{ if (vista === 'revisar' && P && !form && !temSujo()) carregar(); }, 8000);
+// F5 ou fechar a aba com texto não salvo: o navegador pergunta antes.
+addEventListener('beforeunload', (e) => { if (temSujo()) { e.preventDefault(); e.returnValue = ''; } });
 // ---- a vista Arquivos --------------------------------------------------------------
 let vista = 'revisar', ARV = null, abertas = new Set(), focoArq = '.';
 // Os últimos 5 passos, e o que foi desfeito, para refazer. Vive na página: a árvore
@@ -1071,6 +1103,17 @@ function desenharRecado(){
     const b = document.createElement('button');
     b.textContent = '↶ desfazer'; b.onclick = desfazerAprovacao;
     r.append(b);
+  }
+  if (podeVoltarDescarte()) {
+    const b = document.createElement('button');
+    b.textContent = '↶ desfazer'; b.title = 'traz de volta o texto descartado · Ctrl+Z fora do texto';
+    b.onclick = voltarDescarte;
+    r.append(b);
+  }
+  if (semLugar && recado === semLugar.recado) {
+    const t = document.createElement('div');
+    t.className = 'txt mini'; t.textContent = semLugar.texto;
+    r.append(t);
   }
   const d = $('btn-desfazer-ap');
   d.disabled = !aprovadas.length;
