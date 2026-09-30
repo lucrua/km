@@ -17,6 +17,9 @@ border-bottom:1px solid var(--rule);position:sticky;top:0;background:var(--bg);z
 select,.topo button{font:inherit;font-size:12.5px;padding:3px 9px;border-radius:6px;
 border:1px solid var(--rule);background:var(--bg);color:var(--ink);cursor:pointer}
 .topo .dir{margin-left:auto;display:flex;gap:8px;align-items:center}
+/* Um select tem a largura da opção mais longa; um rótulo de commit comprido empurraria a barra
+   para duas linhas. O texto inteiro fica na lista e no título. */
+.topo .dir select{max-width:200px;text-overflow:ellipsis}
 .recado{padding:7px 16px;font-size:13px;background:var(--ok-bg);color:var(--ok);
 border-bottom:1px solid var(--rule)}
 .recado.ruim{background:var(--neg-bg);color:var(--neg)}
@@ -27,6 +30,8 @@ border:1px solid currentColor;background:transparent;color:inherit}
 .lado{width:var(--lado);flex:0 0 var(--lado);padding:6px 0 16px;position:sticky;top:var(--h-topo);
 max-height:calc(100vh - var(--h-topo));overflow:auto;overscroll-behavior:contain;scrollbar-width:thin;
 scrollbar-color:var(--rule) transparent}
+.lado .resumo{padding:2px 10px 8px 12px;color:var(--mut);font-size:11.5px;line-height:1.45;
+font-variant-numeric:tabular-nums}
 .ramo{font-size:13px;line-height:24px}
 .ramo .no{display:flex;align-items:center;height:24px;position:relative;cursor:pointer;
 padding:0 10px 0 calc(6px + (var(--n) - 1) * 12px);white-space:nowrap;outline:0;user-select:none}
@@ -285,15 +290,9 @@ border:1px solid var(--ok-bg);background:var(--ok-bg);color:var(--ok)}
   <button role="tab" id="aba-arquivos" aria-selected="false" onclick="mostrar('arquivos')">Arquivos</button>
   <button role="tab" id="aba-projetos" aria-selected="false" onclick="mostrar('projetos')">Projetos</button>
 </div>
-<span class="n" id="resumo"></span>
 <div class="dir">
 <span id="so-revisar">
-  <span class="q">no cursor:</span>
-  <button onmousedown="event.preventDefault()" onclick="noCursor('to_do')" title="to_do — para o agente">📌</button>
-  <button onmousedown="event.preventDefault()" onclick="noCursor('to_validate')" title="to_validate — com prazo">❓</button>
-  <button onmousedown="event.preventDefault()" onclick="noCursor('comment')" title="comment — para quem ler depois">💬</button>
-  <span style="width:10px"></span>
-  <button id="btn-desfazer-ap" onclick="desfazerAprovacao()" disabled title="nenhuma aprovação a desfazer">↶ Desfazer aprovação</button>
+  <button id="btn-desfazer-ap" onclick="desfazerAprovacao()" disabled title="nenhuma aprovação a desfazer">↶ Desfazer</button>
   <span class="q">comparar com</span><select id="base" onchange="trocarBase()"></select>
   <span class="q">lendo</span><select id="lendo" onchange="trocarLendo()"
     title="o lado direito: esta pasta, outro worktree ou um branch — a chancela é uma só para todos"></select>
@@ -487,7 +486,12 @@ function lado(){
   if (!linhasL.some(l => l.no.caminho === focoL)) focoL = linhasL[0] ? linhasL[0].no.caminho : null;
   $('corpo').classList.toggle('sem-docs', !D.docs.length);
   const nav = $('lado'), noTeclado = !!document.activeElement?.closest?.('#lado');
-  nav.innerHTML = `<div class="ramo" role="tree" aria-label="arquivos revisados">${linhasL.map(linhaLado).join('')}</div>`;
+  // O resumo é da lista: fica no alto dela, e não disputa a barra do topo com os botões.
+  const em = D.docs.filter(d => d.rastreado && !d.pendente).length;
+  const sem = D.docs.filter(d => !d.rastreado).length;
+  const resumo = [`${D.docs.length} arquivos`, `${em} em dia`, D.pct ? `${D.pct} do conteúdo a aprovar` : 'nada a aprovar']
+    .concat(sem ? [`${sem} sem chancela`] : []).join(' · ');
+  nav.innerHTML = `<div class="resumo">${esc(resumo)}</div><div class="ramo" role="tree" aria-label="arquivos revisados">${linhasL.map(linhaLado).join('')}</div>`;
   const f = nav.querySelector(`[data-caminho="${CSS.escape(focoL || '')}"]`);
   if (f && noTeclado) f.focus({preventScroll: true});
   if (novo) aVista(nav.querySelector('[aria-selected="true"]'), true);
@@ -694,10 +698,6 @@ function desenhar(){
   // A posição é lida antes de qualquer coisa ser destruída.
   const y = scrollY;
   desenharTopo();
-  const em = D.docs.filter(d => d.rastreado && !d.pendente).length;
-  const sem = D.docs.filter(d => !d.rastreado).length;
-  $('resumo').textContent = `${D.docs.length} arquivos · ${em} em dia · `
-    + (D.pct ? `${D.pct} do conteúdo a aprovar` : 'nada a aprovar') + (sem ? ` · ${sem} sem chancela` : '');
   desenharRecado();
   $('lendo').innerHTML = (D.fontes || []).map(f =>
     `<option value="${esc(f.id)}" ${f.id===D.lendo?'selected':''}>${esc(f.rotulo)}</option>`).join('');
@@ -705,6 +705,7 @@ function desenhar(){
   $('lendo').previousElementSibling.hidden = $('lendo').hidden;
   $('base').innerHTML = D.revisoes.map(v =>
     `<option value="${esc(v.rev)}" ${v.rev===D.base?'selected':''}>${esc(v.label)}</option>`).join('');
+  $('base').title = $('base').selectedOptions[0]?.text || '';
   $('v-tudo').setAttribute('aria-pressed', ver==='tudo');
   $('v-mudou').setAttribute('aria-pressed', ver==='mudou');
   lado();
@@ -867,12 +868,6 @@ function copiar(chave){ navigator.clipboard?.writeText(sujos[chave] || ''); reca
 
 // A marca entra no formato combinado, com o texto de exemplo selecionado, e vira texto seu:
 // você escreve por cima e salva como qualquer outra edição.
-function noCursor(tipo){
-  if (soAprovar()) { recado = '✕ um branch sem worktree não se edita — abra um worktree dele'; return desenhar(); }
-  const chave = km.focado();
-  if (!chave) { recado = '✕ clique no texto, onde a marca deve entrar, e depois no botão'; return desenhar(); }
-  km.inserirMarca(chave, tipo);
-}
 // O que gruda no topo (a régua, a linha dos rótulos, os botões de cada mudança) fica logo
 // abaixo do que já está grudado: a barra quebra em duas linhas em tela estreita, então a altura
 // é medida, não fixa.
@@ -895,6 +890,16 @@ const botoesDeMarca = (chave) => `<div class="marcas">
       <button onmousedown="event.preventDefault()" onclick="marcaNaMudanca('${chave}','to_do')" title="to_do — para o agente">📌</button>
       <button onmousedown="event.preventDefault()" onclick="marcaNaMudanca('${chave}','to_validate')" title="to_validate — com prazo">❓</button>
       <button onmousedown="event.preventDefault()" onclick="marcaNaMudanca('${chave}','comment')" title="comment — para quem ler depois">💬</button></div>`;
+// Um trecho igual não tem botões até o cursor entrar nele: as marcas aparecem na célula ao
+// lado, no mesmo lugar em que um trecho mudado as tem, e saem quando o cursor sai.
+function marcasDoFoco(chave){
+  document.querySelector('.marcas.do-foco')?.remove();
+  if (!chave || !chave.startsWith('g:') || sujos[chave] !== undefined || soAprovar()) return;
+  const cel = document.querySelector(`[data-acoes="${CSS.escape(chave)}"] .grudado`);
+  if (cel) cel.insertAdjacentHTML('beforeend', botoesDeMarca(chave).replace('class="marcas"', 'class="marcas do-foco"'));
+}
+$('doc').addEventListener('focusin', (e) => marcasDoFoco(e.target.closest('.cm-lugar')?.dataset.chave));
+$('doc').addEventListener('focusout', (e) => { if (!e.relatedTarget?.closest?.('.cm-lugar')) marcasDoFoco(null); });
 // ---- aprovar parte de um bloco ----------------------------------------------------
 // Como aceitar metade de um hunk numa revisão de código: selecione, na coluna do texto
 // de hoje, o pedaço cuja mudança você aceita. O resto do bloco continua pendente.
@@ -1028,7 +1033,6 @@ function mostrar(v){
   for (const x of ['revisar', 'arquivos', 'projetos']) $('aba-' + x).setAttribute('aria-selected', v === x);
   $('so-revisar').hidden = v !== 'revisar';
   $('so-arquivos').hidden = v !== 'arquivos';
-  $('resumo').hidden = v !== 'revisar';        // o resumo é da revisão; na árvore, cada linha diz o seu
   document.querySelector('.corpo').hidden = v !== 'revisar';
   $('arquivos').hidden = v !== 'arquivos';
   $('projetos').hidden = v !== 'projetos';
@@ -1242,7 +1246,7 @@ function esquecerProjeto(){
   D = null; doc = 0; base = null; desenhado = null; atualL = null; focoL = null; escolhasDe = null;
   ARV = null; abertas = new Set(); focoArq = '.'; passos = []; refeitos = []; aprovadas = []; lendo = '';
   if (window.km && km.destruirTodos) km.destruirTodos();
-  $('doc').innerHTML = ''; $('lado').innerHTML = ''; $('resumo').textContent = ''; $('arquivos').innerHTML = '';
+  $('doc').innerHTML = ''; $('lado').innerHTML = ''; $('arquivos').innerHTML = '';
   desenharRecado();
 }
 function desmarcarProjeto(){ P = null; Pcaminho = null; esquecerProjeto(); lembrar(); desenharTopo(); }

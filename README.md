@@ -152,8 +152,9 @@ The whole second column is always editable — click and type. The action column
 **Salvar no arquivo** when there is something to save; Ctrl+S saves, Esc discards. A save is
 located by what the text said, not by line number, so a line an agent inserted above does not
 make you write over someone else's paragraph; if your text is no longer in the file, the save
-is refused and the page shows what is there now. **📌 ❓ 💬 at the top** insert a mark after
-the block the cursor is in, the same way.
+is refused and the page shows what is there now. **📌 ❓ 💬** insert a mark after
+the block the cursor is in, the same way — on a change they are always in its action cell; on
+unchanged text they appear there while the cursor is in the block.
 
 A block is identified by its content, never its position: a page that asks to approve a
 block after the file moved gets a refusal, not a different block.
