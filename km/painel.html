@@ -207,6 +207,19 @@ background:var(--ok-bg);color:var(--ok)}
 .col.mudanca-cm .cm-merge-b .cm-tabela.cm-nova{border-left:3px solid var(--ok);margin-left:-8px;padding-left:5px}
 .col.mudanca-cm .cm-merge-b .cm-nova .cm-changedText{background:none}
 .col.mudanca-cm .cm-mergeView .cm-editor .cm-changedLine,.col.mudanca-cm .cm-mergeView .cm-editor .cm-deletedChunk{background:transparent}
+/* Só hoje: a coluna da chancela some e o texto de hoje toma a linha, centrado e com uma medida
+   de leitura. A trilha da chancela fica com largura 0, para os trechos seguirem no mesmo lugar da grade. */
+.doc.so-hoje{grid-template-columns:0 minmax(0,1fr) 196px}
+.doc.so-hoje>.cabgrade:first-child{visibility:hidden;padding:0;overflow:hidden}
+.doc.so-hoje .cm-mergeViewEditor:first-child,.doc.so-hoje .cm-mergeSpacer{display:none}
+.doc.so-hoje .cm-lugar{width:100%;max-width:980px;margin-inline:auto}
+/* Centrados, os trechos iguais e os mudados precisam da mesma margem para o texto alinhar:
+   a da coluna, e a da barra de linha nova (8px) também nos iguais. */
+.doc.so-hoje .col.mudanca-cm{padding-inline:14px}
+.doc.so-hoje .col.mudanca-cm .cm-mergeView .cm-editor{padding-inline:0}
+.doc.so-hoje .col.agora .cm-content{padding-left:8px}
+@media(max-width:1200px){.doc.so-hoje{grid-template-columns:minmax(0,1fr) 150px}
+.doc.so-hoje>.cabgrade:first-child{display:none}}
 .grudado{position:sticky;top:calc(var(--h-topo) + var(--h-cab) + 8px);display:flex;flex-direction:column;gap:4px}
 /* O projeto: o nome no topo troca de projeto; a lista mostra quanto falta em cada um. */
 .projeto{position:relative;display:inline-flex}
@@ -288,6 +301,8 @@ border:1px solid var(--ok-bg);background:var(--ok-bg);color:var(--ok)}
     <button onclick="setVer('tudo')" id="v-tudo">texto inteiro</button>
     <button onclick="setVer('mudou')" id="v-mudou">só as mudanças</button>
   </span>
+  <button onmousedown="event.preventDefault()" onclick="setSoHoje(!soHoje)" id="b-so-hoje"
+    title="esconde a coluna da chancela: o texto de hoje toma a tela (tecla c)">⇤ só hoje</button>
   <span class="modo" title="Formatado: o documento como se lê · Código: o Markdown como está no arquivo">
     <button onmousedown="event.preventDefault()" onclick="setModo(false)" id="m-formatado">Formatado</button>
     <button onmousedown="event.preventDefault()" onclick="setModo(true)" id="m-codigo">Código</button>
@@ -934,6 +949,29 @@ function setModo(c){
   kmPronto.then(() => km.modo(c));
 }
 setModo(codigo);
+// Só hoje: a chancela sai da tela e o texto de hoje ocupa a linha. Trocar não refaz os
+// editores; a linha que você lia fica onde estava na tela, mesmo o texto mudando de altura.
+let soHoje = false;
+try { soHoje = localStorage.getItem('km-so-hoje') === '1'; } catch (e) {}
+function setSoHoje(v){
+  const a = window.km && km.ancora ? km.ancora(topoLeitura()) : null;
+  soHoje = v;
+  try { localStorage.setItem('km-so-hoje', v ? '1' : '0'); } catch (e) {}
+  $('doc').classList.toggle('so-hoje', v);
+  $('b-so-hoje').setAttribute('aria-pressed', v);
+  $('b-so-hoje').textContent = v ? '⇥ com a chancela' : '⇤ só hoje';
+  if (!a) return;
+  medir();
+  const voltar = () => scrollBy(0, km.desvioDaAncora(a, topoLeitura()));
+  // Na hora, pelo que o navegador já mediu; de novo quando o CodeMirror remedir as alturas.
+  voltar(); requestAnimationFrame(() => requestAnimationFrame(voltar));
+}
+// O alto da área de leitura: logo abaixo do topo e do cabeçalho da grade, que grudam.
+function topoLeitura(){
+  const cs = getComputedStyle(document.documentElement);
+  return parseFloat(cs.getPropertyValue('--h-topo')) + parseFloat(cs.getPropertyValue('--h-cab')) + 8;
+}
+setSoHoje(soHoje);
 function trocarBase(){ base = $('base').value; carregar(); }
 function trocarLendo(){
   if (temSujo() && !confirm('Há texto editado e não salvo. Sair mesmo assim?')) { $('lendo').value = lendo; return; }
@@ -962,6 +1000,7 @@ document.addEventListener('keydown', (e)=>{
   if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === 'z') {
     e.preventDefault(); return podeVoltarDescarte() ? voltarDescarte() : desfazerAprovacao();
   }
+  if (e.key === 'c' && !e.ctrlKey && !e.metaKey && !e.altKey) return setSoHoje(!soHoje);
   const ms = mudancas();
   if (!ms.length) return;
   const atual = foco && foco.startsWith('m:') ? Number(foco.slice(2)) : 0;

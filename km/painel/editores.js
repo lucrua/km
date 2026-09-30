@@ -48,6 +48,33 @@ export function modo(emCodigo) {
 // O CodeMirror já observa o próprio tamanho, mas ignora o que chega logo depois de uma atualização.
 export function medirTodos() { for (const v of vivos.values()) for (const view of v.todas) view.requestMeasure(); }
 
+// Onde se lia, para voltar a ler ali depois que as larguras mudam: o editor na altura y da
+// janela, a linha dele ali, e quanto dela já tinha passado — em fração, porque um parágrafo é
+// uma linha só e muda de altura quando quebra noutra largura.
+export function ancora(y) {
+  for (const [chave, v] of vivos) {
+    const r = v.view.dom.getBoundingClientRect();
+    if (!r.height || r.bottom <= y) continue;
+    const linha = v.view.lineBlockAtHeight(Math.max(0, y - v.view.documentTop));
+    const [ini, fim] = extremos(v.view, linha);
+    return { chave, pos: linha.from, frac: fim > ini ? Math.min(1, Math.max(0, (y - ini) / (fim - ini))) : 0 };
+  }
+  return null;
+}
+// Quanto rolar para a mesma fração daquela linha voltar à altura y.
+export function desvioDaAncora(a, y) {
+  const v = vivos.get(a.chave)?.view;
+  if (!v) return 0;
+  const [ini, fim] = extremos(v, v.lineBlockAt(Math.min(a.pos, v.state.doc.length)));
+  return ini + a.frac * (fim - ini) - y;
+}
+// O alto e o baixo de uma linha na janela, pelo DOM quando ela está desenhada.
+function extremos(view, linha) {
+  const c0 = view.coordsAtPos(linha.from, 1), c1 = view.coordsAtPos(linha.to, -1);
+  if (c0 && c1) return [c0.top, Math.max(c0.top, c1.bottom)];
+  return [view.documentTop + linha.top, view.documentTop + linha.bottom];
+}
+
 export const texto = (chave) => vivos.get(chave)?.view.state.doc.toString();
 
 export function selecao(chave) {
@@ -84,5 +111,5 @@ export function focarFim(chave) {
   v.focus();
 }
 
-window.km = { editorSimples, editorMudanca, destruirTodos, modo, medirTodos, texto, selecao, focado, inserirMarca, focarFim };
+window.km = { editorSimples, editorMudanca, destruirTodos, modo, medirTodos, ancora, desvioDaAncora, texto, selecao, focado, inserirMarca, focarFim };
 window.dispatchEvent(new Event('km-pronto'));
