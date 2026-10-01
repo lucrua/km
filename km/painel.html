@@ -127,6 +127,7 @@ border:1px solid var(--rule);background:var(--bg);color:var(--ink)}
 font-family:ui-monospace,Menlo,monospace;border-bottom:1px solid var(--rule)}
 .dobra:hover{color:var(--ink)}
 .aviso-doc{grid-column:1 / 4;padding:12px 14px;color:var(--ok);font-size:13px;border-bottom:1px solid var(--rule)}
+.aviso-doc.fora-git{color:var(--ace);background:var(--ace-bg)}
 .txt.mini{font:11.5px/1.62 ui-monospace,SFMono-Regular,Menlo,monospace;white-space:pre-wrap;
 word-break:break-word;overflow-wrap:anywhere;max-height:160px;overflow:auto;margin-top:4px;opacity:.85}
 .topo .dir button{padding:3px 8px}
@@ -731,6 +732,7 @@ function desenhar(){
       class="abrir-code" onclick="copiarCaminho(event)"
       title="copia o caminho dentro do repositório · Shift+clique copia o caminho completo">copiar caminho</button></div>
     <div class="cabgrade rot">${naChancela() ? 'o que fazer' : 'só leitura — os botões agem na chancela'}</div>`;
+  if (d.fora_do_git) html += `<div class="aviso-doc fora-git">⚠ ${esc(d.fora_do_git)}</div>`;
   if (!segs().some(s => s.tipo === 'mudanca'))
     html += `<div class="aviso-doc">${d.rastreado ? '✓ Em dia com a chancela' + (d.em ? ' de ' + esc(d.em) : '') + '. Nada a decidir neste arquivo.' : ''}</div>`;
   for (const s of segs()){

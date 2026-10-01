@@ -839,3 +839,286 @@ def substituir_texto(root: Path, rel: str, original: str, novo: str, linha: int)
     i = min(achados, key=lambda x: abs(x - (linha - 1)))
     novas = linhas[:i] + novo.rstrip("\n").splitlines() + linhas[i + k:]
     (root / rel).write_text("\n".join(novas) + "\n", encoding="utf-8")
+
+
+# ---- forgetting ----------------------------------------------------------------------
+#
+# The one rewrite of the ref's history; everything else only advances it. A file approved
+# and never committed to a branch is in `.git` only because of the chancel — untracking
+# keeps that text and deleting the file keeps every earlier version, and `refs/km/*` leaves
+# with `git push --mirror` and with any copy of `.git`. `km forget` is how the author takes
+# it out for good.
+
+def sob(rel: str, caminhos: list[str]) -> bool:
+    """`rel` is one of `caminhos`, or inside one of them."""
+    return any(rel == c or rel.startswith(c + "/") for c in caminhos)
+
+
+def fora_do_git(root: Path, rel: str) -> str | None:
+    """Why approving this file stores text git would otherwise not have: None if git
+    already has it in the index, "ignorado" if .gitignore leaves it out, "fora do git" if
+    it was never added."""
+    if _git(root, "--literal-pathspecs", "ls-files", "--error-unmatch", "--", rel).returncode == 0:
+        return None
+    if _git(root, "check-ignore", "-q", "--no-index", "--", rel).returncode == 0:
+        return "ignorado"
+    return "fora do git"
+
+
+def fora_da_chancela(root: Path, rel: str) -> str | None:
+    """The last commit outside `refs/km/*` — a branch, a tag, the stash — that has `rel`."""
+    r = _git(root, "--literal-pathspecs", "log", "--exclude=refs/km/*", "--all", "-1",
+             "--format=%h", "--", rel)
+    return (r.stdout.strip() or None) if r.returncode == 0 else None
+
+
+def na_historia(root: Path, rel: str) -> bool:
+    """Has the chancel ever held `rel` (a file, or anything under a folder)?"""
+    if not existe(root):
+        return False
+    r = _git(root, "--literal-pathspecs", "log", "-1", "--format=%h", REF, "--", rel)
+    return bool(r.stdout.strip())
+
+
+@dataclass
+class Commit:
+    sha: str
+    arvore: str
+    pais: list[str]
+    autor: tuple[str, str, str]         # name, e-mail, "<unix time> <offset>"
+    quem_grava: tuple[str, str, str]
+    mensagem: bytes                     # exactly as stored
+    mapa: dict[str, tuple[str, str]] = field(default_factory=dict)  # path → (mode, blob)
+
+    @property
+    def assunto(self) -> str:
+        return self.mensagem.decode("utf-8", "replace").split("\n", 1)[0]
+
+    @property
+    def dia(self) -> str:
+        from datetime import datetime
+        return datetime.fromtimestamp(int(self.quem_grava[2].split()[0])).date().isoformat()
+
+
+_PESSOA = re.compile(rb"^(.*) <(.*)> (\d+ [+-]\d{4})$")
+
+
+def _pessoa(linha: bytes) -> tuple[str, str, str]:
+    m = _PESSOA.match(linha)
+    if not m:
+        raise SystemExit(f"commit da chancela com cabeçalho que o km não lê: {linha[:80]!r}")
+    return tuple(x.decode("utf-8", "surrogateescape") for x in m.groups())
+
+
+def _commits(root: Path, ponta: str) -> list[Commit]:
+    """Every commit of the ref, parents before children, read in one `cat-file --batch`."""
+    shas = _ok(root, "rev-list", "--reverse", "--topo-order", ponta).split()
+    r = subprocess.run(["git", "cat-file", "--batch"], cwd=root, capture_output=True,
+                       input=("\n".join(shas) + "\n").encode())
+    if r.returncode != 0:
+        raise SystemExit(f"git cat-file --batch: {r.stderr.decode(errors='replace').strip()}")
+    saida, pos, out = r.stdout, 0, []
+    for _ in shas:
+        fim = saida.index(b"\n", pos)
+        sha, _tipo, tamanho = saida[pos:fim].split()
+        corpo = saida[fim + 1:fim + 1 + int(tamanho)]
+        pos = fim + 1 + int(tamanho) + 1
+        cab, _, mensagem = corpo.partition(b"\n\n")
+        campos: dict[bytes, list[bytes]] = {}
+        for linha in cab.split(b"\n"):
+            if linha.startswith(b" "):          # continuation of a gpgsig or mergetag
+                continue
+            chave, _, valor = linha.partition(b" ")
+            campos.setdefault(chave, []).append(valor)
+        out.append(Commit(sha=sha.decode(), arvore=campos[b"tree"][0].decode(),
+                          pais=[p.decode() for p in campos.get(b"parent", [])],
+                          autor=_pessoa(campos[b"author"][0]),
+                          quem_grava=_pessoa(campos[b"committer"][0]), mensagem=mensagem))
+    return out
+
+
+def _mapa(root: Path, arvore: str) -> dict[str, tuple[str, str]]:
+    r = subprocess.run(["git", "ls-tree", "-r", "-z", "--full-tree", arvore], cwd=root,
+                       capture_output=True)
+    if r.returncode != 0:
+        raise SystemExit(f"git ls-tree {arvore}: {r.stderr.decode(errors='replace').strip()}")
+    out = {}
+    for item in r.stdout.decode("utf-8", "surrogateescape").split("\0"):
+        if item:
+            info, caminho = item.split("\t", 1)
+            modo, _tipo, sha = info.split()
+            out[caminho] = (modo, sha)
+    return out
+
+
+def _sem_linhas(mensagem: bytes, caminhos: list[str]) -> bytes:
+    """The message without the lines that are just a forgotten path — how `--from` lists
+    the files it approved."""
+    linhas = mensagem.split(b"\n")
+    fica = [l for l in linhas if not sob(l.decode("utf-8", "replace").strip(), caminhos)]
+    return b"\n".join(fica) if len(fica) != len(linhas) else mensagem
+
+
+@dataclass
+class Esquecimento:
+    """What forgetting `caminhos` does to the ref — worked out without writing anything."""
+
+    caminhos: list[str]
+    ponta: str | None                       # where the ref was read: the update is against it
+    commits: list[Commit] = field(default_factory=list)
+    versoes: dict[str, set[str]] = field(default_factory=dict)   # path → blobs it ever had
+    tocaram: list[Commit] = field(default_factory=list)          # commits that changed a path
+    vazios: set[str] = field(default_factory=set)                # of all, the ones left empty
+    iguais: int = 0                         # leading commits that keep their sha
+    outros: dict[str, set[str]] = field(default_factory=dict)    # blob → other paths holding it
+
+    @property
+    def blobs(self) -> set[str]:
+        return {b for bs in self.versoes.values() for b in bs}
+
+    @property
+    def nada(self) -> bool:
+        return not self.versoes
+
+    @property
+    def citam(self) -> list[Commit]:
+        """Commits that stay and still name a forgotten path in their message."""
+        return [c for c in self.commits if c.sha not in self.vazios
+                and any(p.encode() in _sem_linhas(c.mensagem, self.caminhos)
+                        for p in self.caminhos)]
+
+
+def planejar_esquecer(root: Path, caminhos: list[str]) -> Esquecimento:
+    """Which commits hold `caminhos`, which would be left empty, and what survives.
+
+    A commit is left empty when, without the paths, its tree is its parent's — it only ever
+    approved, deleted or undid those paths — and it was not empty before. It leaves; a commit
+    that also touched other files stays, with the same message and dates.
+    """
+    plano = Esquecimento(caminhos=caminhos, ponta=_ref_em(root))
+    if plano.ponta is None:
+        return plano
+    plano.commits = _commits(root, plano.ponta)
+    memo: dict[str, dict] = {}
+    por_sha = {}
+    reescrever = False
+    for c in plano.commits:
+        if c.arvore not in memo:
+            memo[c.arvore] = _mapa(root, c.arvore)
+        c.mapa = memo[c.arvore]
+        por_sha[c.sha] = c
+        filtrado = {p: v for p, v in c.mapa.items() if not sob(p, caminhos)}
+        pai = por_sha.get(c.pais[0]) if c.pais else None
+        antes = pai.mapa if pai else {}
+        antes_filtrado = {p: v for p, v in antes.items() if not sob(p, caminhos)}
+        mexidos = {p for p in set(c.mapa) | set(antes) if c.mapa.get(p) != antes.get(p)}
+        if any(sob(p, caminhos) for p in mexidos):
+            plano.tocaram.append(c)
+        if len(c.pais) <= 1 and filtrado == antes_filtrado and c.mapa != antes:
+            plano.vazios.add(c.sha)
+        for p, (_modo, blob) in c.mapa.items():
+            if sob(p, caminhos):
+                plano.versoes.setdefault(p, set()).add(blob)
+        reescrever = reescrever or len(filtrado) != len(c.mapa) or c.sha in plano.vazios \
+            or _sem_linhas(c.mensagem, caminhos) != c.mensagem
+        if not reescrever:
+            plano.iguais += 1
+    blobs = plano.blobs
+    for c in plano.commits:
+        for p, (_modo, blob) in c.mapa.items():
+            if blob in blobs and not sob(p, caminhos):
+                plano.outros.setdefault(blob, set()).add(p)
+    return plano
+
+
+def esquecer(root: Path, plano: Esquecimento) -> str | None:
+    """Rewrite the ref without the paths. Returns the new tip — None if nothing is left.
+
+    Every commit keeps its message, author, committer and dates; one before the first that
+    held a path keeps its sha. The ref only moves if it is still where the plan read it: an
+    approval made meanwhile (the panel is open) fails this, and nothing is lost.
+    """
+    if plano.ponta is None or plano.nada:
+        return plano.ponta
+    git_dir = Path(_ok(root, "rev-parse", "--absolute-git-dir").strip())
+    indice = git_dir / f"km-chancela-index-{os.getpid()}-{os.urandom(4).hex()}"
+    env = {**os.environ, "GIT_INDEX_FILE": str(indice)}
+    novo: dict[str, str | None] = {}
+    arvores: dict[str, str] = {}
+    try:
+        for c in plano.commits:
+            pais: list[str] = []
+            for p in c.pais:
+                q = novo[p]
+                if q and q not in pais:
+                    pais.append(q)
+            if c.sha in plano.vazios:
+                novo[c.sha] = pais[0] if pais else None
+                continue
+            tirar = [p for p in c.mapa if sob(p, plano.caminhos)]
+            arvore = c.arvore
+            if tirar:
+                if c.arvore not in arvores:
+                    _ok(root, "read-tree", c.arvore, env=env)
+                    _ok(root, "update-index", "--force-remove", "--", *tirar, env=env)
+                    arvores[c.arvore] = _ok(root, "write-tree", env=env).strip()
+                arvore = arvores[c.arvore]
+            mensagem = _sem_linhas(c.mensagem, plano.caminhos)
+            if arvore == c.arvore and pais == c.pais and mensagem == c.mensagem:
+                novo[c.sha] = c.sha
+                continue
+            pessoas = {"GIT_AUTHOR_NAME": c.autor[0], "GIT_AUTHOR_EMAIL": c.autor[1],
+                       "GIT_AUTHOR_DATE": c.autor[2], "GIT_COMMITTER_NAME": c.quem_grava[0],
+                       "GIT_COMMITTER_EMAIL": c.quem_grava[1],
+                       "GIT_COMMITTER_DATE": c.quem_grava[2]}
+            r = subprocess.run(["git", "commit-tree", arvore, *[x for p in pais for x in ("-p", p)]],
+                               cwd=root, input=mensagem, capture_output=True,
+                               env={**os.environ, **pessoas})
+            if r.returncode != 0:
+                raise SystemExit(f"git commit-tree: {r.stderr.decode(errors='replace').strip()}")
+            novo[c.sha] = r.stdout.decode().strip()
+    finally:
+        if indice.exists():
+            indice.unlink()
+    ponta = novo[plano.ponta]
+    r = (_git(root, "update-ref", REF, ponta, plano.ponta) if ponta
+         else _git(root, "update-ref", "-d", REF, plano.ponta))
+    if r.returncode != 0:
+        if _ref_em(root) != plano.ponta:
+            raise Concorrencia("a chancela mudou enquanto eu reescrevia — uma aprovação no"
+                               " painel? Nada foi trocado; rode de novo")
+        raise SystemExit(f"git update-ref {REF}: {r.stderr.strip()}")
+    return ponta
+
+
+def podar(root: Path) -> None:
+    """Drop from `.git` what nothing reaches any more: the reflog of the ref, if it keeps
+    one, and every unreachable object (`git gc --prune=now`)."""
+    if _git(root, "reflog", "exists", REF).returncode == 0:
+        _ok(root, "reflog", "expire", "--expire=now", "--expire-unreachable=now", REF)
+    _ok(root, "gc", "--prune=now", "--quiet")
+
+
+def objetos_presentes(root: Path, shas: set[str]) -> set[str]:
+    """Which of these objects `.git` still has."""
+    if not shas:
+        return set()
+    r = subprocess.run(["git", "cat-file", "--batch-check=%(objectname)"], cwd=root,
+                       input="\n".join(sorted(shas)) + "\n", capture_output=True, text=True)
+    return {l.strip() for l in r.stdout.splitlines() if l.strip() in shas}
+
+
+def onde_mais(root: Path, shas: set[str]) -> dict[str, set[str]]:
+    """Where else `.git` keeps these blobs: commits outside `refs/km/*`, and the index."""
+    if not shas:
+        return {}
+    fora = set(_ok(root, "rev-list", "--objects", "--no-object-names", "--exclude=refs/km/*",
+                   "--all").split()) & shas
+    r = subprocess.run(["git", "ls-files", "-s", "-z"], cwd=root, capture_output=True)
+    indice = {item.split()[1].decode() for item in r.stdout.split(b"\0") if item} & shas
+    return {"commits": fora, "index": indice}
+
+
+def worktrees(root: Path) -> list[str]:
+    return [l[len("worktree "):] for l in _ok(root, "worktree", "list", "--porcelain").splitlines()
+            if l.startswith("worktree ")]

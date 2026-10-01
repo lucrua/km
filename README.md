@@ -65,6 +65,15 @@ in `.km/config.json` as three lists — `folders`, `files`, `except` — and not
 them appears. Untracking keeps the chancel, so the file is *paused*, not forgotten. The
 design: [docs/tracked-files.md](docs/tracked-files.md).
 
+**The chancel is part of `.git`, and so is everything you approved.** A file you approve is
+stored in the ref even if it was never committed — and deleting it later keeps every
+version it had. The ref is not shown by `git branch`, but it leaves with `git push --mirror`
+and with any copy of `.git` (a zip, a backup, a synced folder). So: `km chancela` and the
+panel warn when the file is not in git; `km install-hooks` adds a pre-push hook that refuses
+to send `refs/km/*`; and `km forget <path>` takes a file out for good — from every commit of
+the ref, from `.km/config.json` and, with `--prune`, from `.git`'s objects. Details:
+[docs/chancel.md](docs/chancel.md#forgetting-a-file).
+
 ## The panel
 
 ```bash
@@ -224,16 +233,17 @@ km chancela regras.md --hunk 2   # change 2 into the ref; `--hunk 2.1` only its 
 km chancela regras.md --all      # the file as it stands today
 km restore  regras.md --hunk 2.1 # put the chancelled text of that block back on disk
 km mv docs guides                # git mv, and the chancel and the config entries follow; --dry-run
-km lint                          # ❓ past its date · a mark still saying `add your comment here` · a mark that vanished
+km forget rascunho               # what forgetting it would rewrite; --apply does it, --prune also runs git gc
+km lint                          # ❓ past its date · a placeholder mark · a mark that vanished · a config entry with nothing on disk
 km marcas                        # ❓ and 📌 in every Markdown file git knows; --todas adds 💬, --tipo, --json
 km quando   regras.md --trecho "colunas"   # when that passage last had a chancel
 km baseline regras.md            # the chancelled copy, for a diff's left-hand column
 km boot [--apply]                # the panel starts with the machine (systemd user unit)
-km install-hooks                 # one line after every commit, saying where you stand
+km install-hooks                 # one line after every commit, and a pre-push that refuses refs/km/*
 ```
 
 `chancela`, `pendente`, `marcas` and `quando` also answer to `chancel`, `pending`, `marks` and
-`when`; `mv` answers to `mover`; `projects` (`add`, `rm`) to `projetos` (`adicionar`,
+`when`; `mv` answers to `mover`; `forget` to `esquecer`; `projects` (`add`, `rm`) to `projetos` (`adicionar`,
 `remover`). Every command except `projects` and `serve` works on the repository you are in. `km marcas` reads every Markdown file git knows about, tracked or not — a to-do is
 written for whoever passes by. `--json` gives `[{file, line, kind, date, text, overdue}]`.
 

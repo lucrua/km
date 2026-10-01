@@ -239,6 +239,10 @@ def estado(root: Path, by: str = "", base: str | None = None,
              "vencidas": len(s.vencidas)}
         if cheio:
             d["em"] = _ultima(root, rel)
+            # Aprovar um arquivo que o git não tem guarda o texto no .git mesmo assim.
+            fora = None if rev else ch.fora_do_git(pasta, rel)
+            if fora:
+                d["fora_do_git"] = cli.aviso_fora_do_git(rel, fora)
             d["segmentos"] = segmentos(s)
             d["vencidas_txt"] = [{"linha": l, "prazo": p, "texto": x} for l, p, x in s.vencidas]
         docs.append(d)
@@ -330,6 +334,10 @@ def agir(root: Path, pedido: dict, by: str) -> dict:
                   if depois.mudancas else " · arquivo em dia"))
         if saiu:
             msg += f" · {saiu} marca(s) removida(s) aprovada(s) junto"
+        fora = None if rev else ch.fora_do_git(root, rel)
+        if fora:
+            msg += " · ⚠ " + ("ignorado pelo git" if fora == "ignorado" else "fora do git")
+            msg += ": o texto fica guardado no .git mesmo sem commit"
         return {"ok": True, "msg": msg, "desfazer": commit}
 
     return {"ok": False, "erro": f"ação desconhecida: {acao}"}

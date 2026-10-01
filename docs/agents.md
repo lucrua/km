@@ -32,16 +32,23 @@ to `pending`, `marks` and `chancel`.
 
 1. **Never approve.** `km chancela` is the author's act. Do not run it — not with `--all`,
    not with `--from` — unless the author explicitly tells you to, for named files.
-2. **Never write `refs/km/chancela`.** No `git update-ref`, `commit-tree`, `push` or
-   `branch` on it, no `git update-ref -d`. Only `km` writes it.
-3. **Never edit `.km/config.json` by hand for a move** — `km mv` rewrites it. Change which
+2. **Never forget.** `km forget --apply` rewrites the chancel's history and deletes reviewed
+   text for good — the same rule as `km chancela`: only when the author tells you to, for
+   files they name. Without `--apply` it only shows what would happen; that you may run.
+3. **Never write `refs/km/chancela`.** No `git update-ref`, `commit-tree`, `push` or
+   `branch` on it, no `git update-ref -d`, no `git filter-repo`. Only `km` writes it —
+   `km chancela`, `km mv` and `km forget`.
+4. **Never push `refs/km/*`** — not by name, not with `git push --mirror` (which sends every
+   ref), not with `--no-verify` past the hook that refuses it. The chancel keeps the full
+   text of files that were never committed to any branch. Push branches and tags by name.
+5. **Never edit `.km/config.json` by hand for a move** — `km mv` rewrites it. Change which
    files are tracked only when the author asks; the panel's *Arquivos* view is the author's
    tool for that.
-4. **Never run `km restore`** unless asked: it overwrites the file with the reviewed text
+6. **Never run `km restore`** unless asked: it overwrites the file with the reviewed text
    and discards whatever changed since, including other people's edits.
-5. **Never delete or rewrite a mark** except as this guide says for each kind.
-6. Leave `km serve` alone: do not start, stop or restart the author's panel.
-7. **Never edit the project registry** (`~/.config/km/projects.json`). Run
+7. **Never delete or rewrite a mark** except as this guide says for each kind.
+8. Leave `km serve` alone: do not start, stop or restart the author's panel.
+9. **Never edit the project registry** (`~/.config/km/projects.json`). Run
    `km projects add <repository root>` only when the author tells you to — and never
    `km projects rm`.
 
@@ -74,6 +81,11 @@ and stay pending.
 
 - **Deleting a tracked file** is allowed (`git rm <file>`). The author sees it as a pending
   deletion and approves it. List every deleted file in your summary.
+- **Deleting is not forgetting.** Every version the author approved stays in the chancel's
+  history. When the author wants a file's text gone from `.git` — a private draft, a
+  repository about to be handed over — run `km forget <path>` (a dry run) and show them what
+  it lists; `km forget <path> --apply --prune` only when they say so. `km lint` points at
+  the files whose text exists only in the chancel.
 - **Moving text between files** (splitting one document, merging two, moving a section):
   review does not follow a passage across files. The text shows as **new** in the destination
   and **removed** in the source, and the author reviews both. That is correct; do not try to
@@ -188,5 +200,6 @@ Paste this into another repository's `CLAUDE.md` or `AGENTS.md`:
 ```markdown
 This repository's documents are reviewed with km (`.km/config.json`). Before moving,
 deleting or rewriting any Markdown file, or handling 📌 to_do / ❓ to_validate marks,
-read `~/knowledge-manager/docs/agents.md` and follow it. Never run `km chancela`.
+read `~/knowledge-manager/docs/agents.md` and follow it. Never run `km chancela` or
+`km forget --apply`, and never push `refs/km/*`.
 ```

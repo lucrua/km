@@ -11,7 +11,7 @@ Decisions taken, and why:
 | Decision | Why |
 |---|---|
 | A ticked **folder is a rule**: files created in it later are tracked | an agent writes a new decision into `decisoes/`; it must show up as *sem chancela* without anyone remembering to add it |
-| **Untracking keeps the chancel** in the ref; the file shows as *pausado* | stopping costs nothing and is reversible; tracking again resumes where it stopped |
+| **Untracking keeps the chancel** in the ref; the file shows as *pausado* | stopping costs nothing and is reversible; tracking again resumes where it stopped. Dropping the text for good is `km forget` ([chancel.md](chancel.md#forgetting-a-file)) |
 | **Exceptions** inside a ticked folder | leave `decisoes/README.md` out without losing the folder rule |
 | **No patterns** | a list of folders and files is what a tree can show and a person can read; a glob is the part nobody can predict |
 | A second view of the panel: **Revisar · Arquivos** | the tree has three levels and 48 files; the 210 px rail cannot hold it |
@@ -43,7 +43,10 @@ other key is rejected with a message naming the key.
 `km mv <from> <to>` rewrites every entry equal to or under `<from>` when it moves a file or
 a folder, and never untracks: a folder covered by a rule above it takes the rule along, and
 a tracked file moved out of its folder is listed in `files`. There is no command to track or
-untrack; that is the *Arquivos* view.
+untrack; that is the *Arquivos* view. `km forget <path>` drops the entries equal to or under
+the path from `folders` and `files` as it erases its chancel, and lists it in `except` when it
+is still on disk under a tracked folder. `km lint` reports `folders` and `files` entries
+with nothing on disk — a folder that no longer exists does not show in the tree.
 
 ### Which files exist
 

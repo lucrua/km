@@ -119,6 +119,38 @@ move leaves nothing to approve.
 A passage moved to another file is not followed: it is new text in the destination and a
 removal in the source, reviewed as such.
 
+## Forgetting a file
+
+Approving stores the file in the ref whether git has it or not, and the ref keeps every
+version: a draft kept out of every branch is in `.git` anyway once approved, deleting it
+leaves every earlier version in the ref's history, and untracking keeps the chancel by
+design. `refs/km/*` is not shown by `git branch`, but `git push --mirror` sends it and any
+copy of `.git` carries it.
+
+`km forget <path>…` is the one command that rewrites the ref's history instead of
+advancing it — the author's act, like `km chancela`. Without `--apply` it only lists what it
+would do: the versions found, the commits that touched the paths and which of them would be
+left empty, the config entries that go, and where else the same text still lives.
+
+- **The ref.** Every commit is rebuilt without the paths. A commit left empty — it only
+  approved, deleted or undid those paths — is dropped; the others keep their message,
+  author, committer and dates, and the ones before the first that held a path keep their
+  sha. A message line that is just a forgotten path (how `--from` lists its files) goes.
+  The ref moves with compare-and-swap: an approval in the panel meanwhile makes the command
+  fail, and nothing is lost. Forgetting everything deletes the ref.
+- **The config.** The paths leave `folders` and `files`. One still on disk under a tracked
+  folder becomes an exception, or the next approval would store it again; an existing
+  exception stays, since it is what keeps the path out.
+- **The objects.** `--prune` expires the ref's reflog, if it has one, and runs
+  `git gc --prune=now`, then checks that the old versions are gone. Without it the command
+  prints those two commands. Worktrees share one `.git`, so this covers all of them.
+
+What it does not reach, and says so: the same text under another path of the chancel, in a
+commit of a branch, tag or stash, or in the index; and copies of the repository made
+before. `km serve` reads the ref on every request and needs no restart; an *↶ Desfazer
+aprovação* from before the rewrite is refused, not misapplied. `km lint` flags the deleted
+files whose text exists only in the chancel, and config entries with nothing on disk.
+
 ## Addresses move with the diff
 
 The commands are listed in the README's [command line](../README.md#the-command-line).

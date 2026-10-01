@@ -318,3 +318,28 @@ def arvore(root: Path) -> dict:
 
     completar(raiz)
     return {"raiz": raiz, "sha": sha_config(cfg), "config": cfg, "erro": erro}
+
+
+def esquecer(cfg: dict, caminhos: list[str], no_disco) -> dict:
+    """The config after `km forget`: no entry of their own in `folders` or `files`.
+
+    An exception is not dropped — under a tracked folder it is what keeps the path out. And
+    a path still on disk that a rule above would keep tracking becomes one: forgetting it
+    and approving it again on the next "aprovar tudo" would store the text all over.
+    """
+    def fora(p: str) -> bool:
+        return any(p == c or p.startswith(c + "/") for c in caminhos)
+
+    novo = {"folders": [p for p in cfg["folders"] if not fora(p)],
+            "files": [p for p in cfg["files"] if not fora(p)],
+            "except": list(cfg["except"])}
+    for c in caminhos:
+        if no_disco(c) and decisao(c, novo):
+            novo["except"].append(c)
+    return normalizar(novo)
+
+
+def inexistentes(root: Path, cfg: dict) -> list[tuple[str, str]]:
+    """`folders` and `files` entries with nothing on disk: (key, path)."""
+    return [(chave, p) for chave in ("folders", "files") for p in cfg[chave]
+            if not (root / p).exists()]
