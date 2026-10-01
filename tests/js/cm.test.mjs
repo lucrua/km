@@ -1,4 +1,4 @@
-// Run: node --test tests/js/
+// Run: node --test tests/js/*.test.mjs — from Node 22 on, a bare folder is taken as a module and fails
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 

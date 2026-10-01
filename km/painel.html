@@ -105,10 +105,15 @@ padding:6px 9px;margin-bottom:8px;border-radius:0 4px 4px 0}
 border:1px solid var(--rule);background:var(--bg);color:var(--ink)}
 .vazio{padding:24px;color:var(--mut)}
 @media(max-width:1200px){.doc{grid-template-columns:minmax(0,1fr) 150px}
-.col.agora.inteiro{grid-column:auto}.corpo{--lado:200px}}
+.col.agora.inteiro{grid-column:auto}.corpo{--lado:200px}
+/* Duas colunas: a primeira leva as duas metades da comparação, então "a chancela" e "agora"
+   dividem a mesma célula, cada um sobre a sua metade; "o que fazer" fica sobre as ações. */
+.doc:not(.so-hoje)>.cabgrade:nth-child(-n+2){grid-area:1 / 1}
+.doc:not(.so-hoje)>.cabgrade:first-child{width:50%}
+.doc:not(.so-hoje)>.cabgrade:nth-child(2){margin-left:50%}}
 
 /* uma mudança: cabeçalho de largura inteira, depois um bloco por linha */
-.cab-m{grid-column:1 / 4;display:flex;flex-wrap:wrap;gap:6px 12px;align-items:center;
+.cab-m{grid-column:1 / -1;display:flex;flex-wrap:wrap;gap:6px 12px;align-items:center;
 padding:10px 14px 8px;border-top:1px solid var(--ace);background:color-mix(in srgb,var(--ace-bg) 45%,transparent)}
 .cab-m.foco{box-shadow:inset 3px 0 0 var(--acc)}
 .cab-m .titulo-m{font-weight:600;color:#EDF2F7}
@@ -129,10 +134,10 @@ background:var(--card);border:1px solid var(--acc);box-shadow:0 6px 24px #0008}
 #selecao button{font:inherit;font-size:12.5px;padding:4px 11px;border-radius:6px;cursor:pointer;
 border:1px solid var(--rule);background:var(--bg);color:var(--ink)}
 #selecao button.pri{background:var(--ok-bg);border-color:var(--ok-bg);color:var(--ok)}
-.dobra{grid-column:1 / 4;padding:4px 14px;color:var(--mut);font-size:11.5px;cursor:pointer;
+.dobra{grid-column:1 / -1;padding:4px 14px;color:var(--mut);font-size:11.5px;cursor:pointer;
 font-family:ui-monospace,Menlo,monospace;border-bottom:1px solid var(--rule)}
 .dobra:hover{color:var(--ink)}
-.aviso-doc{grid-column:1 / 4;padding:12px 14px;color:var(--ok);font-size:13px;border-bottom:1px solid var(--rule)}
+.aviso-doc{grid-column:1 / -1;padding:12px 14px;color:var(--ok);font-size:13px;border-bottom:1px solid var(--rule)}
 .aviso-doc.fora-git{color:var(--ace);background:var(--ace-bg)}
 .txt.mini{font:11.5px/1.62 ui-monospace,SFMono-Regular,Menlo,monospace;white-space:pre-wrap;
 word-break:break-word;overflow-wrap:anywhere;max-height:160px;overflow:auto;margin-top:4px;opacity:.85}
@@ -165,7 +170,7 @@ background:var(--card);border:1px solid var(--rule);border-radius:8px;padding:4p
 #historico button{text-align:left;border:0;padding:6px 10px;background:transparent;color:var(--ink);cursor:pointer}
 #historico button:hover{background:var(--bg)}
 .vazio-geral.ruim{color:var(--neg)}
-.vazio-geral{grid-column:1 / 4;padding:40px 20px;color:var(--mut);display:flex;gap:14px;align-items:center}
+.vazio-geral{grid-column:1 / -1;padding:40px 20px;color:var(--mut);display:flex;gap:14px;align-items:center}
 .vazio-geral button{font:inherit;padding:5px 12px;border-radius:6px;cursor:pointer;border:1px solid var(--ok-bg);
 background:var(--ok-bg);color:var(--ok)}
 /* os editores: CodeMirror com o live preview */
@@ -909,9 +914,13 @@ function medirCabecalho(){
   // Para baixo: a linha de baixo encosta por baixo da de cima em vez de deixar uma fresta
   // de fração de pixel por onde o texto aparece.
   raiz.setProperty('--h-topo', Math.floor(document.querySelector('.topo').getBoundingClientRect().height) + 'px');
-  if (cab) raiz.setProperty('--h-cab', Math.floor(cab.getBoundingClientRect().height) + 'px');
+  // A mais alta: no só hoje estreito a primeira some, e mediria 0.
+  if (cab) raiz.setProperty('--h-cab', Math.floor(Math.max(...[...document.querySelectorAll('.cabgrade')]
+    .map((c) => c.getBoundingClientRect().height))) + 'px');
 }
 new ResizeObserver(medirCabecalho).observe(document.querySelector('.topo'));
+// Abaixo de 1200px os rótulos do cabeçalho ficam mais estreitos e quebram em mais linhas.
+addEventListener('resize', medirCabecalho);
 
 // No trecho em que você está escrevendo, a marca entra onde está o cursor; num trecho em que
 // você não clicou, depois do trecho.
@@ -996,6 +1005,7 @@ function setSoHoje(v){
   soHoje = v;
   try { localStorage.setItem('km-so-hoje', v ? '1' : '0'); } catch (e) {}
   $('doc').classList.toggle('so-hoje', v);
+  medirCabecalho();
   $('b-so-hoje').setAttribute('aria-pressed', v);
   $('b-so-hoje').textContent = v ? '⇥ com a chancela' : '⇤ só hoje';
   if (!a) return;

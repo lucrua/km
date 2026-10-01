@@ -144,5 +144,7 @@ autolinks are left alone.
 
 ## Tests
 
-The pure modules — tables, paragraph ranges, marks, offsets — run under `node --test`
-(`tests/js/`), with the bundled CodeMirror for the live-preview decorations.
+The pure modules — tables, paragraph ranges, marks, offsets — run under
+`node --test tests/js/*.test.mjs`, with the bundled CodeMirror for the live-preview decorations.
+The files are named, not the folder: from Node 22 on, `node --test tests/js/` takes the folder
+as a module and fails before running anything.
