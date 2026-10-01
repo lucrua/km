@@ -77,6 +77,12 @@ padding:6px 14px;z-index:4}
 .cabgrade .abrir-code{font:inherit;margin-left:8px;padding:1px 7px;border-radius:5px;cursor:pointer;
 background:transparent;border:1px solid var(--rule);color:var(--mut)}
 .cabgrade .abrir-code:hover{color:var(--acc);border-color:var(--acc)}
+/* Aprovar o arquivo inteiro: no lugar do rótulo "o que fazer", numa linha só como ele —
+   na coluna estreita (150px) quebra, em vez de empurrar a página para o lado. */
+.cabgrade .aprovar-inteiro{font:11.5px/1.4 system-ui,sans-serif;padding:1px 8px;border-radius:5px;cursor:pointer;
+background:var(--ok-bg);border:1px solid var(--ok-bg);color:var(--ok);max-width:100%;text-align:left}
+.cabgrade .aprovar-inteiro:hover{border-color:var(--ok)}
+.cabgrade .aprovar-inteiro[disabled]{opacity:.5;cursor:not-allowed}
 .col{padding:10px 14px 14px;border-bottom:1px solid var(--rule);min-width:0}
 .col.agora{border-right:1px solid var(--rule)}
 .col.agora.inteiro{grid-column:1 / 3}
@@ -340,8 +346,8 @@ border:1px solid var(--ok-bg);background:var(--ok-bg);color:var(--ok)}
   <div class="recado ruim" id="erro-p" hidden></div>
 </main>
 <script type="module">import * as arvore from '/static/painel/arvore.js'; import * as pjs from '/static/painel/projetos.js';
-import * as sjs from '/static/painel/sujos.js';
-window.arvore = arvore; window.pjs = pjs; window.sjs = sjs; window.dispatchEvent(new Event('modulos-prontos'));</script>
+import * as sjs from '/static/painel/sujos.js'; import * as inteiro from '/static/painel/inteiro.js';
+window.arvore = arvore; window.pjs = pjs; window.sjs = sjs; window.inteiro = inteiro; window.dispatchEvent(new Event('modulos-prontos'));</script>
 <script type="module" src="/static/painel/editores.js"></script>
 <script>
 const $ = (id) => document.getElementById(id);
@@ -731,7 +737,7 @@ function desenhar(){
       title="abre este arquivo no VS Code — na linha da mudança em foco, se houver">abrir no VS Code</button>`}<button
       class="abrir-code" onclick="copiarCaminho(event)"
       title="copia o caminho dentro do repositório · Shift+clique copia o caminho completo">copiar caminho</button></div>
-    <div class="cabgrade rot">${naChancela() ? 'o que fazer' : 'só leitura — os botões agem na chancela'}</div>`;
+    <div class="cabgrade rot">${naChancela() ? botaoInteiro(d) || 'o que fazer' : 'só leitura — os botões agem na chancela'}</div>`;
   if (d.fora_do_git) html += `<div class="aviso-doc fora-git">⚠ ${esc(d.fora_do_git)}</div>`;
   if (!segs().some(s => s.tipo === 'mudanca'))
     html += `<div class="aviso-doc">${d.rastreado ? '✓ Em dia com a chancela' + (d.em ? ' de ' + esc(d.em) : '') + '. Nada a decidir neste arquivo.' : ''}</div>`;
@@ -798,6 +804,30 @@ async function copiarCaminho(e){
 function fechar(){ form = null; desenhar(); }
 function abrirForm(chave, tipo, shas){ form = {chave, tipo, shas}; desenhar(); }
 function aprovar(shas){ agir({acao:'aprovar', shas}); }
+// O arquivo inteiro de uma vez (km/painel/inteiro.js): tudo o que a tela mostra, num commit
+// só, que um ↶ Desfazer leva de volta. A aprovação é do arquivo no disco, então espera o
+// texto não salvo; e uma marca que sumiria é dita antes, não aprovada às cegas.
+const semSalvarInteiro = 'há texto editado e não salvo — salve ou descarte antes de aprovar o arquivo inteiro';
+const tituloInteiro = () => temSujo() ? semSalvarInteiro
+  : 'aprova todas as mudanças deste arquivo de uma vez, como estão na tela — ↶ Desfazer leva tudo de volta';
+function botaoInteiro(d){
+  if (!window.inteiro || !inteiro.arquivoInteiro(mudancas())) return '';
+  return `<button class="aprovar-inteiro" id="b-inteiro" onclick="aprovarArquivo()" ${temSujo() ? 'disabled' : ''}
+    title="${tituloInteiro()}">Aprovar o arquivo · ${esc(d.pct)}</button>`;
+}
+// Digitar não redesenha o cabeçalho: o botão acompanha o texto não salvo daqui.
+function atualizarInteiro(){
+  const b = $('b-inteiro');
+  if (b) { b.disabled = temSujo(); b.title = tituloInteiro(); }
+}
+function aprovarArquivo(){
+  const x = inteiro.arquivoInteiro(mudancas());
+  if (!x) return;
+  if (temSujo()) { recado = '✕ ' + semSalvarInteiro; return desenharRecado(); }
+  const pergunta = inteiro.perguntaDasMarcas(x.sumidas);
+  if (pergunta && !confirm(pergunta)) return;
+  aprovar(x.shas);
+}
 function enviar(){
   const texto = ($('f-texto')||{}).value || '';
   return agir({acao:'reverter', shas: form.shas, motivo: texto});
@@ -805,6 +835,7 @@ function enviar(){
 function mexeuTexto(chave, texto){
   if (mesmo(texto, originais[chave])) { delete sujos[chave]; delete bases[chave]; }
   else { if (!(chave in bases)) bases[chave] = originais[chave]; sujos[chave] = texto; }
+  atualizarInteiro();
   // Só a coluna das ações muda; o texto que você está digitando fica onde está.
   const cel = document.querySelector(`[data-acoes="${CSS.escape(chave)}"]`);
   if (!cel) return;

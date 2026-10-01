@@ -117,6 +117,13 @@ the changes inside the selection are taken — like staging half a hunk in a cod
 selection that touches part of a word takes the word. Underneath, the engine still works in
 Markdown blocks; the page turns a selection over the passage into "this part of this block".
 
+**To approve the whole file, one button.** When a file has more than one change, **Aprovar o
+arquivo · 23%** stands in the head of the third column: every passage on the screen goes in at
+once, as one commit on the ref (`chancela: <file> · arquivo inteiro`) that one *↶ Desfazer*
+takes back. It approves what the page shows — a passage an agent wrote while you read stays
+pending. It waits while there is text not yet saved, and asks first, naming them, when it
+would approve a mark's removal.
+
 How much is left is a **percentage of the content**: the characters still to decide over the
 characters the file would have if everything were approved. Not a count of blocks or
 changes — a one-word fix and a new section are not "one" each.

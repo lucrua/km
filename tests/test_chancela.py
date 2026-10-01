@@ -660,6 +660,42 @@ class PainelTest(RepoTest):
         self.assertIn("dias corridos", self.texto())        # o arquivo não é mexido
         self.assertEqual(len(self.mudancas()), 1)
 
+    def test_the_whole_file_in_one_approval_is_one_commit_and_one_undo(self):
+        """Aprovar o arquivo inteiro: os blocos de todas as mudanças da tela, de uma vez."""
+        hoje = DOC.replace("Onze", "Doze").replace("horas úteis", "dias corridos").replace(
+            "> 💬 a ordem veio de um print, não do export.\n\n", "")
+        self.escrever(hoje)
+        ms = self.mudancas()
+        self.assertGreaterEqual(len(ms), 2)
+        antes = git(self.dir, "rev-list", "--count", ch.REF)
+        r = self.agir(acao="aprovar", shas=[u["sha"] for m in ms for u in m["unidades"]])
+        self.assertTrue(r["ok"], r)
+        self.assertIn("arquivo em dia", r["msg"])
+        self.assertIn("1 marca(s) removida(s)", r["msg"])
+        self.assertEqual(ch.chancelado(self.dir, "regras.md"), hoje)     # byte a byte
+        self.assertEqual(int(git(self.dir, "rev-list", "--count", ch.REF)), int(antes) + 1)
+        self.assertIn("arquivo inteiro", git(self.dir, "log", "-1", "--format=%s", ch.REF))
+        r = self.agir(acao="desfazer", commit=r["desfazer"])
+        self.assertTrue(r["ok"], r)
+        self.assertEqual(ch.chancelado(self.dir, "regras.md"), DOC)
+        self.assertEqual(len(self.mudancas()), len(ms))
+
+    def test_the_whole_file_approves_what_the_page_saw_not_what_came_after(self):
+        self.escrever(DOC.replace("Onze", "Doze").replace("horas úteis", "dias corridos"))
+        shas = [u["sha"] for m in self.mudancas() for u in m["unidades"]]
+        depois = self.texto().replace("Texto de abertura.", "Texto de abertura, de um agente.")
+        self.escrever(depois)                                   # um agente, enquanto você lia
+        r = self.agir(acao="aprovar", shas=shas)
+        self.assertTrue(r["ok"], r)
+        self.assertIn("falta", r["msg"])
+        chancela = ch.chancelado(self.dir, "regras.md")
+        self.assertIn("Doze colunas", chancela)
+        self.assertIn("dias corridos", chancela)
+        self.assertIn("Texto de abertura.", chancela)
+        self.assertNotIn("arquivo inteiro", git(self.dir, "log", "-1", "--format=%s", ch.REF))
+        [resto] = self.mudancas()
+        self.assertEqual(resto["agora"], "Texto de abertura, de um agente.")
+
     def test_undoing_the_first_approval_of_a_file_makes_it_new_again(self):
         (self.dir / "novo.md").write_text("# Novo\n\nTexto.\n", encoding="utf-8")
         s = ch.situacao(self.dir, "novo.md")
