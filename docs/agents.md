@@ -129,7 +129,8 @@ km lint                      # tracked files: ❓ past its date, placeholders, v
 ```
 
 `km marcas` reads **every** Markdown file git knows about, committed or not, ignored ones
-excepted — tracked by km or not. `km lint` reads only tracked files.
+excepted — tracked by km or not. `km lint` reads only tracked files — and, run without a
+file, `.km/config.json` (see [Before you finish](#before-you-finish)).
 
 ### 📌 to_do — work for you
 
@@ -178,6 +179,17 @@ When you are unsure of something you wrote, say so in the document:
 Put it right after the passage, exact form, local date (`date +%F`, and
 `date -d '+7 days' +%F`). Mention each one in your summary.
 
+## Pushing, migrating, handing a repository over
+
+- Push branches and tags **by name**: `git push <remote> <branch>`, `git push <remote> --tags`.
+  `git push --mirror` sends every ref, the chancel included. Where the author ran
+  `km install-hooks`, a pre-push hook refuses it with `km: push recusado`; then push by name —
+  never `--no-verify`.
+- A copy of `.git` carries the chancel even when no push does: a zip, a backup, a synced
+  folder, an import into another server. Before a repository leaves the machine, tell the
+  author, run `km lint` and list what it says exists only in the chancel. Forgetting it is the
+  author's call (rule 2).
+
 ## Before you finish
 
 ```bash
@@ -186,12 +198,20 @@ km lint             # no placeholder left; every vanished mark is one you can ex
 km marcas --todas   # the to_dos you handled are gone; the rest have a 💬 saying why
 ```
 
+`km lint` also reports, as the author's to settle and not yours to fix:
+
+- `tem chancela e não está mais no disco` — a deleted file still waiting for the author to
+  approve its deletion. With `o texto só existe nela`, it was never committed to any branch:
+  only `km forget` takes that text out of `.git`.
+- under `.km/config.json`, a `folders` or `files` entry with nothing on disk.
+
 Then write a summary with:
 
 - moves (`from → to`) and deletions;
 - vanished marks: file, the mark, and where it went (or why it was removed);
 - to_dos handled (`file:line — what you did`) and not handled (`— why`);
-- ❓ and 💬 you added, and overdue ❓ you found.
+- ❓ and 💬 you added, and overdue ❓ you found;
+- what `km lint` said exists only in the chancel, and stale config entries — for the author.
 
 ## For the author: the snippet
 
