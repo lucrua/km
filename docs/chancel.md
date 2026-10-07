@@ -84,17 +84,21 @@ tool markers. The practice is right, for reasons worth keeping: an agent reads a
 natively with no tooling, a human opening the file sees the mark, and the note moves
 with the text when the paragraph is edited.
 
-So there is **one ref and a writing convention**, not a parallel store of comments. Three
+So there is **one ref and a writing convention**, not a parallel store of comments. Two
 marks, one line each, in the exact forms listed in the README's
 [convention](../README.md#the-convention):
 
 ```markdown
-> ❓ **to_validate by AAAA-MM-DD** — something to confirm by that deadline
-> 💬 for whoever reads the passage later
-> 📌 **to_do · AAAA-MM-DD** — for an agent to find and address; the day it was written
+> 📌 **to_do · AAAA-MM-DD** — a review point for an agent to settle in the text; the day it was written
+> 💬 a caveat on the passage before it, for whoever reads it later
 ```
 
-None of them blocks a chancel. A passage approved with a mark in it is **in the chancel and
+There was a third, `> ❓ **to_validate by AAAA-MM-DD**`, a question with a deadline. It was
+retired: nothing said who was to answer it, so the author used it to ask agents and agents
+used it to ask the author, and the answers piled up as notes beside the text instead of
+going into it. A review point is a 📌 now, and its answer is the text itself.
+
+Neither blocks a chancel. A passage approved with a mark in it is **in the chancel and
 carries the mark**, visible to every reader instead of hidden in a tool.
 
 ### The failure this creates, and the mechanism against it

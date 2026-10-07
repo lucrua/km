@@ -16,8 +16,8 @@ test('every block of every change on the screen goes in, each sha once', () => {
 });
 
 test('the marks the approval would take away are gathered from every change', () => {
-  const x = arquivoInteiro([mudanca(['a'], ['> 💬 um']), mudanca(['b']), mudanca(['c'], ['> ❓ **to_validate by 2026-10-08** — dois'])]);
-  assert.deepEqual(x.sumidas, ['> 💬 um', '> ❓ **to_validate by 2026-10-08** — dois']);
+  const x = arquivoInteiro([mudanca(['a'], ['> 💬 um']), mudanca(['b']), mudanca(['c'], ['> 📌 **to_do · 2026-10-08** — dois'])]);
+  assert.deepEqual(x.sumidas, ['> 💬 um', '> 📌 **to_do · 2026-10-08** — dois']);
 });
 
 test('no removed mark asks nothing; removed marks are named in the question', () => {

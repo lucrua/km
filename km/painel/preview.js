@@ -1,5 +1,5 @@
 // Live preview: the document is always the file's exact text; formatting is decoration.
-// Off the cursor's line the Markdown markers are hidden, paragraphs flow, the 📌 ❓ 💬 marks
+// Off the cursor's line the Markdown markers are hidden, paragraphs flow, the 📌 💬 marks
 // become coloured boxes and tables become a grid with row and column controls. All of it
 // lives in one StateField: hidden line breaks and block widgets are decorations CodeMirror
 // accepts only from the state, never from a plugin. The Código mode swaps that layer out for
@@ -9,12 +9,11 @@ import { EditorView, Decoration, WidgetType, StateField, StateEffect, EditorStat
          HighlightStyle, tags, getChunks } from '../vendor/cm.js';
 import { quebrasOcultas } from './paragrafo.js';
 import * as tabela from './tabela.js';
-import { hoje, marcaDaLinha } from './marcas.js';
+import { marcaDaLinha } from './marcas.js';
 import { coberto, linhasNovas } from './novas.js';
 
-export { hoje };
 // Cada marca, a sua caixa.
-const CAIXA = { to_do: 'fazer', to_validate: 'validar', comment: 'comentario' };
+const CAIXA = { to_do: 'fazer', comment: 'comentario' };
 const esc = (s) => s.replace(/[&<>"]/g, (m) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[m]));
 
 // Markdown inline, só para ler as células da tabela — nunca usado para escrever nada.
@@ -306,13 +305,7 @@ export function decorar(state, editavel, mudadas = faixasDoLado(state, true), la
       // Uma citação é marca só no formato exato; a primeira linha que for dá a cor da caixa.
       let tipo = '';
       for (let k = doc.lineAt(n.from).number; k <= doc.lineAt(n.to).number; k++) {
-        const l = doc.line(k), m = marcaDaLinha(l.text);
-        if (!m) continue;
-        tipo = tipo || m.tipo;
-        if (m.tipo === 'to_validate' && m.data < hoje()) {
-          const d = l.from + l.text.indexOf(m.data);
-          deco.push(Decoration.mark({ class: 'cm-vencida' }).range(d, d + 10));
-        }
+        tipo = tipo || marcaDaLinha(doc.line(k).text)?.tipo || '';
       }
       linha(n.from, n.to, 'cm-cit' + (tipo ? ' cm-cit-' + CAIXA[tipo] : ''));
     }

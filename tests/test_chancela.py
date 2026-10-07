@@ -269,27 +269,30 @@ class PendenciaTest(unittest.TestCase):
 
 
 class MarcaTest(unittest.TestCase):
-    """The three marks, in the exact form an agent can grep for."""
+    """The two marks, in the exact form an agent can grep for."""
 
-    def test_reads_the_three_marks(self):
-        texto = ("> ❓ **to_validate by 2026-10-01** — com quem assina\n"
-                 "> 💬 para quem ler depois\n"
+    def test_reads_the_two_marks(self):
+        texto = ("> 💬 não tenho certeza disso\n"
                  "> 📌 **to_do · 2026-09-24** — trocar a tabela\n")
         ms = ch.marcas(texto)
         self.assertEqual([(m.linha, m.tipo, m.data, m.texto) for m in ms], [
-            (1, "to_validate", "2026-10-01", "com quem assina"),
-            (2, "comment", "", "para quem ler depois"),
-            (3, "to_do", "2026-09-24", "trocar a tabela")])
+            (1, "comment", "", "não tenho certeza disso"),
+            (2, "to_do", "2026-09-24", "trocar a tabela")])
+
+    def test_a_to_do_waiting_for_the_author_is_still_a_to_do(self):
+        # O agente acrescenta `→ <pergunta>` no fim da linha; a marca continua sendo a mesma.
+        [m] = ch.marcas("> 📌 **to_do · 2026-09-24** — trocar a tabela → §4 ou anexo B?\n")
+        self.assertEqual((m.tipo, m.data, m.texto),
+                         ("to_do", "2026-09-24", "trocar a tabela → §4 ou anexo B?"))
 
     def test_what_is_not_the_exact_form_is_not_a_mark(self):
-        for linha in ["> ❓ **to_validate** — sem data",
-                      "> ❓ **to_validate by 2026-10-01** - hífen, não travessão",
-                      "> 📌 **to_do 2026-09-24** — sem o ponto",
+        for linha in ["> 📌 **to_do 2026-09-24** — sem o ponto",
+                      "> 📌 **to_do · 2026-09-24** - hífen, não travessão",
                       "> 📌 **to_do · 2026-09-24** — ",
                       "> 💬 ",
                       ">💬 sem espaço",
                       "💬 fora da citação",
-                      "❓ **to_validate by 2026-10-01** — fora da citação",
+                      "> ❓ **to_validate by 2026-10-01** — a marca antiga",
                       "> ⚠️ **sem certeza** — a marca antiga",
                       "> 🚫 **discordo** — a marca antiga",
                       "> ❓ **a confirmar até 2026-10-01** — a marca antiga"]:
@@ -302,16 +305,15 @@ class MarcaTest(unittest.TestCase):
         self.assertIn("💬", m.sumidas[0])
 
     def test_each_kind_that_vanishes_is_flagged(self):
-        for linha in ["> ❓ **to_validate by 2026-10-01** — x",
-                      "> 💬 x",
+        for linha in ["> 💬 x",
                       "> 📌 **to_do · 2026-09-24** — x"]:
             antes = DOC + "\n" + linha + "\n"
             ms = ch.mudancas(antes, DOC)
             self.assertEqual([s for m in ms for s in m.sumidas], [linha], linha)
 
     def test_rewriting_a_mark_is_not_removing_it(self):
-        antes = ["> ❓ **to_validate by 2026-09-15** — com quem assina"]
-        depois = ["> ❓ **to_validate by 2026-10-10** — com quem assina, e quando"]
+        antes = ["> 📌 **to_do · 2026-09-15** — com quem assina"]
+        depois = ["> 📌 **to_do · 2026-09-15** — com quem assina → o contrato não diz; quem?"]
         self.assertEqual(ch.sumidas(antes, depois), [])
         self.assertEqual(ch.sumidas(antes, []), [antes[0]])
 
@@ -324,12 +326,10 @@ class MarcaTest(unittest.TestCase):
         m = ch.mudancas(DOC, DOC.replace("horas úteis", "horas corridas"))[0]
         self.assertEqual(m.sumidas, [])
 
-    def test_a_deadline_past_today_is_overdue(self):
-        texto = ("> ❓ **to_validate by 2026-09-23** — ontem\n"
-                 "> ❓ **to_validate by 2026-09-24** — hoje\n"
-                 "> 📌 **to_do · 2020-01-01** — to_do não vence\n")
-        self.assertEqual([(l, d) for l, d, _ in ch.vencidas(texto, hoje="2026-09-24")],
-                         [(1, "2026-09-23")])
+    def test_taking_the_retired_mark_out_flags_nothing(self):
+        # Um ❓ que sobrou num documento é uma citação comum: apagá-lo é uma edição qualquer.
+        antes = DOC + "\n> ❓ **to_validate by 2020-01-01** — é isso?\n"
+        self.assertEqual([s for m in ch.mudancas(antes, DOC) for s in m.sumidas], [])
 
     def test_the_placeholder_is_found(self):
         texto = ("> 💬 add your comment here\n"
@@ -392,52 +392,73 @@ class CliTest(RepoTest):
     def test_a_mark_never_blocks_the_chancel(self):
         self.km("chancela", "regras.md", "--all")
         self.escrever(DOC.replace("O prazo conta em horas úteis.",
-                                  "O prazo conta em dias.\n\n> ❓ **to_validate by 2026-10-01** — é isso?"))
+                                  "O prazo conta em dias.\n\n> 📌 **to_do · 2026-10-01** — é isso?"))
         self.km("chancela", "regras.md", "--hunk", "Prazo")
-        self.assertIn("to_validate by 2026-10-01", ch.chancelado(self.dir, "regras.md"))
+        self.assertIn("to_do · 2026-10-01", ch.chancelado(self.dir, "regras.md"))
 
     def test_there_is_no_force(self):
         with self.assertRaises(SystemExit):
             self.km("chancela", "regras.md", "--all", "--force")
 
-    def test_lint_reports_overdue_and_placeholder_and_nothing_else(self):
-        self.escrever(DOC + "\n> ❓ **to_validate by 2020-01-01** — venceu\n"
-                      "\n> ❓ **to_validate by 2999-01-01** — longe\n"
-                      "\n> 📌 **to_do · 2020-01-01** — add your comment here\n"
+    def test_lint_reports_the_placeholder_and_nothing_else(self):
+        self.escrever(DOC + "\n> 📌 **to_do · 2020-01-01** — um to_do velho não vence\n"
+                      "\n> 📌 **to_do · 2026-09-24** — add your comment here\n"
                       "\n> 💬 um comentário de verdade\n")
         self.km("chancela", "regras.md", "--all")
         codigo, saida = self.km("lint")
-        self.assertIn(":15", saida)                       # o ❓ vencido, com a linha
-        self.assertIn("2020-01-01", saida)
-        self.assertNotIn("longe", saida)
+        self.assertIn(":17", saida)                       # o texto de exemplo, com a linha
         self.assertIn("add your comment here", saida)
-        self.assertIn("2 apontamento(s)", saida)
+        self.assertNotIn("não vence", saida)
+        self.assertIn("1 apontamento(s)", saida)
         self.assertEqual(self.km("lint", "--strict")[0], 1)
+
+    def test_nothing_is_ever_overdue(self):
+        import json
+        # Nem o to_do de anos atrás, nem o ❓ com prazo que sobrou de antes.
+        self.escrever(DOC + "\n> 📌 **to_do · 2020-01-01** — velho\n"
+                      "\n> ❓ **to_validate by 2020-01-01** — sobrou\n")
+        self.km("chancela", "regras.md", "--all")
+        self.assertEqual(self.km("lint")[1].strip(), "0 apontamento(s)")
+        for args in [("pendente",), ("pendente", "--short")]:
+            saida = self.km(*args)[1]
+            self.assertNotIn("vencid", saida, args)
+            self.assertNotIn("❓", saida, args)
+        [d] = json.loads(self.km("pendente", "--json")[1])
+        self.assertNotIn("vencidas", d)
 
     def test_marcas_lists_what_an_agent_should_find(self):
         (self.dir / "outro.md").write_text(
             "# Outro\n\n> 📌 **to_do · 2026-09-24** — trocar a tabela\n\n"
             "> 💬 para quem ler\n", encoding="utf-8")
-        self.escrever(DOC + "\n> ❓ **to_validate by 2020-01-01** — venceu\n")
+        self.escrever(DOC + "\n> 📌 **to_do · 2020-01-01** — rever → qual das duas?\n"
+                      "\n> ❓ **to_validate by 2020-01-01** — sobrou de antes\n")
         _, saida = self.km("marcas")
         linhas = [l for l in saida.splitlines() if l.strip()]
         self.assertEqual(linhas, [
             "outro.md:3  to_do  2026-09-24  trocar a tabela",
-            "regras.md:15  to_validate  2020-01-01  venceu  (vencido)"])
+            "regras.md:15  to_do  2020-01-01  rever → qual das duas?"])
         self.assertIn("para quem ler", self.km("marcas", "--todas")[1])
         self.assertIn("para quem ler", self.km("marcas", "--all")[1])
-        self.assertNotIn("regras.md", self.km("marcas", "--tipo", "to_do")[1])
+        self.assertNotIn("sobrou de antes", self.km("marcas", "--todas")[1])
+        so_comentarios = self.km("marcas", "--tipo", "comment")[1].splitlines()
+        self.assertEqual([l.split("  ")[1] for l in so_comentarios], ["comment", "comment"])
+
+    def test_marcas_has_no_to_validate_kind(self):
+        import contextlib
+        import io
+        with self.assertRaises(SystemExit), contextlib.redirect_stderr(io.StringIO()):
+            self.km("marcas", "--tipo", "to_validate")
 
     def test_marcas_json(self):
         import json
-        self.escrever(DOC + "\n> ❓ **to_validate by 2020-01-01** — venceu\n")
+        self.escrever(DOC + "\n> 📌 **to_do · 2020-01-01** — rever\n")
         _, saida = self.km("marcas", "--json", "--todas")
         dados = json.loads(saida)
         self.assertEqual(dados, [
             {"file": "regras.md", "line": 9, "kind": "comment", "date": "",
-             "text": "a ordem veio de um print, não do export.", "overdue": False},
-            {"file": "regras.md", "line": 15, "kind": "to_validate", "date": "2020-01-01",
-             "text": "venceu", "overdue": True}])
+             "text": "a ordem veio de um print, não do export."},
+            {"file": "regras.md", "line": 15, "kind": "to_do", "date": "2020-01-01",
+             "text": "rever"}])
 
     def test_marcas_reads_files_the_chancel_does_not_track(self):
         from km import acompanhamento as ac
@@ -553,6 +574,14 @@ class PainelTest(RepoTest):
         self.assertFalse(r["ok"])
         self.assertIn("horas úteis", ch.chancelado(self.dir, "regras.md"))
 
+    def test_the_page_is_told_nothing_about_deadlines(self):
+        self.escrever(DOC + "\n> ❓ **to_validate by 2020-01-01** — sobrou de antes\n")
+        estado = self.serve.estado(self.dir, arquivo="regras.md")
+        self.assertNotIn("hoje", estado)
+        [d] = estado["docs"]
+        self.assertNotIn("vencidas", d)
+        self.assertNotIn("vencidas_txt", d)
+
     def test_there_is_no_validar_action(self):
         self.escrever(DOC.replace("horas úteis", "horas corridas"))
         sha = self.mudancas()[0]["unidades"][0]["sha"]
@@ -570,8 +599,7 @@ class PainelTest(RepoTest):
         self.assertEqual(self.texto(), DOC)
 
     def test_approving_takes_the_passage_and_its_mark_and_nothing_blocks_it(self):
-        for linha in ["> ❓ **to_validate by 2020-01-01** — é isso?",
-                      "> 📌 **to_do · 2026-09-24** — refazer",
+        for linha in ["> 📌 **to_do · 2026-09-24** — refazer",
                       "> 💬 add your comment here"]:
             ch.escrever(self.dir, {"regras.md": DOC}, "chancela")
             self.escrever(DOC.replace("O prazo conta em horas úteis.",

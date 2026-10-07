@@ -19,7 +19,6 @@ import shutil
 import subprocess
 import threading
 import webbrowser
-from datetime import date
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 from urllib.parse import quote
@@ -208,7 +207,6 @@ def estado(root: Path, by: str = "", base: str | None = None,
     for the document being read. The rail on the left is counts. `lendo` picks what the
     right-hand side reads: this folder, another worktree, or a branch.
     """
-    hoje = date.today().isoformat()
     docs = []
     soma_pend = soma_total = 0
     lista = fontes(root)
@@ -224,19 +222,18 @@ def estado(root: Path, by: str = "", base: str | None = None,
         acompanhados = _documentos(root, pasta, rev)
     except ac.ConfigInvalida as e:
         # Uma config quebrada vira um aviso na tela, não uma página que não carrega.
-        return {"repo": root.name, "root": str(root), "docs": [], "hoje": hoje, "by": by,
+        return {"repo": root.name, "root": str(root), "docs": [], "by": by,
                 "base": base or ch.REF, "revisoes": ch.revisoes(root), "pct": "",
                 "erro": str(e), **extra}
     for rel in acompanhados:
-        s = ch.situacao(pasta, rel, hoje, base=base, rev=rev)
+        s = ch.situacao(pasta, rel, base=base, rev=rev)
         if not s.depois.strip():
             continue
         cheio = rel == arquivo
         pend, total = ch.pendencia_do_arquivo(s)
         soma_pend, soma_total = soma_pend + pend, soma_total + total
         d = {"file": rel, "rastreado": s.tem_chancela, "cheio": cheio,
-             "pendente": bool(s.mudancas), "pct": ch.percentual(pend, total),
-             "vencidas": len(s.vencidas)}
+             "pendente": bool(s.mudancas), "pct": ch.percentual(pend, total)}
         if cheio:
             d["em"] = _ultima(root, rel)
             # Aprovar um arquivo que o git não tem guarda o texto no .git mesmo assim.
@@ -244,10 +241,9 @@ def estado(root: Path, by: str = "", base: str | None = None,
             if fora:
                 d["fora_do_git"] = cli.aviso_fora_do_git(rel, fora)
             d["segmentos"] = segmentos(s)
-            d["vencidas_txt"] = [{"linha": l, "prazo": p, "texto": x} for l, p, x in s.vencidas]
         docs.append(d)
     docs.sort(key=lambda d: (not d["rastreado"], d["file"]))
-    return {"repo": root.name, "root": str(root), "docs": docs, "hoje": hoje, "by": by,
+    return {"repo": root.name, "root": str(root), "docs": docs, "by": by,
             "base": base or ch.REF, "revisoes": ch.revisoes(root),
             "pct": ch.percentual(soma_pend, soma_total) if soma_pend else "", **extra}
 

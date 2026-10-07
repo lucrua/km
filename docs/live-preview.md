@@ -46,7 +46,7 @@ Served as static files from `km/painel/`:
 | `tabela.js` | pure functions over a table's source lines — parse cells, add/remove row, add/remove column |
 | `paragrafo.js` | pure function: the newline ranges inside paragraphs to show as spaces, given the cursor |
 | `editores.js` | creates the editors for the page's segments and connects them to save, dirty tracking, selection and marks |
-| `marcas.js` | the three marks' exact forms and the line each button inserts — pure |
+| `marcas.js` | the two marks' exact forms and the line each button inserts — pure |
 | `pontos.js` | converts CodeMirror's UTF-16 offsets to the server's code points — pure |
 
 The pure modules have no DOM and no CodeMirror imports, so they are tested with `node --test`.
@@ -71,7 +71,7 @@ Off the cursor line:
 | `- item`, `1. item` | a bullet or the number, with the item's indentation |
 | `- [ ]` / `- [x]` | ☐ / ☑ — display only; click the line to change it |
 | `> quote` | a bar on the left, `>` hidden |
-| `> 📌 **to_do · …**` · `> ❓ **to_validate by …**` · `> 💬 …` | blue, amber and neutral boxes — only in the exact form; an overdue ❓ highlights its date (local time) |
+| `> 📌 **to_do · …**` · `> 💬 …` | a blue and a neutral box — only in the exact form |
 | fenced code | its own background, fence lines hidden |
 | `---` | a horizontal rule |
 
@@ -137,7 +137,7 @@ autolinks are left alone.
   differs from the original.
 - **Approving a selection:** the selection's offsets come from the right editor, and are turned
   into "this part of this block" with the `unidades` offsets.
-- **📌 ❓ 💬 at the cursor:** a transaction inserting the mark after the block the cursor is in,
+- **📌 💬 at the cursor:** a transaction inserting the mark after the block the cursor is in,
   with one blank line before and after, and `add your comment here` selected.
 - **Undo:** Ctrl+Z inside an editor undoes text (CodeMirror's history). In the *Arquivos* view,
   Ctrl+Z still undoes the config.
