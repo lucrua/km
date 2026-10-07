@@ -48,7 +48,6 @@ background:repeating-linear-gradient(90deg,transparent 0 7px,var(--guia) 7px 8px
 .ramo .nome{flex:1 1 auto;min-width:0;overflow:hidden;text-overflow:ellipsis;padding-left:2px}
 .ramo .pasta .nome{color:#C5D0DA}
 .ramo .no[aria-selected=true] .nome{color:#F2F6FA}
-.ramo .venc{flex:none;font-size:10px;margin-left:6px;opacity:.9}
 .ramo .est{flex:none;min-width:30px;margin-left:8px;text-align:right;font-size:11.5px;
 font-variant-numeric:tabular-nums;letter-spacing:.01em}
 .ramo .est.ace{color:var(--ace)}
@@ -181,9 +180,7 @@ background:var(--ok-bg);color:var(--ok)}
 .cm-link-texto{color:var(--acc)}
 .cm-line.cm-cit{border-left:3px solid var(--rule);padding-left:10px;color:#B9C6D2}
 .cm-line.cm-cit-fazer{border-color:var(--acc);background:color-mix(in srgb,var(--val-bg) 55%,transparent)}
-.cm-line.cm-cit-validar{border-color:var(--ace);background:color-mix(in srgb,var(--ace-bg) 55%,transparent)}
 .cm-line.cm-cit-comentario{border-color:var(--mut);background:color-mix(in srgb,var(--pend-bg) 70%,transparent)}
-.cm-vencida{color:var(--neg);font-weight:700}
 .cm-line.cm-codigo{font-family:ui-monospace,Menlo,monospace;font-size:.92em;background:var(--card)}
 .cm-line.cm-cerca{font-size:0;line-height:6px}
 .cm-line.cm-hr{border-bottom:1px solid var(--rule);color:transparent}
@@ -515,13 +512,11 @@ function linhaLado(l){
   const diz = pasta
     ? (n.pendentes ? `${n.pendentes} a aprovar` : (n.novos === n.total ? 'sem chancela' : (n.novos ? `${n.novos} sem chancela` : 'em dia')))
     : (!n.doc.rastreado ? 'sem chancela' : (n.doc.pendente ? `${n.doc.pct} a aprovar` : 'em dia'));
-  // Numa pasta aberta o ❓ já aparece no arquivo; repeti-lo em cada pasta acima só faz barulho.
-  const venc = e.vencida && !(pasta && abertasL.has(n.caminho)) ? '<span class="venc" aria-hidden="true">❓</span>' : '';
-  const titulo = `${n.caminho}${pasta ? '/' : ''} — ${diz}${e.vencida ? ' · ❓ vencida' : ''}`;
+  const titulo = `${n.caminho}${pasta ? '/' : ''} — ${diz}`;
   return `<div class="no ${pasta ? 'pasta' : 'arq'}" role="treeitem" aria-level="${l.nivel}" aria-setsize="${l.de}"
     aria-posinset="${l.pos}" ${pasta ? `aria-expanded="${abertasL.has(n.caminho)}"` : `aria-selected="${n.i === doc}"`}
     data-caminho="${esc(n.caminho)}" tabindex="${n.caminho === focoL ? 0 : -1}" title="${esc(titulo)}" style="--n:${l.nivel}">
-    <span class="guias"></span><span class="seta">${pasta ? SETA : ''}</span><span class="nome">${esc(n.nome).replaceAll('/', '<span class="sep">/</span>')}</span>${venc}<span class="est ${e.classe}">${esc(e.texto).replace('●', '<i class="ponto"></i>')}</span></div>`;
+    <span class="guias"></span><span class="seta">${pasta ? SETA : ''}</span><span class="nome">${esc(n.nome).replaceAll('/', '<span class="sep">/</span>')}</span><span class="est ${e.classe}">${esc(e.texto).replace('●', '<i class="ponto"></i>')}</span></div>`;
 }
 
 // Rola só a régua, e só o necessário: o documento fica onde está.
@@ -929,9 +924,8 @@ function marcaNaMudanca(chave, tipo){
   km.inserirMarca(chave, tipo);
 }
 const botoesDeMarca = (chave) => `<div class="marcas">
-      <button onmousedown="event.preventDefault()" onclick="marcaNaMudanca('${chave}','to_do')" title="to_do — para o agente">📌</button>
-      <button onmousedown="event.preventDefault()" onclick="marcaNaMudanca('${chave}','to_validate')" title="to_validate — com prazo">❓</button>
-      <button onmousedown="event.preventDefault()" onclick="marcaNaMudanca('${chave}','comment')" title="comment — para quem ler depois">💬</button></div>`;
+      <button onmousedown="event.preventDefault()" onclick="marcaNaMudanca('${chave}','to_do')" title="to_do — um ponto de revisão para o agente">📌</button>
+      <button onmousedown="event.preventDefault()" onclick="marcaNaMudanca('${chave}','comment')" title="comment — uma ressalva sobre o trecho, para quem ler depois">💬</button></div>`;
 // Um trecho igual não tem botões até o cursor entrar nele: as marcas aparecem na célula ao
 // lado, no mesmo lugar em que um trecho mudado as tem, e saem quando o cursor sai.
 function marcasDoFoco(chave){

@@ -85,15 +85,7 @@ test('switching keeps the editor read-only or editable', () => {
   for (const s of [s1, s2]) { assert.equal(s.readOnly, true); assert.equal(s.facet(EditorView.editable), false); }
 });
 
-test('today is the local date, not UTC', async () => {
-  process.env.TZ = 'America/Sao_Paulo';
-  const { hoje } = await import('../../km/painel/preview.js');
-  // 22:30 em Brasília já é o dia seguinte em UTC: um ❓ que vence hoje não está vencido.
-  assert.equal(hoje(new Date('2026-09-23T22:30:00-03:00')), '2026-09-23');
-  assert.equal(hoje(new Date('2026-09-24T00:10:00-03:00')), '2026-09-24');
-});
-
-// As três marcas viram caixas; o ❓ vencido destaca a data.
+// As duas marcas viram caixas; nenhuma data vence.
 const classes = (state) => {
   const out = [];
   decorar(state, true).between(0, state.doc.length, (from, to, d) => { if (d.spec.class) out.push([from, d.spec.class]); });
@@ -106,19 +98,17 @@ test('each mark is a box of its own kind, and the old marks are plain quotes', (
   const s = EditorState.create({ doc: texto, extensions: editorMarkdown() });
   const porLinha = (n) => classes(s).filter(([f, c]) => f === s.doc.line(n).from && c.startsWith('cm-cit')).map(([, c]) => c);
   assert.deepEqual(porLinha(1), ['cm-cit cm-cit-fazer']);
-  assert.deepEqual(porLinha(3), ['cm-cit cm-cit-validar']);
+  assert.deepEqual(porLinha(3), ['cm-cit'], 'the retired ❓ is a plain quote');
   assert.deepEqual(porLinha(5), ['cm-cit cm-cit-comentario']);
   assert.deepEqual(porLinha(7), ['cm-cit']);
   assert.deepEqual(porLinha(9), ['cm-cit']);
   assert.ok(!classes(s).some(([, c]) => c === 'cm-vencida'));
 });
 
-test('an overdue to_validate highlights its date, and a to_do date never does', () => {
-  const texto = '> ❓ **to_validate by 2020-01-01** — venceu\n\n> 📌 **to_do · 2020-01-01** — velho\n';
+test('no date is ever highlighted as overdue', () => {
+  const texto = '> ❓ **to_validate by 2020-01-01** — sobrou\n\n> 📌 **to_do · 2020-01-01** — velho\n';
   const s = EditorState.create({ doc: texto, extensions: editorMarkdown() });
-  const vencidas = classes(s).filter(([, c]) => c === 'cm-vencida').map(([f]) => texto.slice(f, f + 10));
-  assert.deepEqual(vencidas, ['2020-01-01']);
-  assert.equal(classes(s).filter(([, c]) => c === 'cm-vencida')[0][0], texto.indexOf('2020'));
+  assert.deepEqual(classes(s).filter(([, c]) => c === 'cm-vencida'), []);
 });
 
 test('on today\'s side, a wholly new line on screen gets the bar; a new table, the grid', () => {

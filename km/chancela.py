@@ -20,20 +20,18 @@ import re
 import subprocess
 import time
 from dataclasses import dataclass, field
-from datetime import date
 from difflib import SequenceMatcher
 from pathlib import Path
 
 REF = "refs/km/chancela"
 HEADING = re.compile(r"^(#{1,6})\s+(.*)$")
 
-#: The writing convention: three marks, each one a line of its own, a blockquote in the
+#: The writing convention: two marks, each one a line of its own, a blockquote in the
 #: document itself — an agent reads them with no tooling and a human sees them when opening
 #: the file, which no sidecar store achieves. The forms are exact so they can be grepped:
-#: ❓ to_validate carries a deadline, 📌 to_do the day it was written and is meant for an
-#: agent to find and address, 💬 comment is for whoever reads the passage later.
+#: 📌 to_do is a review point the author leaves for an agent, with the day it was written;
+#: 💬 comment is a caveat on the passage before it, for whoever reads it later.
 MARCAS = {
-    "to_validate": re.compile(r"^> ❓ \*\*to_validate by (\d{4}-\d{2}-\d{2})\*\* — (.+)$"),
     "to_do": re.compile(r"^> 📌 \*\*to_do · (\d{4}-\d{2}-\d{2})\*\* — (.+)$"),
     "comment": re.compile(r"^> 💬 ()(\S.*)$"),
 }
@@ -707,8 +705,8 @@ def unidades_por_sha(ms: list[Mudanca], shas: set[str]) -> list[Unidade]:
 @dataclass
 class Marca:
     linha: int                  # 1-based
-    tipo: str                   # to_validate · to_do · comment
-    data: str                   # the deadline, the day it was written, or "" for a comment
+    tipo: str                   # to_do · comment
+    data: str                   # the day a to_do was written, or "" for a comment
     texto: str
     cru: str                    # the whole line, as in the file
 
@@ -749,13 +747,6 @@ def sumidas(antes: list[str], depois: list[str]) -> list[str]:
             if m and m.tipo not in ficaram]
 
 
-def vencidas(texto: str, hoje: str | None = None) -> list[tuple[int, str, str]]:
-    """❓ to_validate whose deadline is before today (the local date)."""
-    agora = hoje or date.today().isoformat()
-    return [(m.linha, m.data, m.cru) for m in marcas(texto)
-            if m.tipo == "to_validate" and m.data < agora]
-
-
 # ---- what is pending -----------------------------------------------------------------
 
 @dataclass
@@ -772,7 +763,6 @@ class Situacao:
     antes: str
     depois: str
     mudancas: list[Mudanca]
-    vencidas: list[tuple[int, str, str]]
     sumiu: bool = False         # the file is not there any more — on disk, or in the branch
 
     @property
@@ -784,8 +774,8 @@ class Situacao:
         return [u for m in self.mudancas for u in m.unidades]
 
 
-def situacao(root: Path, rel: str, hoje: str | None = None,
-             base: str | None = None, rev: str | None = None) -> Situacao:
+def situacao(root: Path, rel: str, base: str | None = None,
+             rev: str | None = None) -> Situacao:
     """The file against its chancel — or against any other revision, to read it side by side.
 
     The verdicts always act on the chancel; `base` only changes what you are comparing with.
@@ -797,7 +787,7 @@ def situacao(root: Path, rel: str, hoje: str | None = None,
     depois = lido or ""
     return Situacao(arquivo=rel, tem_chancela=antes is not None, antes=antes or "",
                     depois=depois, mudancas=mudancas(antes or "", depois),
-                    vencidas=vencidas(depois, hoje), sumiu=lido is None)
+                    sumiu=lido is None)
 
 
 # ---- writing in the document ---------------------------------------------------------

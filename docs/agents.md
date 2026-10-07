@@ -13,7 +13,7 @@ approved in their name. It is short: read all of it before you start.
   and approves or reverts it.
 - `.km/config.json` says which files are reviewed (*tracked*): three lists, `folders`,
   `files` and `except`.
-- Notes for people and agents are written **in the documents**, as one-line marks: 📌 ❓ 💬
+- Notes for people and agents are written **in the documents**, as one-line marks: 📌 💬
   (below).
 
 The repository uses km if `.km/config.json` exists at its root. `km` is on the PATH; if it
@@ -22,7 +22,7 @@ repository.
 
 ```bash
 km pendente           # what changed since the chancel, per file, and what never had one
-km pendente --json    # the same, for a script: file, pct, changes, vanished marks, overdue ❓
+km pendente --json    # the same, for a script: file, pct, changes, vanished marks
 ```
 
 km prints in the language of the documents. `pendente`, `marcas` and `chancela` also answer
@@ -90,7 +90,7 @@ and stay pending.
   review does not follow a passage across files. The text shows as **new** in the destination
   and **removed** in the source, and the author reviews both. That is correct; do not try to
   avoid it.
-- **Carry the marks with their passage.** A 📌 ❓ 💬 stays directly after the passage it
+- **Carry the marks with their passage.** A 📌 or 💬 stays directly after the passage it
   annotates, in the file the passage ends up in. Never drop one along the way.
 - The source then reports *marca removida* (a mark vanished) for each mark that left it.
   List them in your summary with where each one went.
@@ -101,16 +101,14 @@ One line each, a blockquote starting at column 0, in exactly these forms. Shown 
 here; in a document each is its own paragraph, with a blank line before and after:
 
 ```markdown
-> 📌 **to_do · 2026-09-24** — what to do
-> ❓ **to_validate by 2026-10-01** — what to confirm, by that date
-> 💬 a note for whoever reads this passage later
+> 📌 **to_do · 2026-09-24** — a review point: what the author wants changed or answered
+> 💬 a caveat on the passage right before it
 ```
 
 The regular expressions (the same in `km/chancela.py` and `km/painel/marcas.js`):
 
 ```text
 ^> 📌 \*\*to_do · (\d{4}-\d{2}-\d{2})\*\* — (.+)$
-^> ❓ \*\*to_validate by (\d{4}-\d{2}-\d{2})\*\* — (.+)$
 ^> 💬 (\S.*)$
 ```
 
@@ -118,66 +116,82 @@ A line in any other shape is an ordinary quote and means nothing to km. The dash
 dash (`—`), the dot in `to_do · ` is a middle dot (`·`), dates are `YYYY-MM-DD` in local time.
 A mark whose text is still `add your comment here` is a placeholder and `km lint` reports it.
 
+There is no other mark. `> ❓ **to_validate by …**` was retired: do not write one, and if you
+find one left in a document, leave it as it is and tell the author.
+
 To find them:
 
 ```bash
-km marcas                    # 📌 and ❓ in every Markdown file git knows
+km marcas                    # 📌 in every Markdown file git knows
 km marcas --todas            # also 💬
-km marcas --tipo to_do       # one kind: to_do, to_validate or comment
-km marcas --json             # [{file, line, kind, date, text, overdue}]
-km lint                      # tracked files: ❓ past its date, placeholders, vanished marks
+km marcas --tipo comment     # one kind: to_do or comment
+km marcas --json             # [{file, line, kind, date, text}]
+km lint                      # tracked files: placeholders, vanished marks
 ```
 
 `km marcas` reads **every** Markdown file git knows about, committed or not, ignored ones
 excepted — tracked by km or not. `km lint` reads only tracked files — and, run without a
 file, `.km/config.json` (see [Before you finish](#before-you-finish)).
 
-### 📌 to_do — work for you
+### 📌 to_do — a review point from the author
 
-When asked to "handle the to_dos" (or one of them):
+The author read the document and left a 📌 where something is wrong, unclear, missing or
+in doubt. It is their voice, and work for you. When asked to "handle the to_dos" (or one of
+them), each 📌 ends in one of three ways.
 
-1. Do what it says.
-2. When it is **fully** done, delete the 📌 line (and one of the blank lines around it). The
-   author sees the deletion flagged as *marca removida*; that is intended — it is how they
-   check your work. In a file km does not track nothing is flagged, so your report is the
-   only record.
-3. When you **cannot** do it — ambiguous, blocked, needs a decision, out of scope — or did
-   only part of it: leave the 📌 line exactly as it is and add a 💬 right after it saying
-   what is missing:
+**1. Done.** Put the answer **in the text**: correct the passage, add what was missing,
+answer the question where a reader will look for it. Then delete the 📌 line (and one of the
+blank lines around it). Whoever reads the finished document must find the answer in the
+document itself — never leave a note saying the point was handled. The author sees the
+passage you changed with the deletion flagged beside it as *marca removida*; that is
+intended — it is how they check your work. In a file km does not track nothing is flagged,
+so your report is the only record.
 
-   ```markdown
-   > 📌 **to_do · 2026-09-20** — trocar a tabela pela do contrato
+**2. Nothing to change.** The text is right as it stands, or the point is already covered:
+delete the 📌 line, leave the text alone, and say why in your report. The author sees a mark
+removed with no change beside it — the reason is what they will look for.
 
-   > 💬 not done: the contract has two tables (§4 and annex B); which one?
-   ```
+**3. It needs the author.** Ambiguous, blocked, a decision that is theirs to make, a point
+you disagree with, or one you could only do part of: do not delete the 📌. Append
+` → <your question, proposal, or what is missing>` to the end of **the same line**, and take
+it up in the conversation:
 
-4. Report each one as `file:line — what you did`, or `file:line — not done: why`.
+```markdown
+> 📌 **to_do · 2026-09-20** — trocar a tabela pela do contrato → the contract has two tables (§4 and annex B); which one?
+```
 
-Write a 📌 yourself only when the author asks you to leave work for a later agent.
+A 📌 with a `→` is waiting for the author. This is the only place you write to the author
+in the document, and only on a point they raised.
 
-### ❓ to_validate — a question for the author
+- Each round, **rewrite** what follows the `→` with where the question stands now. One line,
+  never a thread: the discussion lives in the conversation.
+- When it is settled, finish as in 1 or 2.
+- The author may answer in the document instead: they rewrite the 📌 and take the `→` out.
+  It is yours again.
+- When sweeping, skip a 📌 that already has a `→`, unless the author answered it in the
+  conversation.
 
-It waits for the author, by its deadline. Do not answer it by deleting it, and never change
-its line — not the date, not the text.
+Report each one as `file:line — what you did`, `file:line — nothing to change: why`, or
+`file:line — waiting: the question`.
 
-- If you find evidence either way, add a 💬 right after it, with the source:
-  `> 💬 evidence: <what, and where — file, section, commit>`.
-- Report the overdue ones (`"overdue": true` in `km marcas --json`) in your summary.
+Write a 📌 yourself only when the author asks you to leave work for a later agent. A
+question of your own goes in the conversation, not in the document.
 
-### 💬 comment — for future readers
+### 💬 comment — a caveat on the passage
 
-Keep it. When you move or rewrite the passage it annotates, it goes along, right after that
-passage. Edit its text only if the author asks.
+A 💬 qualifies the passage right before it: the author is not sure of it, it was not checked,
+or it may change (`não tenho certeza disso`, `não revisado item a item`).
 
-### Adding your own
-
-When you are unsure of something you wrote, say so in the document:
-
-- a question the author must settle: `> ❓ **to_validate by <today + 7 days>** — <question>`;
-- context the next reader needs: `> 💬 <note>`.
-
-Put it right after the passage, exact form, local date (`date +%F`, and
-`date -d '+7 days' +%F`). Mention each one in your summary.
+- **Reading one:** that passage is not settled. Do not follow it to the letter, and do not
+  build on it without checking it against the source — the code, the data, the author. Say
+  in your report when you relied on a passage that carries a 💬.
+- **Keep it.** Never delete a 💬 or edit its text unless the author asks — not even when you
+  checked the passage and it is right; say so in your report and let the author remove it.
+  When you move or rewrite the passage it annotates, it goes along, right after that passage.
+- **Writing one:** only to flag uncertainty in something **you** wrote — a claim you could
+  not verify, a number you inferred. Put it right after the passage, in the exact form, and
+  mention each one in your report. Not for evidence, progress notes, replies or questions:
+  those go in the conversation, or after the `→` of the 📌 they answer.
 
 ## Pushing, migrating, handing a repository over
 
@@ -195,7 +209,7 @@ Put it right after the passage, exact form, local date (`date +%F`, and
 ```bash
 km pendente         # everything you changed shows here; a pure km mv adds nothing
 km lint             # no placeholder left; every vanished mark is one you can explain
-km marcas --todas   # the to_dos you handled are gone; the rest have a 💬 saying why
+km marcas --todas   # the to_dos you handled are gone; the rest have a → saying what is missing
 ```
 
 `km lint` also reports, as the author's to settle and not yours to fix:
@@ -209,8 +223,9 @@ Then write a summary with:
 
 - moves (`from → to`) and deletions;
 - vanished marks: file, the mark, and where it went (or why it was removed);
-- to_dos handled (`file:line — what you did`) and not handled (`— why`);
-- ❓ and 💬 you added, and overdue ❓ you found;
+- to_dos: handled (`file:line — what you did`), removed with nothing to change (`— why`),
+  and waiting for the author (`— the question`);
+- 💬 you added, and passages carrying a 💬 that you relied on;
 - what `km lint` said exists only in the chancel, and stale config entries — for the author.
 
 ## For the author: the snippet
@@ -219,7 +234,7 @@ Paste this into another repository's `CLAUDE.md` or `AGENTS.md`:
 
 ```markdown
 This repository's documents are reviewed with km (`.km/config.json`). Before moving,
-deleting or rewriting any Markdown file, or handling 📌 to_do / ❓ to_validate marks,
+deleting or rewriting any Markdown file, or handling 📌 to_do marks,
 read `~/knowledge-manager/docs/agents.md` and follow it. Never run `km chancela` or
 `km forget --apply`, and never push `refs/km/*`.
 ```

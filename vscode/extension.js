@@ -2,7 +2,7 @@
 //
 // The chancel is a reviewed copy of the file in refs/km/chancela, so the left-hand column
 // is `km baseline` (which is `git show refs/km/chancela:<file>`) and the state of each
-// passage comes from `km pendente --json`. The marks (❓ to_validate, 💬 comment, 📌 to_do)
+// passage comes from `km pendente --json`. The marks (📌 to_do, 💬 comment)
 // are not stored here: they are blockquotes in the document, written in the panel.
 const vscode = require('vscode');
 const cp = require('child_process');
@@ -228,7 +228,7 @@ async function veredicto() {
   const escolha = await vscode.window.showQuickPick([
     { label: 'Aprovar', detail: 'a mudança inteira entra na chancela' },
     { label: 'Reverter', detail: 'o texto volta ao que você chancelou' },
-    { label: 'Abrir o painel', detail: 'aprovar parte, 📌 ❓ 💬 depois do trecho, ver lado a lado' },
+    { label: 'Abrir o painel', detail: 'aprovar parte, 📌 💬 depois do trecho, ver lado a lado' },
   ], { title: (m.titulo || 'mudança') + ' — pendente' });
   if (!escolha) return;
   if (escolha.label === 'Abrir o painel') return void abrirPainel();

@@ -1,14 +1,12 @@
-// The three marks, as the page writes and reads them. Pure: no DOM, no CodeMirror, so the
+// The two marks, as the page writes and reads them. Pure: no DOM, no CodeMirror, so the
 // exact forms are tested with `node --test` against the same regexes the engine greps for.
 //
-//   > ❓ **to_validate by AAAA-MM-DD** — …   a deadline; overdue once the date has passed
-//   > 💬 …                                    for whoever reads the passage later
-//   > 📌 **to_do · AAAA-MM-DD** — …           for an agent to find and address; the day written
+//   > 📌 **to_do · AAAA-MM-DD** — …   a review point for an agent; the day it was written
+//   > 💬 …                             a caveat on the passage before it, for whoever reads later
 
 export const PLACEHOLDER = 'add your comment here';
 
 export const FORMAS = {
-  to_validate: /^> ❓ \*\*to_validate by (\d{4}-\d{2}-\d{2})\*\* — (.+)$/,
   to_do: /^> 📌 \*\*to_do · (\d{4}-\d{2}-\d{2})\*\* — (.+)$/,
   comment: /^> 💬 ()(\S.*)$/,
 };
@@ -16,10 +14,8 @@ export const FORMAS = {
 // A data no relógio de quem escreve: em UTC, depois das 21h no Brasil já seria amanhã.
 const dois = (n) => String(n).padStart(2, '0');
 export const hoje = (d = new Date()) => `${d.getFullYear()}-${dois(d.getMonth() + 1)}-${dois(d.getDate())}`;
-export const emDias = (n, d = new Date()) => hoje(new Date(d.getFullYear(), d.getMonth(), d.getDate() + n, 12));
 
 export function modelo(tipo, d = new Date()) {
-  if (tipo === 'to_validate') return `> ❓ **to_validate by ${emDias(7, d)}** — ${PLACEHOLDER}`;
   if (tipo === 'to_do') return `> 📌 **to_do · ${hoje(d)}** — ${PLACEHOLDER}`;
   if (tipo === 'comment') return `> 💬 ${PLACEHOLDER}`;
   throw new Error('marca desconhecida: ' + tipo);

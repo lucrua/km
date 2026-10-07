@@ -14,7 +14,6 @@ import os
 import re
 import subprocess
 import unicodedata
-from datetime import date
 from pathlib import Path
 
 from . import acompanhamento as ac
@@ -99,7 +98,6 @@ def cmd_init(args) -> int:
 def _resumo(situacoes: list[ch.Situacao]) -> str:
     em_dia = sum(1 for s in situacoes if s.em_dia)
     nunca = sum(1 for s in situacoes if not s.tem_chancela)
-    vencidas = sum(len(s.vencidas) for s in situacoes)
     pend = total = 0
     for s in situacoes:
         a, b = ch.pendencia_do_arquivo(s)
@@ -109,15 +107,12 @@ def _resumo(situacoes: list[ch.Situacao]) -> str:
         bits.append(f"{ch.percentual(pend, total)} do conteúdo a aprovar")
     if nunca:
         bits.append(f"{nunca} sem chancela")
-    if vencidas:
-        bits.append(f"❓ {vencidas} com prazo vencido")
     return " · ".join(bits)
 
 
 def cmd_pendente(args) -> int:
     """The two questions: what changed since the chancel, and what never had one."""
     root = _root(args)
-    hoje = date.today().isoformat()
     alvos = _arquivos(root, args.file)
     if args.file and not alvos:
         if args.json:
@@ -125,7 +120,7 @@ def cmd_pendente(args) -> int:
             return 0
         print(f"{args.file} não é acompanhado — escolha no painel, aba Arquivos")
         return 0
-    situacoes = [ch.situacao(root, rel, hoje) for rel in alvos]
+    situacoes = [ch.situacao(root, rel) for rel in alvos]
 
     if args.json:
         # For the editor: where the pending changes are, and how much of the file they are.
@@ -138,7 +133,6 @@ def cmd_pendente(args) -> int:
                 "pct": ch.percentual(pend, total), "pendente": bool(s.mudancas),
                 "mudancas": [{"n": m.n, "titulo": m.titulo, "linha": m.linha,
                               "fim": max(m.fim, m.linha + 1), "sumidas": m.sumidas} for m in s.mudancas],
-                "vencidas": [{"linha": l, "prazo": p, "texto": x} for l, p, x in s.vencidas],
             })
         print(json.dumps(saida, ensure_ascii=False))
         return 0
@@ -165,12 +159,6 @@ def cmd_pendente(args) -> int:
         print("\nsem chancela nenhuma:" if novos else "\ntodo arquivo acompanhado tem chancela")
         for s in novos:
             print(f"      {s.arquivo}  ·  {len(s.depois.splitlines())} linhas")
-
-    vencidas = [(s.arquivo, l, prazo, txt) for s in situacoes for l, prazo, txt in s.vencidas]
-    if vencidas:
-        print(f"\n❓ com prazo vencido ({len(vencidas)}):")
-        for arquivo, l, prazo, txt in vencidas[:args.limit]:
-            print(f"      {arquivo}:{l}  desde {prazo}  {txt[:60]}")
 
     print("\n" + _resumo(situacoes))
     if novos and not args.novos:
@@ -326,10 +314,9 @@ def reverter(root: Path, rel: str, alvos: list[ch.Unidade], s: ch.Situacao,
 def cmd_lint(args) -> int:
     """Mechanical checks on the convention. No judgement, no model."""
     root = _root(args)
-    hoje = date.today().isoformat()
     achados = 0
     for rel in _arquivos(root, args.file):
-        s = ch.situacao(root, rel, hoje)
+        s = ch.situacao(root, rel)
         texto = ch.atual(root, rel)
         if texto is None:
             print(f"{rel}: tem chancela e não está mais no disco")
@@ -338,10 +325,8 @@ def cmd_lint(args) -> int:
                       f" para tirá-lo do .git, km forget {rel}")
             achados += 1
             continue
-        linhas = [f"  :{n} ❓ to_validate venceu em {prazo} — {txt[:60]}"
-                  for n, prazo, txt in s.vencidas]
-        linhas += [f"  :{m.linha} {m.tipo} ainda com o texto de exemplo — {m.cru[:60]}"
-                   for m in ch.marcas(texto) if m.placeholder]
+        linhas = [f"  :{m.linha} {m.tipo} ainda com o texto de exemplo — {m.cru[:60]}"
+                  for m in ch.marcas(texto) if m.placeholder]
         linhas += [f"  marca removida em {u.titulo[:30]} — {l[:50]}"
                    for u in s.unidades for l in u.sumidas]
         if linhas:
@@ -385,23 +370,20 @@ def cmd_marcas(args) -> int:
     reviews is exactly where one would otherwise go unseen.
     """
     root = _root(args)
-    hoje = date.today().isoformat()
-    tipos = {args.tipo} if args.tipo else ({"to_do", "to_validate", "comment"} if args.todas
-                                           else {"to_do", "to_validate"})
+    tipos = {args.tipo} if args.tipo else ({"to_do", "comment"} if args.todas else {"to_do"})
     achadas = []
     for rel in ac.candidatos(root):
         texto = ch.atual(root, rel) or ""
         for m in ch.marcas(texto):
             if m.tipo in tipos:
                 achadas.append({"file": rel, "line": m.linha, "kind": m.tipo, "date": m.data,
-                                "text": m.texto,
-                                "overdue": m.tipo == "to_validate" and m.data < hoje})
+                                "text": m.texto})
     if args.json:
         print(json.dumps(achadas, ensure_ascii=False))
         return 0
     for a in achadas:
         print(f"{a['file']}:{a['line']}  {a['kind']}  " + (f"{a['date']}  " if a["date"] else "")
-              + a["text"] + ("  (vencido)" if a["overdue"] else ""))
+              + a["text"])
     return 0
 
 
@@ -846,7 +828,6 @@ def main(argv: list[str]) -> int:
     s.add_argument("--novos", action="store_true", help="listar os arquivos acompanhados que nunca tiveram chancela")
     s.add_argument("--short", action="store_true", help="uma linha, para o hook")
     s.add_argument("--json", action="store_true", help="para o editor e para a tela")
-    s.add_argument("--limit", type=int, default=12)
     s.set_defaults(func=cmd_pendente)
 
     s = sub.add_parser("chancela", aliases=["chancel"],
@@ -886,19 +867,19 @@ def main(argv: list[str]) -> int:
                    help="depois, apagar do .git as versões velhas (reflog do ref e git gc --prune=now)")
     s.set_defaults(func=cmd_forget)
 
-    s = sub.add_parser("lint", help="a convenção das marcas: ❓ vencida, texto de exemplo, marca sumida")
+    s = sub.add_parser("lint", help="a convenção das marcas: texto de exemplo, marca sumida")
     s.add_argument("file", nargs="?")
     s.add_argument("--strict", action="store_true", help="sai com erro se houver apontamento")
     s.set_defaults(func=cmd_lint)
 
     s = sub.add_parser("marcas", aliases=["marks"],
-                       help="as marcas ❓ to_validate e 📌 to_do de todo Markdown do git,"
+                       help="as marcas 📌 to_do de todo Markdown do git,"
                             " acompanhado ou não — para um agente achar o que fazer")
-    s.add_argument("--tipo", "--kind", dest="tipo", choices=["to_do", "to_validate", "comment"])
+    s.add_argument("--tipo", "--kind", dest="tipo", choices=["to_do", "comment"])
     s.add_argument("--todas", "--all", dest="todas", action="store_true",
                    help="incluir 💬 comment")
     s.add_argument("--json", action="store_true",
-                   help="lista de {file, line, kind, date, text, overdue}")
+                   help="lista de {file, line, kind, date, text}")
     s.set_defaults(func=cmd_marcas)
 
     s = sub.add_parser("quando", aliases=["when"],

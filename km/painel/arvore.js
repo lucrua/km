@@ -25,7 +25,7 @@ export function montarArvore(docs) {
 }
 
 function pasta(caminho, nome) {
-  return { tipo: 'pasta', caminho, nome, filhos: [], total: 0, pendentes: 0, novos: 0, vencidas: 0 };
+  return { tipo: 'pasta', caminho, nome, filhos: [], total: 0, pendentes: 0, novos: 0 };
 }
 
 function compactar(n) {
@@ -38,19 +38,18 @@ function compactar(n) {
   return n;
 }
 
-// Ordena e soma de baixo para cima: quantos arquivos, quantos a aprovar, quantos sem chancela
-// e quantos com um ❓ vencido, em qualquer profundidade.
+// Ordena e soma de baixo para cima: quantos arquivos, quantos a aprovar e quantos sem
+// chancela, em qualquer profundidade.
 function arrumar(p) {
-  p.total = p.pendentes = p.novos = p.vencidas = 0;
+  p.total = p.pendentes = p.novos = 0;
   for (const f of p.filhos) {
     if (f.tipo === 'pasta') {
       arrumar(f);
-      p.total += f.total; p.pendentes += f.pendentes; p.novos += f.novos; p.vencidas += f.vencidas;
+      p.total += f.total; p.pendentes += f.pendentes; p.novos += f.novos;
     } else {
       p.total++;
       if (!f.doc.rastreado) p.novos++;
       else if (f.doc.pendente) p.pendentes++;
-      if (f.doc.vencidas) p.vencidas++;
     }
   }
   p.filhos.sort((a, b) => (a.tipo === b.tipo ? comparar(a, b) : a.tipo === 'pasta' ? -1 : 1));
@@ -58,19 +57,17 @@ function arrumar(p) {
 
 // O que a coluna da direita diz de um arquivo: quanto falta, em dia, ou nunca chancelado.
 export function estadoArquivo(d) {
-  const vencida = !!d.vencidas;
-  if (!d.rastreado) return { classe: 'novo', texto: 'novo', vencida };
-  if (d.pendente) return { classe: 'ace', texto: d.pct, vencida };
-  return { classe: 'ok', texto: '✓', vencida };
+  if (!d.rastreado) return { classe: 'novo', texto: 'novo' };
+  if (d.pendente) return { classe: 'ace', texto: d.pct };
+  return { classe: 'ok', texto: '✓' };
 }
 
 // E de uma pasta: ●N arquivos a aprovar abaixo dela; ✓ se tudo está em dia; `novo` se nada
 // abaixo tem chancela. Uma mistura de em dia e sem chancela não diz nada — fica quieta.
 export function estadoPasta(p) {
-  const vencida = p.vencidas > 0;
-  if (p.pendentes) return { classe: 'ace', texto: '●' + p.pendentes, vencida };
-  if (!p.novos) return { classe: 'ok', texto: '✓', vencida };
-  return { classe: 'novo', texto: p.novos === p.total ? 'novo' : '', vencida };
+  if (p.pendentes) return { classe: 'ace', texto: '●' + p.pendentes };
+  if (!p.novos) return { classe: 'ok', texto: '✓' };
+  return { classe: 'novo', texto: p.novos === p.total ? 'novo' : '' };
 }
 
 // As pastas que começam abertas: as que guardam algo a aprovar.

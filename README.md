@@ -130,7 +130,7 @@ changes — a one-word fix and a new section are not "one" each.
 
 The text is edited in [CodeMirror](https://codemirror.net/) with a **live preview**, the
 model Obsidian uses: the editor always holds the file's exact bytes, and formatting is only
-a display layer. Headings, bold, links, lists, task boxes and the 📌 ❓ 💬 boxes show
+a display layer. Headings, bold, links, lists, task boxes and the 📌 💬 boxes show
 formatted, with their markers hidden except on the line with the cursor; a hard-wrapped
 paragraph reads as one flowing paragraph until you click into it. Nothing is rewritten on
 save — which is why a WYSIWYG editor was not used: it would rewrite the file and every save
@@ -152,7 +152,7 @@ removed.
 |---|---|
 | **Aprovar** | the passage goes into the chancel — with any mark written in it |
 | **Reverter** | puts the chancel's text back in the file |
-| **📌 · ❓ · 💬** | write a [mark](#the-convention) right after the passage, as a block of its own, with `add your comment here` selected so what you type replaces it. Nothing is approved: the mark is your text, saved like any edit |
+| **📌 · 💬** | write a [mark](#the-convention) right after the passage, as a block of its own, with `add your comment here` selected so what you type replaces it. Nothing is approved: the mark is your text, saved like any edit |
 
 **An approval can be undone.** Its message carries *↶ desfazer*, and **↶ Desfazer
 aprovação** in the top bar (or Ctrl+Z outside the text) takes back the last ones of the
@@ -168,7 +168,7 @@ The whole second column is always editable — click and type. The action column
 **Salvar no arquivo** when there is something to save; Ctrl+S saves, Esc discards. A save is
 located by what the text said, not by line number, so a line an agent inserted above does not
 make you write over someone else's paragraph; if your text is no longer in the file, the save
-is refused and the page shows what is there now. **📌 ❓ 💬** insert a mark after
+is refused and the page shows what is there now. **📌 💬** insert a mark after
 the block the cursor is in, the same way — on a change they are always in its action cell; on
 unchanged text they appear there while the cursor is in the block.
 
@@ -177,7 +177,7 @@ block after the file moved gets a refusal, not a different block.
 
 **The left rail is a tree** of the files under review and their folders; a chain of
 single-folder folders is one row (`descoberta/guides`). Each row says what is left — `21%` to
-approve, `✓` up to date, `novo` never had a chancel, ❓ an overdue mark — and a folder shows `●N`
+approve, `✓` up to date, `novo` never had a chancel — and a folder shows `●N`
 files to approve below it. Folders with something to approve start open; the ones you open or
 close stay that way. It takes the keyboard like any tree (↑ ↓ ← → Enter Home End). **Drag its
 right edge to resize it** (or ← → on the edge); a double-click resets it, and the browser
@@ -198,21 +198,26 @@ Marks live **in the document**, one line each, as a blockquote, because a note o
 can see is a note the next agent rewrites without knowing it existed:
 
 ```markdown
-> ❓ **to_validate by 2026-10-01** — add your comment here
-> 💬 add your comment here
 > 📌 **to_do · 2026-09-24** — add your comment here
+> 💬 add your comment here
 ```
 
-| | for | the date |
+| | who writes it | what happens to it |
 |---|---|---|
-| ❓ **to_validate** | something to confirm by a deadline | the deadline — the panel writes today + 7 days, local time; `km lint` reports it once passed |
-| 💬 comment | whoever reads the passage later | none |
-| 📌 **to_do** | an agent, to find and address | the day it was written |
+| 📌 **to_do** | you, reading: a review point — something wrong, unclear, missing or in doubt. The date is the day it was written | an agent puts the answer **in the text** and deletes the 📌; the removal shows beside the change as *marca removida*, and that is your check. When it needs you, the 📌 stays and the agent appends ` → <question>` to the line |
+| 💬 comment | you: a caveat on the passage before it — `não tenho certeza disso` | it stays. An agent reading it does not follow that passage to the letter, and never removes the 💬 |
+
+The review loop: you read the document and leave 📌 where you have a point; you tell the
+agent *trate os 📌 de <arquivo>*; it reads them with `km marcas`, fixes the text and deletes
+each one it settled; you see the changes and the removed marks side by side in the panel,
+and approve. A finished document carries the answers in its text and no trace of the review.
+
+A 📌 with a `→` is waiting for you: answer in the conversation, or rewrite the 📌 and take
+the `→` out, which hands it back to the agent.
 
 The forms are exact, so an agent can grep for them:
 
 ```text
-^> ❓ \*\*to_validate by (\d{4}-\d{2}-\d{2})\*\* — (.+)$
 ^> 📌 \*\*to_do · (\d{4}-\d{2}-\d{2})\*\* — (.+)$
 ^> 💬 (\S.*)$
 ```
@@ -221,8 +226,8 @@ The forms are exact, so an agent can grep for them:
 chancel: approving the passage takes its marks with it.
 
 One ref and a writing convention, not a parallel store of comments. A mark that
-**disappears** from a rewrite is flagged on its own, apart from ordinary edits, because that
-is the change designed to pass unnoticed.
+**disappears** from a rewrite is flagged on its own, apart from ordinary edits: for a 📌 it
+is how you check the agent's work, and for a 💬 it is the change designed to pass unnoticed.
 
 ## The command line
 
@@ -241,8 +246,8 @@ km chancela regras.md --all      # the file as it stands today
 km restore  regras.md --hunk 2.1 # put the chancelled text of that block back on disk
 km mv docs guides                # git mv, and the chancel and the config entries follow; --dry-run
 km forget rascunho               # what forgetting it would rewrite; --apply does it, --prune also runs git gc
-km lint                          # ❓ past its date · a placeholder mark · a mark that vanished · a config entry with nothing on disk
-km marcas                        # ❓ and 📌 in every Markdown file git knows; --todas adds 💬, --tipo, --json
+km lint                          # a placeholder mark · a mark that vanished · a config entry with nothing on disk
+km marcas                        # 📌 in every Markdown file git knows; --todas adds 💬, --tipo, --json
 km quando   regras.md --trecho "colunas"   # when that passage last had a chancel
 km baseline regras.md            # the chancelled copy, for a diff's left-hand column
 km boot [--apply]                # the panel starts with the machine (systemd user unit)
@@ -252,7 +257,7 @@ km install-hooks                 # one line after every commit, and a pre-push t
 `chancela`, `pendente`, `marcas` and `quando` also answer to `chancel`, `pending`, `marks` and
 `when`; `mv` answers to `mover`; `forget` to `esquecer`; `projects` (`add`, `rm`) to `projetos` (`adicionar`,
 `remover`). Every command except `projects` and `serve` works on the repository you are in. `km marcas` reads every Markdown file git knows about, tracked or not — a to-do is
-written for whoever passes by. `--json` gives `[{file, line, kind, date, text, overdue}]`.
+written for whoever passes by. `--json` gives `[{file, line, kind, date, text}]`.
 
 **Moving a reviewed file is `km mv`, not `git mv`.** The chancel is keyed by path: after a
 plain `git mv` the file reads as never reviewed and the old path as a deletion. `km mv
